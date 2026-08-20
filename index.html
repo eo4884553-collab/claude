@@ -1556,6 +1556,7 @@ function parseMedicaoRows(rows){
     });
   }
   if(!items.length) return {ok:false, error:'nenhum item com unidade preenchida foi encontrado após o cabeçalho'};
+  if(!bmCols.length) return {ok:false, error:'não encontrei colunas de "QUANTIDADE DESTA MEDIÇÃO" por BM — confira se este é realmente o arquivo de MEDIÇÃO (e não o de custo/orçamento)'};
 
   let contrato=null, empresa=null, objeto=null;
   for(let r=0;r<headerRowIdx;r++){
@@ -1654,11 +1655,13 @@ function showImportPreviewModal(filename, kind, parsed){
   const modal = document.createElement('div'); modal.className='modal';
   const discCount = new Set(parsed.items.map(it=>it.disciplina)).size;
   const sample = parsed.items.slice(0,5).map(it=>`<tr><td>${it.code}</td><td>${(it.descricao||'').slice(0,45)}</td><td>${it.disciplina||''}</td></tr>`).join('');
+  const suspicious = discCount > 60 || parsed.items.length > 3000 || parsed.items.some(it=>/^\d+$/.test((it.descricao||'').trim()));
   modal.innerHTML = `<h3>Confirmar importação — ${filename}</h3>
     <p class="hint">Estrutura reconhecida automaticamente. Itens existentes (mesmo código) serão atualizados; itens novos serão adicionados; itens ausentes neste arquivo permanecem inalterados na base atual.</p>
+    ${suspicious ? `<div class="risk-banner bad">⚠ O número de disciplinas/itens detectados foge do esperado — isso costuma indicar que a estrutura da planilha não foi reconhecida corretamente (arquivo errado no campo, ou layout diferente do previsto). Confira a amostra abaixo com atenção antes de confirmar.</div>` : ''}
     <div class="grid kpis" style="margin-bottom:10px;">
       <div class="kpi"><div class="l">Itens detectados</div><div class="v">${parsed.items.length}</div></div>
-      <div class="kpi"><div class="l">Disciplinas</div><div class="v">${discCount}</div></div>
+      <div class="kpi"><div class="l">Disciplinas</div><div class="v${suspicious?' bad':''}">${discCount}</div></div>
       ${kind==='medicao' ? `<div class="kpi"><div class="l">BMs (colunas)</div><div class="v">${parsed.bmCount}</div></div>` : ''}
     </div>
     ${kind==='medicao' && parsed.contratoInfo && (parsed.contratoInfo.contrato||parsed.contratoInfo.empresa) ? `<p class="hint"><b>Contrato:</b> ${parsed.contratoInfo.contrato||'—'} &nbsp; <b>Empresa:</b> ${parsed.contratoInfo.empresa||'—'}</p>` : ''}
