@@ -12,8 +12,16 @@ Supressão, Total do Projeto) · **Físico-Financeiro** (Análise por Disciplina
 **Lançar Custos** · **Histórico**.
 
 Recursos principais:
-- Importação de `MEDIÇÃO.xlsx` e `CUSTO DO CONTRATO.xlsx` (com mapeamento de colunas), sem
-  jamais apagar itens já lançados — apenas atualiza/soma o que é importado.
+- Importação da planilha de **MEDIÇÃO** (formato com colunas de BM em pares
+  quantidade/valor, ex.: `MEDIÇÕES_ATUALIZADA.xlsx`) e da planilha de **ORÇAMENTO EXECUTIVO
+  DETALHADO** (meta de custo e custo realizado/aplicado, ex.:
+  `ORÇAMENTO_EXECUTIVO_DETALHADO.xlsx`). O reconhecimento da estrutura é automático (linha de
+  cabeçalho, colunas por BM, hierarquia disciplina/grupo, código do item) e os itens são casados
+  entre as duas planilhas pelo código numérico do item — sem jamais apagar itens já lançados:
+  apenas atualiza/soma o que é importado, e itens ausentes no arquivo permanecem intactos.
+- Exportação em Excel (`.xlsx`) com a mesma estrutura e formatação das planilhas originais
+  (cabeçalhos, hierarquia de disciplina/grupo, colunas por BM, larguras de coluna), já com todos
+  os lançamentos feitos no app — disponível em **Importar**, **Lançar BM** e **Lançar Custos**.
 - Leitura de PDF 100% local via PDF.js; IA (Anthropic) é opcional e só é usada se uma chave de
   API for informada — sem ela (ou sem crédito), a leitura local do PDF continua funcionando.
 - Filtros, edição em massa (soma/subtração), largura de coluna ajustável em todas as tabelas.
@@ -22,6 +30,9 @@ Recursos principais:
 - Aprovação de BM propaga automaticamente para Dashboard Executivo, Total do Projeto,
   Histórico de Desvios, Controle de Supressão, Físico-Financeiro e Base de Dados.
 
-O app é carregado inicialmente com dados de demonstração (334 itens de medição/custo, 23 BMs,
-18 disciplinas) reconciliados com os totais consolidados de referência. Basta importar as
-planilhas reais em **Importar** para substituir os dados de exemplo, mantendo tudo editável.
+O app já é carregado com os dados reais do contrato 90005/2025 (AIR MINAS AR CONDICIONADO LTDA —
+reforma do sistema de climatização e adequação da cobertura da Biblioteca Pública Estadual): 340
+itens de medição, 346 itens de custo, 23 BMs e 20 disciplinas, extraídos das planilhas de
+MEDIÇÃO e ORÇAMENTO EXECUTIVO DETALHADO fornecidas. Basta reimportar versões atualizadas dessas
+planilhas em **Importar** sempre que houver uma nova medição/custo — os campos continuam
+editáveis manualmente a qualquer momento.
