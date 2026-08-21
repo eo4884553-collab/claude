@@ -44,8 +44,8 @@ Recursos principais:
 O app já é carregado com os dados reais do contrato 90005/2025 (AIR MINAS AR CONDICIONADO LTDA —
 reforma do sistema de climatização e adequação da cobertura da Biblioteca Pública Estadual): 340
 itens de medição, 346 itens de custo, 23 BMs e 20 disciplinas, extraídos das planilhas de
-MEDIÇÃO e ORÇAMENTO EXECUTIVO DETALHADO fornecidas, além de 3 contratos de fornecedores extraídos
-dos PDFs assinados (locação de caçambas, instalação de ar-condicionado e reforma de cobertura
-com termo aditivo). Basta reimportar versões atualizadas das planilhas em **Importar** sempre
-que houver uma nova medição/custo — os campos continuam editáveis manualmente a qualquer
-momento.
+MEDIÇÃO e ORÇAMENTO EXECUTIVO DETALHADO fornecidas, além de 6 contratos de fornecedores extraídos
+dos PDFs assinados (locação de caçambas, instalação de ar-condicionado, reforma de cobertura com
+termo aditivo, estrutura metálica, instalação elétrica com termo aditivo e reboco/chapisco). Basta
+reimportar versões atualizadas das planilhas em **Importar** sempre que houver uma nova
+medição/custo — os campos continuam editáveis manualmente a qualquer momento.
