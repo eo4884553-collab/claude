@@ -536,6 +536,7 @@ function recalcAll(){
   const margemTotal = totalMedidoBM - totalCustoRealizado;
   const reajustePercent = state.reajustePercent || 0;
   const totalMedidoReajustado = totalMedidoBM * (1 + reajustePercent);
+  const margemReajustada = totalMedidoReajustado - totalCustoRealizado;
 
   const statusCounts = {'Não faturado':0,'Em aprovação':0,'Faturado aprovado':0};
   state.medicaoItems.forEach(it=>{ statusCounts[it.statusFaturamento||'Não faturado'] = (statusCounts[it.statusFaturamento||'Não faturado']||0)+1; });
@@ -546,7 +547,7 @@ function recalcAll(){
     reajustePercent, totalMedidoReajustado:+totalMedidoReajustado.toFixed(2),
     qtdContratadaTotal:+qtdContratadaTotal.toFixed(2), qtdMedidaTotal:+qtdMedidaTotal.toFixed(2),
     totalMetaCusto:+totalMetaCusto.toFixed(2), totalCustoRealizado:+totalCustoRealizado.toFixed(2),
-    margemTotal:+margemTotal.toFixed(2), statusCounts,
+    margemTotal:+margemTotal.toFixed(2), margemReajustada:+margemReajustada.toFixed(2), statusCounts,
     avancoFisico: qtdContratadaTotal>0 ? qtdMedidaTotal/qtdContratadaTotal : 0,
     avancoFinanceiro: totalContrato>0 ? totalMedidoBM/totalContrato : 0,
   };
@@ -1412,7 +1413,7 @@ function renderDashboard(main){
   stats.appendChild(statTile({label:'Saldo a medir', value: fmtMoney(a.totalContrato - a.totalMedidoBM), sub: fmtPct(1-a.avancoFinanceiro)+' do contrato restante'}));
   stats.appendChild(statTile({label:'Meta de Custo', value: fmtMoney(a.totalMetaCusto), sub:'Orçamento executivo'}));
   stats.appendChild(statTile({label:'Custo Realizado', value: fmtMoney(a.totalCustoRealizado), sub: fmtPct(a.totalMetaCusto>0?a.totalCustoRealizado/a.totalMetaCusto:0)+' da meta consumido'}));
-  stats.appendChild(statTile({label:'Margem (fat. − custo)', value: fmtMoney(a.margemTotal), valueClass: a.margemTotal<0?'bad':'good', sub: a.margemTotal<0?'Custo acima do faturamento':'Faturamento acima do custo'}));
+  stats.appendChild(statTile({label:'Margem (fat. − custo)', value: fmtMoney(a.margemTotal), valueClass: a.margemTotal<0?'bad':'good', sub: `Sem reajuste: ${fmtMoney(a.margemTotal)} · Com reajuste (+${fmtNum(a.reajustePercent*100)}%): ${fmtMoney(a.margemReajustada)}`}));
   stats.appendChild(statTile({label:'Itens / Disciplinas', value: state.medicaoItems.length+' / '+state.disciplinas.length, sub: state.bmCount+' BMs cadastrados'}));
   p.appendChild(stats);
   main.appendChild(p);
