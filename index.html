@@ -1540,7 +1540,7 @@ function renderTotalProjeto(main){
 function renderLancarBM(main){
   const p = document.createElement('div'); p.className='panel';
   p.innerHTML = `<h2>Lançar BM & Base de Dados</h2><p class="hint">Lista de todos os subitens da medição. Selecione a BM ativa para lançar quantidade/valor medidos naquele boletim; os acumulados, saldos e status são recalculados automaticamente.</p>
-    <p class="hint"><b>Para aprovar uma medição:</b> use o filtro <b>BM</b> abaixo e escolha o número da BM — a lista mostra só os itens que tiveram quantidade medida naquela BM. Aprove item a item com o botão "Aprovar", ou aprove todos de uma vez com "Status em massa". As alterações refletem automaticamente no Dashboard Executivo, Total do Projeto, Histórico de Desvios, Controle de Supressão e Físico-Financeiro.</p>`;
+    <p class="hint"><b>Para aprovar uma medição:</b> use o filtro <b>BM</b> abaixo e escolha o número da BM — a lista mostra só os itens que tiveram quantidade medida naquela BM, e logo acima da tabela aparece o <b>total de quantidade/valor medido e aprovado daquela BM</b>. Aprove item a item com o botão "Aprovar", ou aprove todos de uma vez com "Status em massa". As alterações refletem automaticamente no Dashboard Executivo, Total do Projeto, Histórico de Desvios, Controle de Supressão e Físico-Financeiro.</p>`;
 
   const bmRow = document.createElement('div'); bmRow.className='section-actions'; bmRow.style.alignItems='center';
   bmRow.innerHTML = `<label class="field" style="max-width:220px;">BM ativa
@@ -1558,6 +1558,8 @@ function renderLancarBM(main){
   const p2 = document.createElement('div'); p2.className='panel';
   const filterHolder = document.createElement('div');
   p2.appendChild(filterHolder);
+  const totalsHolder = document.createElement('div');
+  p2.appendChild(totalsHolder);
   const bulkHolder = document.createElement('div');
   p2.appendChild(bulkHolder);
   const statusBulkHolder = document.createElement('div');
@@ -1569,10 +1571,30 @@ function renderLancarBM(main){
   function getFiltered(){
     return applyFilters(state.medicaoItems, 'lancarbm', {statusField:'statusFaturamento'});
   }
+  function drawTotals(filtered){
+    const f = getFilterState('lancarbm');
+    const bmSel = f.bm ? Number(f.bm) : null;
+    const kpis = [];
+    if(bmSel){
+      let qtdBM=0, valBM=0, valAprovBM=0;
+      filtered.forEach(r=>{
+        const b = r.bms && r.bms[bmSel];
+        if(b){ qtdBM += Number(b.qtd)||0; valBM += Number(b.valor)||0; if(r.statusFaturamento==='Faturado aprovado') valAprovBM += Number(b.valor)||0; }
+      });
+      kpis.push(['Qtd. medida nesta BM', fmtNum(qtdBM)]);
+      kpis.push(['Valor medido nesta BM', fmtMoney(valBM)]);
+      kpis.push(['Valor aprovado nesta BM', fmtMoney(valAprovBM)]);
+    } else {
+      kpis.push(['Valor medido (itens filtrados)', fmtMoney(sumBy(filtered,'valorMedido'))]);
+      kpis.push(['Valor aprovado (itens filtrados)', fmtMoney(sumBy(filtered,'valorAprovado'))]);
+    }
+    totalsHolder.innerHTML = `<div class="grid kpis" style="margin:8px 0;">${kpis.map(([l,v])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('')}</div>`;
+  }
   function draw(){
     filterHolder.innerHTML=''; filterHolder.appendChild(renderFilterBar('lancarbm', {disciplina:true, grupo:true, bm:true, status:true, statusOptions:['Não faturado','Em aprovação','Faturado aprovado']}, draw));
     const filtered = getFiltered();
     document.getElementById('filterCount_lancarbm').textContent = filtered.length + ' de ' + state.medicaoItems.length + ' itens';
+    drawTotals(filtered);
 
     bulkHolder.innerHTML='';
     bulkHolder.appendChild(renderBulkBar('lancarbm', [
@@ -1641,7 +1663,9 @@ function renderLancarBM(main){
           row.statusFaturamento = val;
         }
         recalcAll(); saveLocalDebounced(); renderKpiStrip();
-        document.getElementById('filterCount_lancarbm').textContent = getFiltered().length + ' de ' + state.medicaoItems.length + ' itens';
+        const f2 = getFiltered();
+        document.getElementById('filterCount_lancarbm').textContent = f2.length + ' de ' + state.medicaoItems.length + ' itens';
+        drawTotals(f2);
       }
     });
     tbl.querySelector('tbody').addEventListener('click', (e)=>{
