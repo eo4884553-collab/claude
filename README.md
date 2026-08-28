@@ -33,8 +33,9 @@ Recursos principais:
   único lugar (evita ter dois pontos de edição divergentes): filtre por BM para ver só os itens
   medidos naquele boletim e aprove item a item ou em massa. O valor/qtd. aprovado nunca pode
   superar o medido — o app corrige automaticamente se uma reimportação reduzir um valor já
-  aprovado. Ao exportar a MEDIÇÃO, o app pergunta se aquele BM já foi aprovado pela fiscalização
-  e, se sim, aprova em massa os itens medidos nele antes de gerar o Excel.
+  aprovado. Ao importar uma planilha de MEDIÇÃO em **Importar**, o app pergunta se aquelas
+  medições já foram aprovadas pela fiscalização e, se sim, aprova em massa (qtd./valor aprovado
+  = medido) os itens medidos no arquivo importado.
 - Dashboards profissionais em **Controle Master** e **Físico-Financeiro** (stat tiles com
   tendência, medidores de avanço/consumo do orçamento, Curva S, barras horizontais e
   divergentes, status de faturamento, medido BM com reajuste contratual aplicado — percentual
