@@ -170,7 +170,12 @@ function recompute(state) {
   const totalAdmPago = round2(sum(parcelasRealizadas, (p) => p.totalAdmPix));
   const totalCartaoPago = round2(sum(parcelasRealizadas, (p) => p.gastoCartao));
   const totalEvolucaoCaixaPago = round2(sum(parcelasRealizadas, (p) => p.parcelaEvolucaoCaixa));
-  const totalGastoAcumulado = round2(totalEmpreiteiroPago + totalAdmPago + totalCartaoPago);
+  // Categorias pagas direto pelo proprietário (fora do contrato do empreiteiro e fora
+  // das parcelas de Contas a Pagar — ex.: Serviços Preliminares: topografia, projetos,
+  // prefeitura, cartório). Sem isso, esse dinheiro já gasto não entraria no "gasto
+  // acumulado" nem reduziria o saldo de recurso disponível.
+  const totalPagoDiretoProprietario = round2(sum(categoriasBase.filter((c) => c.pagoDiretoProprietario), (c) => c.valorRealizadoItens));
+  const totalGastoAcumulado = round2(totalEmpreiteiroPago + totalAdmPago + totalCartaoPago + totalPagoDiretoProprietario);
 
   const parcelasPlanejadas = parcelas.filter((p) => p.status !== 'REALIZADO');
   const totalEmpreiteiroPlanejado = round2(sum(parcelasPlanejadas, (p) => p.totalEmpreiteiroPix));
@@ -285,6 +290,7 @@ function recompute(state) {
     totalAdmPago,
     totalCartaoPago,
     totalEvolucaoCaixaPago,
+    totalPagoDiretoProprietario,
     totalGastoAcumulado,
     totalEmpreiteiroPlanejado,
     totalPlanejadoFuturo,

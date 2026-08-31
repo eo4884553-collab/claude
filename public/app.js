@@ -251,6 +251,11 @@ function renderDashboard() {
       <div class="card-value">${money(r.totalCartaoPago)}</div>
       <div class="card-sub">Total gasto acumulado: ${money(r.totalGastoAcumulado)}</div>
     </div>
+    <div class="card">
+      <div class="card-label">Pago direto (fora do empreiteiro)</div>
+      <div class="card-value">${money(r.totalPagoDiretoProprietario)}</div>
+      <div class="card-sub">Ex.: Serviços Preliminares — topografia, projetos, prefeitura, cartório. Já descontado do saldo de recurso disponível.</div>
+    </div>
   `;
   root.appendChild(cards);
   root.appendChild(renderVerbaFuturaBlock());

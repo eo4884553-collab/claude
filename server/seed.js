@@ -53,6 +53,13 @@ function buildCategorias() {
       percAvancoManual: numero in AVANCO_FISICO_INICIAL ? AVANCO_FISICO_INICIAL[numero] : 0,
       dataUltimoAvanco: '2026-06-10',
       observacao: '',
+      // Categoria 1 (Serviços Preliminares) é paga direto pelo proprietário a
+      // terceiros (topografia, projetos, prefeitura, cartório) — não passa pelo
+      // contrato do empreiteiro nem pelas parcelas de Contas a Pagar. Por isso
+      // essa flag soma o realizado dela na conta geral de "gasto acumulado" /
+      // saldo de recurso disponível, senão o dinheiro já gasto aqui "some" do
+      // acompanhamento financeiro.
+      pagoDiretoProprietario: numero === 1,
       itens,
     };
   });

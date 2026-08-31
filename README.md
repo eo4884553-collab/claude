@@ -103,7 +103,21 @@ botão **"Restaurar dados originais da planilha"** na aba **Parâmetros**
 
 5. **Saldo de recurso disponível.** `(recurso próprio planejado + caixa
    liberado acumulado) − (empreiteiro pago + administração paga + cartão
-   pago)`, todos calculados sobre as parcelas com status **REALIZADO**.
+   pago + pago direto fora do empreiteiro)`, todos calculados sobre as
+   parcelas com status **REALIZADO** (mais o item abaixo).
+
+   **Pago direto — fora do contrato do empreiteiro.** A categoria
+   "Serviços Preliminares e Gerais" (topografia, projeto arquitetônico,
+   licenciamento, registro do lote, ITBI etc.) é paga pelo proprietário
+   direto a terceiros — não passa pelo empreiteiro nem pelas parcelas de
+   Contas a Pagar. Sem contar esse valor em algum lugar, o dinheiro já
+   gasto ali "sumiria" do saldo disponível. Por isso o realizado dessa
+   categoria (a soma dos itens editáveis em Detalhamento FC) entra direto
+   no gasto acumulado — visível no card **"Pago direto (fora do
+   empreiteiro)"** do Dashboard. Qualquer categoria pode receber essa
+   mesma marcação (`pagoDiretoProprietario` no dado da categoria) se
+   algum dia outro custo passar a ser pago fora do contrato do
+   empreiteiro.
 
 6. **Saldo caixa, saldo empreiteiro e % de avanço (para acompanhar).**
    - **Avanço empreiteiro (% pago)** = total já pago ao empreiteiro ÷
