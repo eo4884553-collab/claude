@@ -143,6 +143,24 @@ botão **"Restaurar dados originais da planilha"** na aba **Parâmetros**
    alterado sozinho — é você quem decide se corta, adia ou espera mais
    liberação de caixa, revisando as parcelas planejadas.
 
+9. **Realizar uma parcela planejada — e a reorganização automática do que
+   ainda falta (esse ajuste É automático).** Toda parcela tem um campo
+   **Status** (`PLANEJADO` / `REALIZADO`) editável direto na tabela de
+   Contas a Pagar — é assim que você "realiza" um planejamento: muda o
+   status para `REALIZADO` (ou já cria a parcela como realizada, pelo
+   formulário "Nova parcela"). Diferente do item 8 (que é só alerta), aqui
+   o app **ajusta sozinho** as parcelas que ainda estão `PLANEJADO`: sempre
+   que uma parcela vira `REALIZADO`, ele soma tudo que já foi realizado e
+   verifica se o que ainda está planejado, somado a isso, ultrapassa o
+   **contrato total do empreiteiro** (o orçado). Se ultrapassar, reduz
+   proporcionalmente o valor de empreiteiro (PIX) e administração de cada
+   parcela ainda planejada, só o suficiente para caber no que resta do
+   contrato — nunca aumenta de volta sozinho, e nunca mexe no valor do
+   cartão (que normalmente já é gasto real, comprado antes da medição). Um
+   aviso aparece explicando quantas parcelas foram ajustadas e por quê, e
+   cada parcela alterada ganha uma nota no campo Observação registrando a
+   data do ajuste.
+
 Todo campo calculado pode ser sobrescrito manualmente (ex.: "Total a
 transferir" e "Custo total" de uma parcela, ou o valor liberado de uma etapa
 PCI). Quando você sobrescreve, o campo fica marcado em azul e passa a valer

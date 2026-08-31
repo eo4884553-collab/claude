@@ -321,4 +321,43 @@ function recompute(state) {
   };
 }
 
-module.exports = { recompute, computeCategoria, round2, clamp };
+/**
+ * Reorganiza as parcelas PLANEJADAS para que o total (já realizado + ainda
+ * planejado) do empreiteiro nunca ultrapasse o orçado do contrato
+ * (parametros.contratoTotalEmpreiteiro). Só encolhe (nunca infla de volta)
+ * e só mexe em totalEmpreiteiroPix/totalAdmPix — o cartão fica intocado,
+ * porque normalmente já é gasto real (comprado), diferente do que ainda
+ * será transferido ao empreiteiro. Retorna um resumo do ajuste, ou `null`
+ * se nada precisou mudar. Muta `state.parcelas` diretamente.
+ */
+function reorganizarPlanejamento(state, dataAjuste) {
+  const parametros = state.parametros || {};
+  const contratoTotalEmpreiteiro = Number(parametros.contratoTotalEmpreiteiro) || 0;
+  if (!contratoTotalEmpreiteiro) return null;
+
+  const parcelas = state.parcelas || [];
+  const realizadas = parcelas.filter((p) => p.status === 'REALIZADO');
+  const totalRealizado = round2(sum(realizadas, (p) => p.totalEmpreiteiroPix));
+  const tetoPlanejado = Math.max(0, round2(contratoTotalEmpreiteiro - totalRealizado));
+
+  const planejadas = parcelas.filter((p) => p.status !== 'REALIZADO');
+  const somaPlanejado = round2(sum(planejadas, (p) => p.totalEmpreiteiroPix));
+
+  if (somaPlanejado <= 0 || somaPlanejado <= tetoPlanejado) return null;
+
+  const fator = tetoPlanejado / somaPlanejado;
+  const taxaAdm = Number(parametros.taxaAdministracaoPercent) || 0;
+  const data = dataAjuste || new Date().toISOString().slice(0, 10);
+  const nota = `[Ajustado automaticamente em ${data} para caber no orçado restante do contrato]`;
+  for (const p of planejadas) {
+    p.totalEmpreiteiroPix = round2((Number(p.totalEmpreiteiroPix) || 0) * fator);
+    p.totalAdmPix = round2(p.totalEmpreiteiroPix * taxaAdm);
+    if (p.overrides) { p.overrides.totalATransferir = false; p.overrides.custoTotal = false; }
+    if (!p.obs || !p.obs.includes('[Ajustado automaticamente')) {
+      p.obs = p.obs ? `${p.obs} ${nota}` : nota;
+    }
+  }
+  return { fator: round2(fator * 10000) / 10000, tetoPlanejado, somaPlanejadoAnterior: somaPlanejado, qtd: planejadas.length };
+}
+
+module.exports = { recompute, computeCategoria, reorganizarPlanejamento, round2, clamp };

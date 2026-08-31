@@ -4,7 +4,7 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const store = require('./store');
-const { recompute, computeCategoria } = require('./calc');
+const { recompute, computeCategoria, reorganizarPlanejamento } = require('./calc');
 
 const app = express();
 app.use(express.json());
@@ -14,8 +14,10 @@ function newId(prefix) {
   return `${prefix}-${crypto.randomBytes(5).toString('hex')}`;
 }
 
-function ok(res, state) {
-  res.json(recompute(state));
+function ok(res, state, ajuste) {
+  const body = recompute(state);
+  if (ajuste) body.ajusteAutomatico = ajuste;
+  res.json(body);
 }
 
 // ---- Estado completo (todas as abas já calculadas) ----
@@ -159,6 +161,7 @@ app.put('/api/liberacao-pci/:etapa', async (req, res) => {
 
 // ---- Parcelas (aba Contas a Pagar — o que vai para o cliente) ----
 app.post('/api/parcelas', async (req, res) => {
+  let ajuste = null;
   const state = await store.mutate((s) => {
     const b = req.body || {};
     s.parcelas.push({
@@ -177,11 +180,13 @@ app.post('/api/parcelas', async (req, res) => {
       obs: b.obs || '',
       overrides: {},
     });
+    if ((b.status || 'PLANEJADO') === 'REALIZADO') ajuste = reorganizarPlanejamento(s);
   });
-  ok(res, state);
+  ok(res, state, ajuste);
 });
 
 app.put('/api/parcelas/:id', async (req, res) => {
+  let ajuste = null;
   const state = await store.mutate((s) => {
     const p = s.parcelas.find((x) => x.id === req.params.id);
     if (!p) throw Object.assign(new Error('parcela não encontrada'), { status: 404 });
@@ -198,8 +203,13 @@ app.put('/api/parcelas/:id', async (req, res) => {
       p.overrides.custoTotal = true;
     }
     if (req.body.limparOverrides) p.overrides = {};
+    // Ao marcar (ou editar valores de) uma parcela REALIZADO, reorganiza as
+    // planejadas restantes para não ultrapassar o orçado do contrato.
+    if (p.status === 'REALIZADO' && (req.body.status !== undefined || req.body.totalEmpreiteiroPix !== undefined)) {
+      ajuste = reorganizarPlanejamento(s);
+    }
   });
-  ok(res, state);
+  ok(res, state, ajuste);
 });
 
 app.delete('/api/parcelas/:id', async (req, res) => {
@@ -213,6 +223,7 @@ app.delete('/api/parcelas/:id', async (req, res) => {
 // categoria (usando o peso já estipulado de cada uma) e gera automaticamente
 // a parcela correspondente em Contas a Pagar, já descontando o cartão. ----
 app.post('/api/lancamento-mensal', async (req, res) => {
+  let ajuste = null;
   const state = await store.mutate((s) => {
     const b = req.body || {};
     const avancos = Array.isArray(b.avancos) ? b.avancos : [];
@@ -273,8 +284,9 @@ app.post('/api/lancamento-mensal', async (req, res) => {
       obs: b.obs ? `${b.obs} — ${obsAuto}` : obsAuto,
       overrides: {},
     });
+    if ((b.status || 'PLANEJADO') === 'REALIZADO') ajuste = reorganizarPlanejamento(s);
   });
-  ok(res, state);
+  ok(res, state, ajuste);
 });
 
 // ---- Ajustes manuais no fluxo de caixa mensal ----

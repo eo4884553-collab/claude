@@ -44,6 +44,16 @@ function toast(msg, isError = false) {
   toast._t = setTimeout(() => { el.hidden = true; }, 3200);
 }
 
+// Mostra o toast do ajuste automático (quando o backend reorganizou as parcelas
+// planejadas para caber no orçado). Retorna true se mostrou, para o chamador
+// decidir se ainda quer exibir sua própria mensagem de sucesso por cima.
+function toastAjuste(data) {
+  if (!data || !data.ajusteAutomatico) return false;
+  const a = data.ajusteAutomatico;
+  toast(`Ajuste automático: ${a.qtd} parcela(s) planejada(s) reduzida(s) para caber no orçado restante do contrato (${money(a.tetoPlanejado)}).`);
+  return true;
+}
+
 async function api(method, url, body) {
   const res = await fetch(url, {
     method,
@@ -281,7 +291,7 @@ function renderDashboard() {
     tr.appendChild(td(dateInput({ value: p.dataGeracaoCusto, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { dataGeracaoCusto: v }) })));
     tr.appendChild(td(dateInput({ value: p.vencPlanejado, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { vencPlanejado: v }) })));
     tr.appendChild(td(dateInput({ value: p.vencimento, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { vencimento: v }) })));
-    tr.appendChild(td(selectInput({ value: p.status, options: ['PLANEJADO', 'REALIZADO'], onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { status: v }) })));
+    tr.appendChild(td(selectInput({ value: p.status, options: ['PLANEJADO', 'REALIZADO'], onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { status: v }).then(toastAjuste) })));
     tr.appendChild(td(textInput({ value: p.obs, wide: true, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { obs: v }) })));
     const delTd = document.createElement('td');
     const delBtn = document.createElement('button');
@@ -355,9 +365,9 @@ function openNovaParcelaModal() {
       e.preventDefault();
       const fd = new FormData(form);
       const payload = Object.fromEntries(fd.entries());
-      await api('POST', '/api/parcelas', payload);
+      const data = await api('POST', '/api/parcelas', payload);
       close();
-      toast('Parcela criada.');
+      if (!toastAjuste(data)) toast('Parcela criada.');
     });
     body.appendChild(form);
     body.querySelector('.muted-hint')?.remove();
@@ -690,10 +700,10 @@ function renderLancamentoMensalPanel() {
       obs: panel.querySelector('#lmObs').value,
     };
     try {
-      await api('POST', '/api/lancamento-mensal', payload);
+      const data = await api('POST', '/api/lancamento-mensal', payload);
       LANCAMENTO_MENSAL_OPEN = false;
       renderAll();
-      toast('Parcela gerada em Contas a Pagar.');
+      if (!toastAjuste(data)) toast('Parcela gerada em Contas a Pagar.');
     } catch (e) { /* erro já mostrado pelo api() */ }
   };
   actions.appendChild(submitBtn);
