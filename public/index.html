@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Liberação Caixa &amp; Empreitada — Casa Newton</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="toast" class="toast" hidden></div>
+
+  <header class="topbar">
+    <div class="topbar-title">
+      <strong id="obraNome">Obra</strong>
+      <span id="obraEndereco" class="muted"></span>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button class="tab-btn active" data-tab="dashboard">📋 Contas a Pagar (Cliente)</button>
+      <button class="tab-btn" data-tab="avancos">🧱 Lançar Avanços</button>
+      <button class="tab-btn" data-tab="detalhamento">📊 Detalhamento FC</button>
+      <button class="tab-btn" data-tab="fluxo">💵 Fluxo de Caixa</button>
+      <button class="tab-btn" data-tab="pci">🏦 Liberação PCI</button>
+      <button class="tab-btn" data-tab="parametros">⚙️ Parâmetros</button>
+    </nav>
+  </header>
+
+  <main id="app">
+    <section id="tab-dashboard" class="tab-panel"></section>
+    <section id="tab-avancos" class="tab-panel" hidden></section>
+    <section id="tab-detalhamento" class="tab-panel" hidden></section>
+    <section id="tab-fluxo" class="tab-panel" hidden></section>
+    <section id="tab-pci" class="tab-panel" hidden></section>
+    <section id="tab-parametros" class="tab-panel" hidden></section>
+  </main>
+
+  <template id="tpl-modal">
+    <div class="modal-backdrop">
+      <div class="modal">
+        <div class="modal-header">
+          <h3></h3>
+          <button class="modal-close">✕</button>
+        </div>
+        <div class="modal-body"></div>
+      </div>
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>

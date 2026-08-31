@@ -1,0 +1,522 @@
+[
+  {
+    "numero": "01",
+    "nome": "Serviços Preliminares e Gerais (água luz e projetos aprovados)",
+    "valorOrcado": 65328,
+    "valorRealizado": 60060.87,
+    "itens": [
+      {
+        "descricao": "PLANITALTIMETRICO",
+        "unidade": "verba",
+        "valorOrcado": 1700.0,
+        "valorRealizado": 1500.0,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      },
+      {
+        "descricao": "SONDAGEM",
+        "unidade": "verba",
+        "valorOrcado": 2000.0,
+        "valorRealizado": 1875.0,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      },
+      {
+        "descricao": "ARTQUITETONICO",
+        "unidade": "serv.",
+        "valorOrcado": 13200.0,
+        "valorRealizado": 11900.0,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      },
+      {
+        "descricao": "ESTRUTURAL",
+        "unidade": "serv.",
+        "valorOrcado": 11200.0,
+        "valorRealizado": 9870.0,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      },
+      {
+        "descricao": "ELETRICO",
+        "unidade": "serv.",
+        "valorOrcado": 4200.0,
+        "valorRealizado": 3948.0,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      },
+      {
+        "descricao": "HIDRAULICO",
+        "unidade": "serv.",
+        "valorOrcado": 4200.0,
+        "valorRealizado": 3948.0,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      },
+      {
+        "descricao": "PREFEITURA 1",
+        "unidade": "serv.",
+        "valorOrcado": 1000.0,
+        "valorRealizado": 1371.6,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      },
+      {
+        "descricao": "TX. AP. PROJETO COND.",
+        "unidade": "serv.",
+        "valorOrcado": 0,
+        "valorRealizado": 250.0,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      },
+      {
+        "descricao": "LICENCIAMENTO",
+        "unidade": "serv.",
+        "valorOrcado": 1000.0,
+        "valorRealizado": 0,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      },
+      {
+        "descricao": "ART DE EXECUÇÃO",
+        "unidade": "serv.",
+        "valorOrcado": 0,
+        "valorRealizado": 103.03,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      },
+      {
+        "descricao": "ART PROJETOS",
+        "unidade": "serv.",
+        "valorOrcado": 500.0,
+        "valorRealizado": 0,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      },
+      {
+        "descricao": "REGISTRO DE FINANCIAMENTO",
+        "unidade": "serv.",
+        "valorOrcado": 3928.0,
+        "valorRealizado": 1661.47,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      },
+      {
+        "descricao": "REGISTRO DO LOTE",
+        "unidade": "serv.",
+        "valorOrcado": 8000.0,
+        "valorRealizado": 14008.01,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      },
+      {
+        "descricao": "ITBI DO LOTE",
+        "unidade": "serv.",
+        "valorOrcado": 14400.0,
+        "valorRealizado": 9625.76,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "02",
+    "nome": "Infraestrutura (estacas,brocas,baldrames,sapatas)",
+    "valorOrcado": 108586.8,
+    "valorRealizado": 105268.87,
+    "itens": [
+      {
+        "descricao": "VIGAS BALDRAME",
+        "unidade": "UNID",
+        "valorOrcado": 0,
+        "valorRealizado": 9629.0,
+        "dataPagamento": "2026-06-01T00:00:00",
+        "formaPagamento": "CARTÃO"
+      },
+      {
+        "descricao": "FORMAS DA VIGA BALDRAMA",
+        "unidade": "UNID",
+        "valorOrcado": 0,
+        "valorRealizado": 6050.0,
+        "dataPagamento": "2026-06-01T00:00:00",
+        "formaPagamento": "CARTÃO"
+      },
+      {
+        "descricao": "CONCRETO BLOCOS ",
+        "unidade": "UNID",
+        "valorOrcado": 0,
+        "valorRealizado": 13800.0,
+        "dataPagamento": "2026-06-01T00:00:00",
+        "formaPagamento": "CARTÃO"
+      },
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 108586.8,
+        "valorRealizado": 75789.87,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "03",
+    "nome": "Supra estrutura(vigas,pilares,cintas,escada)",
+    "valorOrcado": 192286.8,
+    "valorRealizado": 186411.37,
+    "itens": [
+      {
+        "descricao": "CONCRETO PISO E BALDRAME PISCINA",
+        "unidade": "UNID",
+        "valorOrcado": 0,
+        "valorRealizado": 8300.0,
+        "dataPagamento": "2026-07-13T00:00:00",
+        "formaPagamento": "CARTÃO EM AGOSTO"
+      },
+      {
+        "descricao": "LAJE PARA O PRIMEIRO PAVIMENTO",
+        "unidade": "UNID",
+        "valorOrcado": 0,
+        "valorRealizado": 12803.31,
+        "dataPagamento": "2026-07-24T00:00:00",
+        "formaPagamento": "CARTÃO EM AGOSTO"
+      },
+      {
+        "descricao": "PILARES E VIGAS 1º PAVIMENTO EM 1/2",
+        "unidade": "UNID",
+        "valorOrcado": 0,
+        "valorRealizado": 8500,
+        "dataPagamento": "2026-07-24T00:00:00",
+        "formaPagamento": "CARTÃO EM AGOSTO"
+      },
+      {
+        "descricao": "PILARES E VIGAS 1º PAVIMENTO EM 2/2",
+        "unidade": "UNID",
+        "valorOrcado": 0,
+        "valorRealizado": 8500,
+        "dataPagamento": "2026-07-24T00:00:00",
+        "formaPagamento": "CARTÃO EM SETEMBRO"
+      },
+      {
+        "descricao": "MADEIRA PARA FORMAS EM 1/2",
+        "unidade": "UNID",
+        "valorOrcado": 0,
+        "valorRealizado": 3060,
+        "dataPagamento": "2026-07-24T00:00:00",
+        "formaPagamento": "CARTÃO EM AGOSTO"
+      },
+      {
+        "descricao": "MADEIRA PARA FORMAS EM 2/2",
+        "unidade": "UNID",
+        "valorOrcado": 0,
+        "valorRealizado": 3060,
+        "dataPagamento": "2026-07-24T00:00:00",
+        "formaPagamento": "CARTÃO EM SETEMBRO"
+      },
+      {
+        "descricao": "DEPOSITO EM GERAL",
+        "unidade": "UNID",
+        "valorOrcado": 0,
+        "valorRealizado": 13988.15,
+        "dataPagamento": "2026-08-14T00:00:00",
+        "formaPagamento": "CARTÃO EM SETEMBRO"
+      },
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 192286.8,
+        "valorRealizado": 128199.91,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "04",
+    "nome": "Paredes e Painéis",
+    "valorOrcado": 76334.4,
+    "valorRealizado": 93501.96,
+    "itens": [
+      {
+        "descricao": "TIJOLO,BLOCO,AREIA,BRITA,VERGALHÃO",
+        "unidade": "UNID",
+        "valorOrcado": 0,
+        "valorRealizado": 8500.0,
+        "dataPagamento": "2026-06-12T00:00:00",
+        "formaPagamento": "CARTÃO EM SETEMBRO"
+      },
+      {
+        "descricao": "TIJOLO,BLOCO,AREIA,BRITA,VERGALHÃO",
+        "unidade": "UNID",
+        "valorOrcado": 0,
+        "valorRealizado": 11000.0,
+        "dataPagamento": "2026-07-13T00:00:00",
+        "formaPagamento": "CARTÃO EM SETEMBRO"
+      },
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 76334.4,
+        "valorRealizado": 74001.96,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "05",
+    "nome": "Esquadrias",
+    "valorOrcado": 72874.8,
+    "valorRealizado": 70648.07,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 72874.8,
+        "valorRealizado": 70648.07,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "06",
+    "nome": "Vidros e Plásticos",
+    "valorOrcado": 26449.2,
+    "valorRealizado": 25641.03,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 26449.2,
+        "valorRealizado": 25641.03,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "07",
+    "nome": "Coberturas ( estrutura e telhas)",
+    "valorOrcado": 40287.6,
+    "valorRealizado": 39056.59,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 40287.6,
+        "valorRealizado": 39056.59,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "08",
+    "nome": "Impermeabilizações",
+    "valorOrcado": 30690,
+    "valorRealizado": 29752.25,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 30690,
+        "valorRealizado": 29752.25,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "09",
+    "nome": "Revestimentos Internos",
+    "valorOrcado": 80575.2,
+    "valorRealizado": 78113.18,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 80575.2,
+        "valorRealizado": 78113.18,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "10",
+    "nome": "Forros",
+    "valorOrcado": 19530,
+    "valorRealizado": 18933.25,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 19530,
+        "valorRealizado": 18933.25,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "11",
+    "nome": "Revestimentos Externos",
+    "valorOrcado": 46090.8,
+    "valorRealizado": 44682.47,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 46090.8,
+        "valorRealizado": 44682.47,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "12",
+    "nome": "Pintura",
+    "valorOrcado": 47541.6,
+    "valorRealizado": 46088.94,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 47541.6,
+        "valorRealizado": 46088.94,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "13",
+    "nome": "Pisos",
+    "valorOrcado": 103564.8,
+    "valorRealizado": 100400.32,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 103564.8,
+        "valorRealizado": 100400.32,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "14",
+    "nome": "Acabamentos(soleiras,rodapés,peitoril etc)",
+    "valorOrcado": 13838.4,
+    "valorRealizado": 13415.56,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 13838.4,
+        "valorRealizado": 13415.56,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "15",
+    "nome": "Inst. Elétricas e Telefônicas",
+    "valorOrcado": 42966,
+    "valorRealizado": 41653.15,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 42966,
+        "valorRealizado": 41653.15,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "16",
+    "nome": "Instalações Hidráulicas",
+    "valorOrcado": 42966,
+    "valorRealizado": 41653.15,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 42966,
+        "valorRealizado": 41653.15,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "17",
+    "nome": "Inst. Esgoto e Águas Pluviais",
+    "valorOrcado": 46090.8,
+    "valorRealizado": 44682.47,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 46090.8,
+        "valorRealizado": 44682.47,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "18",
+    "nome": "Louças e Metais",
+    "valorOrcado": 47541.6,
+    "valorRealizado": 46088.94,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 47541.6,
+        "valorRealizado": 46088.94,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "19",
+    "nome": "Complementos( limpeza final e calafete)",
+    "valorOrcado": 10378.8,
+    "valorRealizado": 10061.67,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 10378.8,
+        "valorRealizado": 10061.67,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  },
+  {
+    "numero": "20",
+    "nome": "Outros Serviços",
+    "valorOrcado": 67183.2,
+    "valorRealizado": 65130.38,
+    "itens": [
+      {
+        "descricao": "Mão de obra Fama+ material",
+        "unidade": "verba",
+        "valorOrcado": 67183.2,
+        "valorRealizado": 65130.38,
+        "dataPagamento": null,
+        "formaPagamento": "PIX"
+      }
+    ]
+  }
+]
