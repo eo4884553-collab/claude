@@ -112,7 +112,7 @@
     "parcelaEvolucaoCaixa": 7429.921609,
     "custoTotal": 55511.74805,
     "vencimento": null,
-    "vencPlanejado": "2026-08-25T00:00:00",
+    "vencPlanejado": "2026-09-10T00:00:00",
     "status": "PLANEJADO",
     "obs": ""
   },
@@ -125,7 +125,7 @@
     "parcelaEvolucaoCaixa": 0,
     "custoTotal": 20505.2507,
     "vencimento": null,
-    "vencPlanejado": "2026-08-25T00:00:00",
+    "vencPlanejado": "2026-09-25T00:00:00",
     "status": "PLANEJADO",
     "obs": ""
   }
