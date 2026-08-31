@@ -131,6 +131,18 @@ botão **"Restaurar dados originais da planilha"** na aba **Parâmetros**
      em agosto que só fecha e é pago em setembro). É essa segunda data que
      define em qual "Mês/Parcela" a parcela é organizada em todas as abas.
 
+8. **Verba disponível para itens futuros (alerta, não ajuste automático).**
+   Todo lançamento futuro ainda não realizado (parcelas com status
+   **PLANEJADO**) entra na conta de **"Planejado futuro"** — a soma do custo
+   total de tudo que ainda falta lançar. Isso é comparado com a **"Verba
+   disponível p/ futuros"** = Saldo Caixa (crédito PCI ainda a liberar) +
+   Saldo de recurso disponível (recurso próprio + caixa já liberado − já
+   gasto). A diferença é a **"Margem para itens futuros"**: positiva, os
+   planejados cabem na verba; negativa, o app mostra um aviso no topo do
+   Dashboard e do Fluxo de Caixa dizendo quanto falta. Nenhum valor é
+   alterado sozinho — é você quem decide se corta, adia ou espera mais
+   liberação de caixa, revisando as parcelas planejadas.
+
 Todo campo calculado pode ser sobrescrito manualmente (ex.: "Total a
 transferir" e "Custo total" de uma parcela, ou o valor liberado de uma etapa
 PCI). Quando você sobrescreve, o campo fica marcado em azul e passa a valer

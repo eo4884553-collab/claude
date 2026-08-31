@@ -172,7 +172,11 @@ function recompute(state) {
   const totalEvolucaoCaixaPago = round2(sum(parcelasRealizadas, (p) => p.parcelaEvolucaoCaixa));
   const totalGastoAcumulado = round2(totalEmpreiteiroPago + totalAdmPago + totalCartaoPago);
 
-  const totalEmpreiteiroPlanejado = round2(sum(parcelas.filter((p) => p.status !== 'REALIZADO'), (p) => p.totalEmpreiteiroPix));
+  const parcelasPlanejadas = parcelas.filter((p) => p.status !== 'REALIZADO');
+  const totalEmpreiteiroPlanejado = round2(sum(parcelasPlanejadas, (p) => p.totalEmpreiteiroPix));
+  // Total já planejado (ainda não lançado/realizado) para os próximos itens — soma o
+  // custo total (empreiteiro + ADM + cartão + evolução caixa) de cada parcela futura.
+  const totalPlanejadoFuturo = round2(sum(parcelasPlanejadas, (p) => p.custoTotal));
 
   const parametros = state.parametros || {};
   const contratoTotalEmpreiteiro = Number(parametros.contratoTotalEmpreiteiro) || totalOrcadoCategorias;
@@ -264,6 +268,9 @@ function recompute(state) {
     m.saldoAcumuladoMes = acumulado;
   }
 
+  const saldoCaixaDisponivel = round2(creditoCaixaTotalPCI - caixaLiberadaAcumulada);
+  const verbaDisponivelFutura = round2(saldoCaixaDisponivel + saldoRecursoDisponivel);
+
   const resumo = {
     totalOrcadoCategorias,
     contratoTotalEmpreiteiro,
@@ -280,17 +287,24 @@ function recompute(state) {
     totalEvolucaoCaixaPago,
     totalGastoAcumulado,
     totalEmpreiteiroPlanejado,
+    totalPlanejadoFuturo,
     saldoAPagarEmpreiteiro,
     saldoContratoRestante,
     saldoRecursoDisponivel,
     // "Saldo Caixa": quanto do crédito CAIXA (PCI) ainda falta ser liberado pelo banco.
-    saldoCaixaDisponivel: round2(creditoCaixaTotalPCI - caixaLiberadaAcumulada),
+    saldoCaixaDisponivel,
     // "Saldo Empreiteiro": quanto do contrato total ainda falta ser efetivamente pago.
     saldoContratoAPagarEmpreiteiro: round2(contratoTotalEmpreiteiro - totalEmpreiteiroPago),
     // % Avanço Empreiteiro (pago) e % Avanço Caixa (liberado) — para acompanhamento.
     percValorTotalPago: contratoTotalEmpreiteiro > 0 ? round2((totalEmpreiteiroPago / contratoTotalEmpreiteiro) * 10000) / 10000 : 0,
     sugestaoProximaParcelaEmpreiteiro: round2(sugestaoProximaParcelaEmpreiteiro),
     sugestaoProximaParcelaAdm: round2(sugestaoProximaParcelaAdm),
+    // Verba disponível para itens futuros = Saldo Caixa (a liberar) + Saldo de recurso
+    // disponível (recurso próprio + caixa já liberado − já gasto). Comparado contra o
+    // total já planejado (parcelas ainda não realizadas) para alertar se estourar —
+    // nada aqui é ajustado automaticamente, é só um alerta de acompanhamento.
+    verbaDisponivelFutura,
+    saldoParaFuturos: round2(verbaDisponivelFutura - totalPlanejadoFuturo),
   };
 
   return {

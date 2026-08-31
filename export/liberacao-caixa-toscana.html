@@ -126,6 +126,10 @@
     background: var(--danger-soft); color: var(--danger); border: 1px solid var(--danger);
     border-radius: var(--radius); padding: 10px 14px; font-size: 12.5px; font-weight: 600;
   }
+  .alert-banner {
+    background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn);
+    border-radius: var(--radius); padding: 10px 14px; font-size: 12.5px; font-weight: 600; margin-bottom: 12px;
+  }
 
   /* ---------- Cards ---------- */
   .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
@@ -402,7 +406,9 @@ function recompute(state) {
   const totalCartaoPago = round2(sum(parcelasRealizadas, (p) => p.gastoCartao));
   const totalEvolucaoCaixaPago = round2(sum(parcelasRealizadas, (p) => p.parcelaEvolucaoCaixa));
   const totalGastoAcumulado = round2(totalEmpreiteiroPago + totalAdmPago + totalCartaoPago);
-  const totalEmpreiteiroPlanejado = round2(sum(parcelas.filter((p) => p.status !== 'REALIZADO'), (p) => p.totalEmpreiteiroPix));
+  const parcelasPlanejadas = parcelas.filter((p) => p.status !== 'REALIZADO');
+  const totalEmpreiteiroPlanejado = round2(sum(parcelasPlanejadas, (p) => p.totalEmpreiteiroPix));
+  const totalPlanejadoFuturo = round2(sum(parcelasPlanejadas, (p) => p.custoTotal));
 
   const parametros = state.parametros || {};
   const contratoTotalEmpreiteiro = Number(parametros.contratoTotalEmpreiteiro) || totalOrcadoCategorias;
@@ -459,6 +465,9 @@ function recompute(state) {
   let acumulado = 0;
   for (const m of fluxoCaixaMensal) { acumulado = round2(acumulado + m.entradaTotal - m.saidaTotal); m.saldoAcumuladoMes = acumulado; }
 
+  const saldoCaixaDisponivel = round2(creditoCaixaTotalPCI - caixaLiberadaAcumulada);
+  const verbaDisponivelFutura = round2(saldoCaixaDisponivel + saldoRecursoDisponivel);
+
   const resumo = {
     totalOrcadoCategorias, contratoTotalEmpreiteiro, totalMedido,
     percObraGeral: round2(percObraGeral * 10000) / 10000,
@@ -466,12 +475,15 @@ function recompute(state) {
     percCaixaLiberada: creditoCaixaTotalPCI > 0 ? round2((caixaLiberadaAcumulada / creditoCaixaTotalPCI) * 10000) / 10000 : 0,
     recursoProprioPlanejado, totalInvestidoDisponivel,
     totalEmpreiteiroPago, totalAdmPago, totalCartaoPago, totalEvolucaoCaixaPago, totalGastoAcumulado, totalEmpreiteiroPlanejado,
+    totalPlanejadoFuturo,
     saldoAPagarEmpreiteiro, saldoContratoRestante, saldoRecursoDisponivel,
-    saldoCaixaDisponivel: round2(creditoCaixaTotalPCI - caixaLiberadaAcumulada),
+    saldoCaixaDisponivel,
     saldoContratoAPagarEmpreiteiro: round2(contratoTotalEmpreiteiro - totalEmpreiteiroPago),
     percValorTotalPago: contratoTotalEmpreiteiro > 0 ? round2((totalEmpreiteiroPago / contratoTotalEmpreiteiro) * 10000) / 10000 : 0,
     sugestaoProximaParcelaEmpreiteiro: round2(sugestaoProximaParcelaEmpreiteiro),
     sugestaoProximaParcelaAdm: round2(sugestaoProximaParcelaAdm),
+    verbaDisponivelFutura,
+    saldoParaFuturos: round2(verbaDisponivelFutura - totalPlanejadoFuturo),
   };
 
   return { meta: state.meta, parametros: state.parametros, categorias, liberacaoPCI, parcelas, fluxoCaixaMensal, fluxoCaixaAjustes: state.fluxoCaixaAjustes || [], historicoAvancos: state.historicoAvancos || [], resumo, updatedAt: state.updatedAt };
@@ -879,6 +891,43 @@ function td(el) {
   return cell;
 }
 
+/* Bloco "verba para itens futuros": compara o que já está planejado (parcelas
+   ainda não realizadas) com a verba disponível (Saldo Caixa + Saldo de recurso
+   disponível) e avisa quando estoura — não ajusta nada automaticamente, é só
+   acompanhamento (usado no Dashboard e no Fluxo de Caixa). */
+function renderVerbaFuturaBlock() {
+  const r = VIEW.resumo;
+  const wrap = document.createElement('div');
+  const estourou = r.saldoParaFuturos < 0;
+  if (estourou) {
+    const banner = document.createElement('div');
+    banner.className = 'alert-banner';
+    banner.textContent = `Atenção: os itens futuros já planejados (${money(r.totalPlanejadoFuturo)}) somam mais do que a verba disponível (${money(r.verbaDisponivelFutura)}) — falta ${money(Math.abs(r.saldoParaFuturos))}. Revise as parcelas planejadas ou aguarde mais liberação de caixa.`;
+    wrap.appendChild(banner);
+  }
+  const cards = document.createElement('div');
+  cards.className = 'cards-grid';
+  cards.innerHTML = `
+    <div class="card">
+      <div class="card-label">Planejado futuro (a lançar)</div>
+      <div class="card-value">${money(r.totalPlanejadoFuturo)}</div>
+      <div class="card-sub">Soma das parcelas ainda não realizadas</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Verba disponível p/ futuros</div>
+      <div class="card-value">${money(r.verbaDisponivelFutura)}</div>
+      <div class="card-sub">Saldo caixa (a liberar) + Saldo de recurso disponível</div>
+    </div>
+    <div class="card ${estourou ? 'warn' : 'good'}">
+      <div class="card-label">Margem para itens futuros</div>
+      <div class="card-value">${money(r.saldoParaFuturos)}</div>
+      <div class="card-sub">${estourou ? 'Estourou a verba disponível' : 'Dentro da verba disponível'}</div>
+    </div>
+  `;
+  wrap.appendChild(cards);
+  return wrap;
+}
+
 /* ==========================================================================
    TAB 1 — Dashboard "Contas a Pagar" (visão do cliente)
    ========================================================================== */
@@ -934,6 +983,7 @@ function renderDashboard() {
     </div>
   `;
   root.appendChild(cards);
+  root.appendChild(renderVerbaFuturaBlock());
 
   const panel = document.createElement('div');
   panel.className = 'panel';
@@ -1411,6 +1461,7 @@ function renderFluxo() {
     </div>
   `;
   root.appendChild(tracking);
+  root.appendChild(renderVerbaFuturaBlock());
 
   root.appendChild(renderLancamentoMensalPanel());
 

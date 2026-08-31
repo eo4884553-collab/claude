@@ -151,6 +151,43 @@ function td(el) {
   return cell;
 }
 
+/* Bloco "verba para itens futuros": compara o que já está planejado (parcelas
+   ainda não realizadas) com a verba disponível (Saldo Caixa + Saldo de recurso
+   disponível) e avisa quando estoura — não ajusta nada automaticamente, é só
+   acompanhamento (usado no Dashboard e no Fluxo de Caixa). */
+function renderVerbaFuturaBlock() {
+  const r = STATE.resumo;
+  const wrap = document.createElement('div');
+  const estourou = r.saldoParaFuturos < 0;
+  if (estourou) {
+    const banner = document.createElement('div');
+    banner.className = 'alert-banner';
+    banner.textContent = `Atenção: os itens futuros já planejados (${money(r.totalPlanejadoFuturo)}) somam mais do que a verba disponível (${money(r.verbaDisponivelFutura)}) — falta ${money(Math.abs(r.saldoParaFuturos))}. Revise as parcelas planejadas ou aguarde mais liberação de caixa.`;
+    wrap.appendChild(banner);
+  }
+  const cards = document.createElement('div');
+  cards.className = 'cards-grid';
+  cards.innerHTML = `
+    <div class="card">
+      <div class="card-label">Planejado futuro (a lançar)</div>
+      <div class="card-value">${money(r.totalPlanejadoFuturo)}</div>
+      <div class="card-sub">Soma das parcelas ainda não realizadas</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Verba disponível p/ futuros</div>
+      <div class="card-value">${money(r.verbaDisponivelFutura)}</div>
+      <div class="card-sub">Saldo caixa (a liberar) + Saldo de recurso disponível</div>
+    </div>
+    <div class="card ${estourou ? 'warn' : 'good'}">
+      <div class="card-label">Margem para itens futuros</div>
+      <div class="card-value">${money(r.saldoParaFuturos)}</div>
+      <div class="card-sub">${estourou ? 'Estourou a verba disponível' : 'Dentro da verba disponível'}</div>
+    </div>
+  `;
+  wrap.appendChild(cards);
+  return wrap;
+}
+
 /* ==========================================================================
    TAB 1 — Dashboard "Contas a Pagar" (visão do cliente)
    ========================================================================== */
@@ -206,6 +243,7 @@ function renderDashboard() {
     </div>
   `;
   root.appendChild(cards);
+  root.appendChild(renderVerbaFuturaBlock());
 
   const panel = document.createElement('div');
   panel.className = 'panel';
@@ -686,6 +724,7 @@ function renderFluxo() {
     </div>
   `;
   root.appendChild(tracking);
+  root.appendChild(renderVerbaFuturaBlock());
 
   root.appendChild(renderLancamentoMensalPanel());
 
