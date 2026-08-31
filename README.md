@@ -1,5 +1,23 @@
 # App Liberação Caixa & Empreitada — Casa Newton (Toscana)
 
+**Link para abrir com qualquer pessoa (inclusive o cliente), sem precisar instalar nada:**
+https://claude.ai/code/artifact/6af599b7-686a-4583-bbc8-1ad3805ae6b6
+
+Esse link abre a versão "exportada em HTML" do app (arquivo único,
+`export/liberacao-caixa-toscana.html`, publicado como Claude Artifact). Por
+padrão o link é privado — abra-o e use o menu de compartilhamento da própria
+página para liberar o acesso a quem precisar (ex.: "qualquer pessoa com o
+link" para o cliente). Só você, como dono/editor do link, pode editar; quem
+mais abrir vê a versão mais recente em modo somente leitura. Toda edição sua
+salva automaticamente (alguns segundos após parar de digitar) e atualiza o
+que todo mundo vê nesse mesmo link — não é preciso reenviar nada.
+
+Este repositório também tem uma versão com backend próprio (Node/Express),
+para quem preferir rodar localmente ou hospedar em um servidor — ver
+"Como rodar" abaixo. As duas versões implementam exatamente a mesma lógica de
+cálculo; a diferença é só onde os dados ficam salvos (arquivo local vs. o
+próprio Artifact).
+
 Aplicativo de acompanhamento de obra: você lança o **avanço físico** de cada
 categoria da obra e o sistema recalcula automaticamente:
 
@@ -102,7 +120,33 @@ public/
   index.html, app.js, styles.css → SPA (sem build step, JS puro)
 data/
   db.json     → "banco de dados" local (gerado, não versionado)
+export/
+  liberacao-caixa-toscana.html → versão single-file publicada como Artifact (link acima)
 ```
 
 Não há dependência de build/bundler — é só abrir `npm start`. O front-end é
 JavaScript puro (sem framework) para manter o projeto simples de manter.
+
+## Sobre a versão em HTML (Artifact)
+
+`export/liberacao-caixa-toscana.html` é um app completo em um único arquivo:
+mesma interface e mesmo motor de cálculo do app Node, mas sem backend — os
+dados ficam embutidos na própria página. Publicado como Claude Artifact, ele
+ganha superpotências que um HTML comum não tem:
+
+- **Qualquer pessoa com o link abre e vê os dados mais atuais** — não precisa
+  instalar Node, clonar o repositório nem rodar servidor.
+- **Edições salvam sozinhas.** Ao editar um campo (avanço, parcela, item do
+  Detalhamento FC etc.), a página publica automaticamente uma nova versão de
+  si mesma alguns segundos depois — e todo mundo com o link vê essa versão
+  atualizada. Não existe "enviar arquivo atualizado por e-mail": é sempre o
+  mesmo link.
+- **Somente o dono/editores do link podem editar.** Quem mais abrir (o
+  cliente, por exemplo) vê tudo — dashboard, abas, valores — mas os campos
+  aparecem bloqueados, com um aviso "Modo somente leitura" no topo.
+
+Para atualizar essa versão a partir de uma sessão do Claude Code (caso
+mude a lógica de cálculo no `server/calc.js` e queira refletir no Artifact
+também): copie as mesmas mudanças para o bloco de script equivalente dentro
+de `export/liberacao-caixa-toscana.html` e peça para o Claude republicar o
+Artifact nesse mesmo link.
