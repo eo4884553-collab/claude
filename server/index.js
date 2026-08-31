@@ -4,7 +4,7 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const store = require('./store');
-const { recompute } = require('./calc');
+const { recompute, computeCategoria } = require('./calc');
 
 const app = express();
 app.use(express.json());
@@ -204,6 +204,73 @@ app.put('/api/parcelas/:id', async (req, res) => {
 app.delete('/api/parcelas/:id', async (req, res) => {
   const state = await store.mutate((s) => {
     s.parcelas = s.parcelas.filter((p) => p.id !== req.params.id);
+  });
+  ok(res, state);
+});
+
+// ---- Lançamento mensal (aba Fluxo de Caixa): lança o avanço do mês por
+// categoria (usando o peso já estipulado de cada uma) e gera automaticamente
+// a parcela correspondente em Contas a Pagar, já descontando o cartão. ----
+app.post('/api/lancamento-mensal', async (req, res) => {
+  const state = await store.mutate((s) => {
+    const b = req.body || {};
+    const avancos = Array.isArray(b.avancos) ? b.avancos : [];
+    if (!avancos.length) throw Object.assign(new Error('Informe o novo % de ao menos uma categoria.'), { status: 400 });
+
+    const dataLancamento = b.data || new Date().toISOString().slice(0, 10);
+    let valorGeradoMes = 0;
+    const detalhes = [];
+
+    for (const a of avancos) {
+      const cat = s.categorias.find((c) => c.id === a.categoriaId);
+      const novoPerc = Number(a.novoPerc);
+      if (!cat || !Number.isFinite(novoPerc)) continue;
+      const percAnteriorEfetivo = computeCategoria(cat).percAvancoEfetivo;
+      if (Math.abs(novoPerc - percAnteriorEfetivo) < 0.0001) continue;
+
+      const valorOrcado = Number(cat.valorOrcado) || 0;
+      valorGeradoMes += valorOrcado * (novoPerc - percAnteriorEfetivo);
+
+      const percAvancoManualAnterior = cat.percAvancoManual;
+      cat.percAvancoManual = novoPerc;
+      cat.dataUltimoAvanco = dataLancamento;
+      s.historicoAvancos.unshift({
+        id: newId('avanco'),
+        categoriaId: cat.id,
+        categoriaNome: cat.nome,
+        percAvancoAnterior: percAvancoManualAnterior,
+        percAvancoNovo: novoPerc,
+        data: dataLancamento,
+        obs: b.obs || '',
+        timestamp: new Date().toISOString(),
+      });
+      detalhes.push(`${cat.nome}: ${(percAnteriorEfetivo * 100).toFixed(1)}% → ${(novoPerc * 100).toFixed(1)}%`);
+    }
+
+    if (!detalhes.length) throw Object.assign(new Error('Nenhuma categoria teve o % alterado.'), { status: 400 });
+
+    valorGeradoMes = Math.round(valorGeradoMes * 100) / 100;
+    const gastoCartao = Math.round((Number(b.gastoCartao) || 0) * 100) / 100;
+    const taxaAdm = Number(s.parametros.taxaAdministracaoPercent) || 0;
+    const totalEmpreiteiroPix = Math.round(Math.max(0, valorGeradoMes - gastoCartao) * 100) / 100;
+    const totalAdmPix = Math.round(totalEmpreiteiroPix * taxaAdm * 100) / 100;
+    const obsAuto = `Avanço do mês (valor gerado: R$ ${valorGeradoMes.toFixed(2)}) — ${detalhes.join('; ')}`;
+
+    s.parcelas.push({
+      id: newId('parcela'),
+      label: b.label || `Avanço ${dataLancamento}`,
+      totalEmpreiteiroPix,
+      totalAdmPix,
+      gastoCartao,
+      totalATransferir: Math.round((totalEmpreiteiroPix + totalAdmPix) * 100) / 100,
+      parcelaEvolucaoCaixa: 0,
+      custoTotal: Math.round((totalEmpreiteiroPix + totalAdmPix + gastoCartao) * 100) / 100,
+      vencimento: b.vencimento || null,
+      vencPlanejado: b.vencPlanejado || null,
+      status: b.status || 'PLANEJADO',
+      obs: b.obs ? `${b.obs} — ${obsAuto}` : obsAuto,
+      overrides: {},
+    });
   });
   ok(res, state);
 });

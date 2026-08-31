@@ -53,7 +53,7 @@ botão **"Restaurar dados originais da planilha"** na aba **Parâmetros**
 | **Contas a Pagar (Cliente)** | Dashboard que vai para o cliente: cards-resumo + tabela de parcelas quinzenais (PIX empreiteiro, ADM, cartão, evolução caixa, vencimentos, status). Editável linha a linha. |
 | **Lançar Avanços** | Onde você informa o % de avanço físico/financeiro de cada uma das 20 categorias da obra. É o principal ponto de entrada de dados do dia a dia. |
 | **Detalhamento FC** | Itens orçado x realizado de cada categoria (equivalente à aba "Detalhamento F.C" da planilha). Cada categoria soma seus itens automaticamente. |
-| **Fluxo de Caixa** | Visão mensal de entradas (recurso próprio + liberação PCI) e saídas (parcelas + ajustes manuais), com saldo acumulado. |
+| **Fluxo de Caixa** | Visão mensal de entradas (recurso próprio + liberação PCI) e saídas (parcelas + ajustes manuais), com saldo acumulado. Tem o botão **"Lançar avanço do mês"**: informe o novo % de cada categoria que avançou e o app rateia pelo peso já estipulado (valor orçado), desconta o cartão informado e já cria a parcela correspondente em Contas a Pagar. |
 | **Liberação PCI** | Cronograma de liberação do financiamento CAIXA em 6 etapas (aquisição do lote + 5 etapas de 20%), com liberação automática proporcional ao % de obra. |
 | **Parâmetros** | Dados da obra e parâmetros financeiros globais (recurso próprio planejado, taxa de administração, contrato total do empreiteiro etc.). |
 
@@ -87,6 +87,19 @@ botão **"Restaurar dados originais da planilha"** na aba **Parâmetros**
    nem sempre o valor real bate com o planejado (execução com recurso
    próprio do empreiteiro, atrasos de medição, cartão etc. — exatamente como
    acontecia na planilha original).
+
+   **Atalho: "Lançar avanço do mês" (aba Fluxo de Caixa).** Em vez de lançar
+   o avanço em Lançar Avanços e depois criar a parcela manualmente, esse
+   atalho faz os dois passos juntos: você informa o novo % acumulado de cada
+   categoria que avançou naquele mês, o app calcula `valor gerado = Σ (Δ% ×
+   valor orçado da categoria)` — ou seja, usa o **peso já estipulado** de
+   cada categoria (seu valor orçado sobre o total) para ratear o quanto
+   aquele avanço vale em R$. Informe também o que já saiu pelo **cartão**
+   naquele mês: o app desconta esse valor do que sobra para pagar via PIX
+   (`empreiteiro PIX = valor gerado − cartão`) e sugere a administração
+   (10% sobre o PIX do empreiteiro). Ao confirmar, ele já cria a parcela em
+   Contas a Pagar com esses valores (editáveis depois) e atualiza o
+   histórico de avanços — sem precisar repetir a conta na mão.
 
 5. **Saldo de recurso disponível.** `(recurso próprio planejado + caixa
    liberado acumulado) − (empreiteiro pago + administração paga + cartão

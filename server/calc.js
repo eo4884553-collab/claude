@@ -114,10 +114,17 @@ function computeParcela(parcela) {
 }
 
 function recompute(state) {
-  const categorias = (state.categorias || []).map(computeCategoria);
-  const totalOrcadoCategorias = round2(sum(categorias, (c) => c.valorOrcado));
-  const totalMedido = round2(sum(categorias, (c) => c.valorMedido));
+  const categoriasBase = (state.categorias || []).map(computeCategoria);
+  const totalOrcadoCategorias = round2(sum(categoriasBase, (c) => c.valorOrcado));
+  const totalMedido = round2(sum(categoriasBase, (c) => c.valorMedido));
   const percObraGeral = totalOrcadoCategorias > 0 ? totalMedido / totalOrcadoCategorias : 0;
+
+  // Peso de cada categoria sobre o orçado total — é o "peso já estipulado" usado
+  // para ratear o avanço lançado na aba Fluxo de Caixa em valor financeiro.
+  const categorias = categoriasBase.map((c) => ({
+    ...c,
+    peso: totalOrcadoCategorias > 0 ? round2((c.valorOrcado / totalOrcadoCategorias) * 10000) / 10000 : 0,
+  }));
 
   const liberacaoPCI = computeLiberacaoPCI(state.liberacaoPCI || [], percObraGeral);
   const caixaLiberadaAcumulada = round2(sum(liberacaoPCI, (e) => e.valorLiberado));
@@ -257,4 +264,4 @@ function recompute(state) {
   };
 }
 
-module.exports = { recompute, round2, clamp };
+module.exports = { recompute, computeCategoria, round2, clamp };

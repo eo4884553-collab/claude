@@ -6,6 +6,7 @@
 let STATE = null;
 let ACTIVE_TAB = 'dashboard';
 const OPEN_CATEGORIES = new Set();
+let LANCAMENTO_MENSAL_OPEN = false;
 
 const fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtNum = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 });
@@ -485,11 +486,151 @@ function renderDetalhamento() {
 }
 
 /* ==========================================================================
-   TAB 4 — Fluxo de Caixa (mensal)
+   TAB 4 — Fluxo de Caixa: lançar avanço do mês (gera parcela em Contas a Pagar)
    ========================================================================== */
+function renderLancamentoMensalPanel() {
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+
+  const header = document.createElement('div');
+  header.className = 'panel-header';
+  header.innerHTML = `
+    <div>
+      <h2>Lançar avanço do mês</h2>
+      <div class="muted">Informe o novo % acumulado das categorias que avançaram — o peso de cada uma (já estipulado pelo valor orçado) rateia o valor gerado. O sistema desconta o cartão, sugere o PIX ao empreiteiro e à administração, e cria a parcela em Contas a Pagar.</div>
+    </div>
+  `;
+  const toggleBtn = document.createElement('button');
+  toggleBtn.className = 'btn primary';
+  toggleBtn.textContent = LANCAMENTO_MENSAL_OPEN ? 'Fechar' : 'Lançar avanço do mês';
+  toggleBtn.onclick = () => { LANCAMENTO_MENSAL_OPEN = !LANCAMENTO_MENSAL_OPEN; renderFluxo(); };
+  header.appendChild(toggleBtn);
+  panel.appendChild(header);
+
+  if (!LANCAMENTO_MENSAL_OPEN) return panel;
+
+  const body = document.createElement('div');
+  body.className = 'table-scroll';
+  body.innerHTML = `<table class="data">
+    <thead><tr>
+      <th>Nº</th><th class="wrap">Categoria</th><th class="num">Peso</th><th class="num">Valor orçado</th>
+      <th class="num">% atual</th><th class="num">Novo % acumulado</th><th class="num">Valor gerado</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>`;
+  const tbody = body.querySelector('tbody');
+
+  const rows = [];
+  for (const c of STATE.categorias) {
+    const tr = document.createElement('tr');
+    tr.appendChild(td(`${c.numero}`));
+    tr.appendChild(td(`<span class="wrap">${esc(c.nome)}</span>`));
+    tr.appendChild(td(`<span class="num">${pct(c.peso)}</span>`));
+    tr.appendChild(td(`<span class="num">${money(c.valorOrcado)}</span>`));
+    tr.appendChild(td(`<span class="num">${pct(c.percAvancoEfetivo)}</span>`));
+
+    const percAtual = Math.round(c.percAvancoEfetivo * 1000) / 10;
+    const novoPercInput = document.createElement('input');
+    novoPercInput.type = 'number'; novoPercInput.step = '0.1'; novoPercInput.min = '0';
+    novoPercInput.className = 'cell-input';
+    novoPercInput.value = percAtual;
+    tr.appendChild(td(novoPercInput));
+
+    const valorGeradoCell = document.createElement('td');
+    valorGeradoCell.className = 'num';
+    valorGeradoCell.textContent = money(0);
+    tr.appendChild(valorGeradoCell);
+
+    tbody.appendChild(tr);
+    rows.push({ categoria: c, percAtual, novoPercInput, valorGeradoCell });
+  }
+  panel.appendChild(body);
+
+  const summary = document.createElement('div');
+  summary.className = 'form-grid';
+  summary.style.marginTop = '12px';
+  summary.innerHTML = `
+    <label>Rótulo da parcela
+      <input id="lmLabel" type="text" value="Avanço ${new Date().toISOString().slice(0, 10)}" />
+    </label>
+    <label>Gasto no cartão neste mês (R$)
+      <input id="lmCartao" type="number" step="0.01" value="0" />
+    </label>
+    <label>Vencimento planejado
+      <input id="lmVenc" type="date" />
+    </label>
+    <label style="grid-column: 1 / -1">Observação
+      <textarea id="lmObs"></textarea>
+    </label>
+  `;
+  panel.appendChild(summary);
+
+  const totals = document.createElement('div');
+  totals.className = 'cards-grid';
+  totals.style.marginTop = '4px';
+  totals.innerHTML = `
+    <div class="card"><div class="card-label">Valor gerado no mês</div><div class="card-value" id="lmValorGerado">${money(0)}</div></div>
+    <div class="card"><div class="card-label">Sugestão empreiteiro (PIX)</div><div class="card-value" id="lmEmpreiteiro">${money(0)}</div></div>
+    <div class="card"><div class="card-label">Sugestão administração (PIX)</div><div class="card-value" id="lmAdm">${money(0)}</div></div>
+  `;
+  panel.appendChild(totals);
+
+  function recalcPreview() {
+    let valorGeradoMes = 0;
+    for (const r of rows) {
+      const novoPerc = Number(r.novoPercInput.value) || 0;
+      const deltaValor = r.categoria.valorOrcado * ((novoPerc - r.percAtual) / 100);
+      r.valorGeradoCell.textContent = money(deltaValor);
+      r.valorGeradoCell.style.color = deltaValor > 0.004 ? 'var(--green)' : deltaValor < -0.004 ? 'var(--red)' : '';
+      valorGeradoMes += deltaValor;
+    }
+    const gastoCartao = Number(panel.querySelector('#lmCartao').value) || 0;
+    const taxaAdm = STATE.parametros.taxaAdministracaoPercent || 0;
+    const empreiteiro = Math.max(0, valorGeradoMes - gastoCartao);
+    const adm = empreiteiro * taxaAdm;
+    panel.querySelector('#lmValorGerado').textContent = money(valorGeradoMes);
+    panel.querySelector('#lmEmpreiteiro').textContent = money(empreiteiro);
+    panel.querySelector('#lmAdm').textContent = money(adm);
+  }
+  rows.forEach((r) => r.novoPercInput.addEventListener('input', recalcPreview));
+  summary.querySelector('#lmCartao').addEventListener('input', recalcPreview);
+  recalcPreview();
+
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex; justify-content:flex-end; margin-top:12px;';
+  const submitBtn = document.createElement('button');
+  submitBtn.className = 'btn primary';
+  submitBtn.textContent = 'Gerar parcela em Contas a Pagar';
+  submitBtn.onclick = async () => {
+    const avancos = rows
+      .filter((r) => Math.abs(Number(r.novoPercInput.value) - r.percAtual) > 0.001)
+      .map((r) => ({ categoriaId: r.categoria.id, novoPerc: Number(r.novoPercInput.value) / 100 }));
+    if (!avancos.length) { toast('Altere o % de ao menos uma categoria.', true); return; }
+    const payload = {
+      avancos,
+      gastoCartao: Number(panel.querySelector('#lmCartao').value) || 0,
+      label: panel.querySelector('#lmLabel').value,
+      vencPlanejado: panel.querySelector('#lmVenc').value || null,
+      obs: panel.querySelector('#lmObs').value,
+    };
+    try {
+      await api('POST', '/api/lancamento-mensal', payload);
+      LANCAMENTO_MENSAL_OPEN = false;
+      renderAll();
+      toast('Parcela gerada em Contas a Pagar.');
+    } catch (e) { /* erro já mostrado pelo api() */ }
+  };
+  actions.appendChild(submitBtn);
+  panel.appendChild(actions);
+
+  return panel;
+}
+
 function renderFluxo() {
   const root = document.getElementById('tab-fluxo');
   root.innerHTML = '';
+
+  root.appendChild(renderLancamentoMensalPanel());
 
   const panel = document.createElement('div');
   panel.className = 'panel';
