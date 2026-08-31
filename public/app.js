@@ -20,6 +20,17 @@ function dateBR(iso) {
   if (!y || !m || !d) return s;
   return `${d}/${m}/${y}`;
 }
+
+const MONTH_NAMES_PT = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+// Sugere o rótulo "Mês/1º ou 2º Parcela" a partir de uma data (dias 1-15 = 1ª parcela,
+// 16 em diante = 2ª) — mesma convenção usada no cálculo do Fluxo de Caixa mensal.
+function mesParcelaLabel(dateStr) {
+  if (!dateStr) return '';
+  const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return '';
+  const quinzena = d <= 15 ? '1º' : '2º';
+  return `${MONTH_NAMES_PT[m - 1].toUpperCase()}/${quinzena} PARCELA`;
+}
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -157,14 +168,26 @@ function renderDashboard() {
       <div class="card-sub">Executado (medido): ${money(r.totalMedido)} · ${pct(r.percObraGeral)}</div>
     </div>
     <div class="card good">
-      <div class="card-label">Pago ao empreiteiro (realizado)</div>
-      <div class="card-value">${money(r.totalEmpreiteiroPago)}</div>
-      <div class="card-sub">${pct(r.percValorTotalPago)} do contrato · Saldo a pagar: ${money(r.saldoAPagarEmpreiteiro)}</div>
+      <div class="card-label">Avanço empreiteiro (% pago)</div>
+      <div class="card-value">${pct(r.percValorTotalPago)}</div>
+      <div class="progress-bar" style="margin-top:6px"><span style="width:${Math.min(100, r.percValorTotalPago * 100)}%"></span></div>
+      <div class="card-sub">Pago: ${money(r.totalEmpreiteiroPago)} · Saldo a pagar: ${money(r.saldoAPagarEmpreiteiro)}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Saldo empreiteiro (falta do contrato)</div>
+      <div class="card-value">${money(r.saldoContratoAPagarEmpreiteiro)}</div>
+      <div class="card-sub">Contrato total − já pago ao empreiteiro</div>
     </div>
     <div class="card accent">
-      <div class="card-label">Crédito Caixa (PCI) liberado</div>
-      <div class="card-value">${money(r.caixaLiberadaAcumulada)}</div>
-      <div class="card-sub">${pct(r.percCaixaLiberada)} de ${money(r.creditoCaixaTotalPCI)}</div>
+      <div class="card-label">Avanço caixa (% liberado)</div>
+      <div class="card-value">${pct(r.percCaixaLiberada)}</div>
+      <div class="progress-bar" style="margin-top:6px"><span style="width:${Math.min(100, r.percCaixaLiberada * 100)}%"></span></div>
+      <div class="card-sub">Liberado: ${money(r.caixaLiberadaAcumulada)} de ${money(r.creditoCaixaTotalPCI)}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Saldo caixa (a liberar)</div>
+      <div class="card-value">${money(r.saldoCaixaDisponivel)}</div>
+      <div class="card-sub">Crédito PCI total − já liberado</div>
     </div>
     <div class="card ${r.saldoRecursoDisponivel < 0 ? 'warn' : 'good'}">
       <div class="card-label">Saldo de recurso disponível</div>
@@ -196,9 +219,9 @@ function renderDashboard() {
     </div>
     <div class="table-scroll"><table class="data" id="tblParcelas">
       <thead><tr>
-        <th>Parcela</th><th class="num">Empreiteiro (PIX)</th><th class="num">ADM (PIX)</th>
+        <th>Parcela</th><th>Mês / Parcela</th><th class="num">Empreiteiro (PIX)</th><th class="num">ADM (PIX)</th>
         <th class="num">Cartão</th><th class="num">Total a transferir</th><th class="num">Evolução Caixa</th>
-        <th class="num">Custo total</th><th>Venc. planejado</th><th>Venc. real</th><th>Status</th><th class="wrap">Obs.</th><th></th>
+        <th class="num">Custo total</th><th>Data do custo</th><th>Venc. planejado</th><th>Venc. real</th><th>Status</th><th class="wrap">Obs.</th><th></th>
       </tr></thead>
       <tbody></tbody>
       <tfoot></tfoot>
@@ -210,12 +233,14 @@ function renderDashboard() {
   for (const p of STATE.parcelas) {
     const tr = document.createElement('tr');
     tr.appendChild(td(textInput({ value: p.label, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { label: v }) })));
+    tr.appendChild(td(`<span class="badge gray">${esc(p.mesReferenciaLabel || 'Sem data')}</span>`));
     tr.appendChild(td(numberInput({ value: p.totalEmpreiteiroPix, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { totalEmpreiteiroPix: v }) })));
     tr.appendChild(td(numberInput({ value: p.totalAdmPix, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { totalAdmPix: v }) })));
     tr.appendChild(td(numberInput({ value: p.gastoCartao, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { gastoCartao: v }) })));
     tr.appendChild(td(numberInput({ value: p.totalATransferir, manual: !!p.overrides?.totalATransferir, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { totalATransferir: v }) })));
     tr.appendChild(td(numberInput({ value: p.parcelaEvolucaoCaixa, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { parcelaEvolucaoCaixa: v }) })));
     tr.appendChild(td(numberInput({ value: p.custoTotal, manual: !!p.overrides?.custoTotal, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { custoTotal: v }) })));
+    tr.appendChild(td(dateInput({ value: p.dataGeracaoCusto, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { dataGeracaoCusto: v }) })));
     tr.appendChild(td(dateInput({ value: p.vencPlanejado, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { vencPlanejado: v }) })));
     tr.appendChild(td(dateInput({ value: p.vencimento, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { vencimento: v }) })));
     tr.appendChild(td(selectInput({ value: p.status, options: ['PLANEJADO', 'REALIZADO'], onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { status: v }) })));
@@ -233,13 +258,14 @@ function renderDashboard() {
   const sum = (f) => STATE.parcelas.reduce((a, p) => a + (Number(p[f]) || 0), 0);
   tfoot.innerHTML = `<tr>
     <td>TOTAL</td>
+    <td></td>
     <td class="num">${money(sum('totalEmpreiteiroPix'))}</td>
     <td class="num">${money(sum('totalAdmPix'))}</td>
     <td class="num">${money(sum('gastoCartao'))}</td>
     <td class="num">${money(sum('totalATransferir'))}</td>
     <td class="num">${money(sum('parcelaEvolucaoCaixa'))}</td>
     <td class="num">${money(sum('custoTotal'))}</td>
-    <td colspan="5"></td>
+    <td colspan="6"></td>
   </tr>`;
 
   document.getElementById('btnNovaParcela').onclick = () => openNovaParcelaModal();
@@ -266,7 +292,10 @@ function openNovaParcelaModal() {
       <label>Parcela evolução caixa
         <input name="parcelaEvolucaoCaixa" type="number" step="0.01" value="0" />
       </label>
-      <label>Vencimento planejado
+      <label>Data em que o custo foi gerado
+        <input name="dataGeracaoCusto" type="date" />
+      </label>
+      <label>Para qual mês/parcela ele vai ocorrer (vencimento planejado)
         <input name="vencPlanejado" type="date" />
       </label>
       <label>Vencimento real
@@ -556,7 +585,10 @@ function renderLancamentoMensalPanel() {
     <label>Gasto no cartão neste mês (R$)
       <input id="lmCartao" type="number" step="0.01" value="0" />
     </label>
-    <label>Vencimento planejado
+    <label>Data em que o custo foi gerado
+      <input id="lmDataCusto" type="date" value="${new Date().toISOString().slice(0, 10)}" />
+    </label>
+    <label>Para qual mês/parcela ele vai ocorrer (vencimento planejado)
       <input id="lmVenc" type="date" />
     </label>
     <label style="grid-column: 1 / -1">Observação
@@ -564,6 +596,10 @@ function renderLancamentoMensalPanel() {
     </label>
   `;
   panel.appendChild(summary);
+  summary.querySelector('#lmVenc').addEventListener('change', (e) => {
+    const suggestion = mesParcelaLabel(e.target.value);
+    if (suggestion) summary.querySelector('#lmLabel').value = suggestion;
+  });
 
   const totals = document.createElement('div');
   totals.className = 'cards-grid';
@@ -610,6 +646,8 @@ function renderLancamentoMensalPanel() {
       avancos,
       gastoCartao: Number(panel.querySelector('#lmCartao').value) || 0,
       label: panel.querySelector('#lmLabel').value,
+      dataGeracaoCusto: panel.querySelector('#lmDataCusto').value || null,
+      data: panel.querySelector('#lmDataCusto').value || null,
       vencPlanejado: panel.querySelector('#lmVenc').value || null,
       obs: panel.querySelector('#lmObs').value,
     };
@@ -630,6 +668,25 @@ function renderFluxo() {
   const root = document.getElementById('tab-fluxo');
   root.innerHTML = '';
 
+  const r = STATE.resumo;
+  const tracking = document.createElement('div');
+  tracking.className = 'cards-grid';
+  tracking.innerHTML = `
+    <div class="card good">
+      <div class="card-label">Avanço empreiteiro (% pago)</div>
+      <div class="card-value">${pct(r.percValorTotalPago)}</div>
+      <div class="progress-bar" style="margin-top:6px"><span style="width:${Math.min(100, r.percValorTotalPago * 100)}%"></span></div>
+      <div class="card-sub">Saldo empreiteiro (falta do contrato): ${money(r.saldoContratoAPagarEmpreiteiro)}</div>
+    </div>
+    <div class="card accent">
+      <div class="card-label">Avanço caixa (% liberado)</div>
+      <div class="card-value">${pct(r.percCaixaLiberada)}</div>
+      <div class="progress-bar" style="margin-top:6px"><span style="width:${Math.min(100, r.percCaixaLiberada * 100)}%"></span></div>
+      <div class="card-sub">Saldo caixa (a liberar): ${money(r.saldoCaixaDisponivel)}</div>
+    </div>
+  `;
+  root.appendChild(tracking);
+
   root.appendChild(renderLancamentoMensalPanel());
 
   const panel = document.createElement('div');
@@ -637,13 +694,13 @@ function renderFluxo() {
   panel.innerHTML = `
     <div class="panel-header">
       <div>
-        <h2>Fluxo de caixa mensal</h2>
-        <div class="muted">Agregado a partir de todas as parcelas lançadas em "Contas a Pagar" (planejadas e realizadas) mais ajustes manuais. A liberação de caixa (PCI) aparece no mês originalmente programado de cada etapa. Para o saldo já efetivamente realizado, veja os cards do Dashboard.</div>
+        <h2>Fluxo de caixa por mês e parcela</h2>
+        <div class="muted">Organizado como em Contas a Pagar — cada mês dividido em 1º e 2º Parcela, na ordem cronológica correta. Agregado a partir de todas as parcelas lançadas (planejadas e realizadas) mais ajustes manuais. A liberação de caixa (PCI) aparece no mês originalmente programado de cada etapa. Para o saldo já efetivamente realizado, veja os cards do Dashboard.</div>
       </div>
       <button class="btn primary" id="btnNovoAjuste">+ Ajuste manual</button>
     </div>
     <div class="table-scroll"><table class="data"><thead><tr>
-      <th>Mês</th><th class="num">Entrada recurso próprio</th><th class="num">Entrada caixa (PCI)</th><th class="num">Entrada ajuste</th><th class="num">Entrada total</th>
+      <th>Mês / Parcela</th><th class="num">Entrada recurso próprio</th><th class="num">Entrada caixa (PCI)</th><th class="num">Entrada ajuste</th><th class="num">Entrada total</th>
       <th class="num">Saída empreiteiro (PIX)</th><th class="num">Saída ADM (PIX)</th>
       <th class="num">Saída cartão</th><th class="num">Saída ajuste</th><th class="num">Saída total</th><th class="num">Saldo acumulado</th>
     </tr></thead><tbody></tbody></table></div>

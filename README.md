@@ -50,10 +50,10 @@ botão **"Restaurar dados originais da planilha"** na aba **Parâmetros**
 
 | Aba | Papel |
 |---|---|
-| **Contas a Pagar (Cliente)** | Dashboard que vai para o cliente: cards-resumo + tabela de parcelas quinzenais (PIX empreiteiro, ADM, cartão, evolução caixa, vencimentos, status). Editável linha a linha. |
+| **Contas a Pagar (Cliente)** | Dashboard que vai para o cliente: cards-resumo (contrato, % avanço empreiteiro pago, saldo empreiteiro, % avanço caixa liberado, saldo caixa, saldo de recurso) + tabela de parcelas quinzenais (PIX empreiteiro, ADM, cartão, evolução caixa, data do custo, vencimentos, status). Cada parcela mostra a etiqueta **Mês/Parcela** (ex.: "Agosto/2026 — 1ª Parcela"), calculada automaticamente a partir do vencimento. Editável linha a linha. |
 | **Lançar Avanços** | Onde você informa o % de avanço físico/financeiro de cada uma das 20 categorias da obra. É o principal ponto de entrada de dados do dia a dia. |
 | **Detalhamento FC** | Itens orçado x realizado de cada categoria (equivalente à aba "Detalhamento F.C" da planilha). Cada categoria soma seus itens automaticamente. |
-| **Fluxo de Caixa** | Visão mensal de entradas (recurso próprio + liberação PCI) e saídas (parcelas + ajustes manuais), com saldo acumulado. Tem o botão **"Lançar avanço do mês"**: informe o novo % de cada categoria que avançou e o app rateia pelo peso já estipulado (valor orçado), desconta o cartão informado e já cria a parcela correspondente em Contas a Pagar. |
+| **Fluxo de Caixa** | Cards de acompanhamento (% avanço empreiteiro pago, saldo empreiteiro, % avanço caixa liberado, saldo caixa) + tabela mensal já organizada por **Mês/1º e 2º Parcela** (mesma divisão quinzenal de Contas a Pagar, na ordem cronológica correta), com entradas (recurso próprio + liberação PCI) e saídas (parcelas + ajustes manuais), saldo acumulado. Tem o botão **"Lançar avanço do mês"**: informe o novo % de cada categoria que avançou, a data em que o custo foi gerado e para qual mês/parcela ele vai vencer — o app rateia pelo peso já estipulado (valor orçado), desconta o cartão informado e já cria a parcela correspondente em Contas a Pagar. |
 | **Liberação PCI** | Cronograma de liberação do financiamento CAIXA em 6 etapas (aquisição do lote + 5 etapas de 20%), com liberação automática proporcional ao % de obra. |
 | **Parâmetros** | Dados da obra e parâmetros financeiros globais (recurso próprio planejado, taxa de administração, contrato total do empreiteiro etc.). |
 
@@ -104,6 +104,32 @@ botão **"Restaurar dados originais da planilha"** na aba **Parâmetros**
 5. **Saldo de recurso disponível.** `(recurso próprio planejado + caixa
    liberado acumulado) − (empreiteiro pago + administração paga + cartão
    pago)`, todos calculados sobre as parcelas com status **REALIZADO**.
+
+6. **Saldo caixa, saldo empreiteiro e % de avanço (para acompanhar).**
+   - **Avanço empreiteiro (% pago)** = total já pago ao empreiteiro ÷
+     contrato total. **Saldo empreiteiro** = contrato total − já pago (quanto
+     falta pagar do contrato inteiro, não só do que já foi medido).
+   - **Avanço caixa (% liberado)** = crédito CAIXA (PCI) já liberado ÷ crédito
+     total do PCI. **Saldo caixa** = crédito total − já liberado (quanto o
+     banco ainda vai liberar).
+
+   Esses quatro números aparecem nos cards do Dashboard e também no topo da
+   aba Fluxo de Caixa, para acompanhar lado a lado o avanço do empreiteiro e
+   o avanço da liberação do banco.
+
+7. **Mês/Parcela e a data do custo x a data de vencimento.** Toda parcela
+   tem uma etiqueta automática **"Mês/1º ou 2º Parcela"** (dias 1–15 do
+   vencimento = 1º Parcela, 16 em diante = 2º Parcela — a mesma convenção da
+   planilha original), usada para organizar a aba Fluxo de Caixa exatamente
+   como a Contas a Pagar. Ao criar uma parcela (pelo formulário "Nova
+   parcela" ou por "Lançar avanço do mês"), há dois campos de data
+   propositalmente separados:
+   - **Data em que o custo foi gerado** — quando o gasto/avanço realmente
+     aconteceu;
+   - **Para qual mês/parcela ele vai ocorrer (vencimento planejado)** — o mês
+     de cobrança/pagamento, que pode ser diferente (ex.: um gasto de cartão
+     em agosto que só fecha e é pago em setembro). É essa segunda data que
+     define em qual "Mês/Parcela" a parcela é organizada em todas as abas.
 
 Todo campo calculado pode ser sobrescrito manualmente (ex.: "Total a
 transferir" e "Custo total" de uma parcela, ou o valor liberado de uma etapa

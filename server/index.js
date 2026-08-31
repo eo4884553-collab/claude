@@ -170,6 +170,7 @@ app.post('/api/parcelas', async (req, res) => {
       totalATransferir: Number(b.totalATransferir) || 0,
       parcelaEvolucaoCaixa: Number(b.parcelaEvolucaoCaixa) || 0,
       custoTotal: Number(b.custoTotal) || 0,
+      dataGeracaoCusto: b.dataGeracaoCusto || null,
       vencimento: b.vencimento || null,
       vencPlanejado: b.vencPlanejado || null,
       status: b.status || 'PLANEJADO',
@@ -184,7 +185,7 @@ app.put('/api/parcelas/:id', async (req, res) => {
   const state = await store.mutate((s) => {
     const p = s.parcelas.find((x) => x.id === req.params.id);
     if (!p) throw Object.assign(new Error('parcela não encontrada'), { status: 404 });
-    const fields = ['label', 'totalEmpreiteiroPix', 'totalAdmPix', 'gastoCartao', 'parcelaEvolucaoCaixa', 'vencimento', 'vencPlanejado', 'status', 'obs'];
+    const fields = ['label', 'totalEmpreiteiroPix', 'totalAdmPix', 'gastoCartao', 'parcelaEvolucaoCaixa', 'dataGeracaoCusto', 'vencimento', 'vencPlanejado', 'status', 'obs'];
     for (const f of fields) if (req.body[f] !== undefined) p[f] = req.body[f];
     // totalATransferir e custoTotal normalmente são calculados; se vierem no body,
     // tratamos como override manual explícito (ex.: banco liberou valor diferente).
@@ -265,6 +266,7 @@ app.post('/api/lancamento-mensal', async (req, res) => {
       totalATransferir: Math.round((totalEmpreiteiroPix + totalAdmPix) * 100) / 100,
       parcelaEvolucaoCaixa: 0,
       custoTotal: Math.round((totalEmpreiteiroPix + totalAdmPix + gastoCartao) * 100) / 100,
+      dataGeracaoCusto: b.dataGeracaoCusto || dataLancamento,
       vencimento: b.vencimento || null,
       vencPlanejado: b.vencPlanejado || null,
       status: b.status || 'PLANEJADO',
