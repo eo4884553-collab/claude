@@ -4,7 +4,8 @@
    Estado global + utilidades
    ========================================================================== */
 let STATE = null;
-let ACTIVE_TAB = 'dashboard';
+let ACTIVE_TAB = 'painel';
+let PAINEL_CATEGORIA_SELECIONADA = null;
 const OPEN_CATEGORIES = new Set();
 let LANCAMENTO_MENSAL_OPEN = false;
 
@@ -93,6 +94,7 @@ function renderAll() {
   if (!STATE) return;
   document.getElementById('obraNome').textContent = STATE.meta?.obra || 'Obra';
   document.getElementById('obraEndereco').textContent = STATE.meta?.endereco || '';
+  renderPainel();
   renderDashboard();
   renderAvancos();
   renderCronograma();
@@ -197,6 +199,361 @@ function renderVerbaFuturaBlock() {
   `;
   wrap.appendChild(cards);
   return wrap;
+}
+
+/* ==========================================================================
+   TAB — Dashboard Executivo (curva S + seleção "o que pagar")
+   ========================================================================== */
+
+// % previsto (mesma fórmula do server/calc.js) recalculado no cliente para
+// poder amostrar o cronograma em vários pontos no tempo (curva planejada).
+function calcPercPrevistoClient(cronogramaPrevisto, dataRef) {
+  if (!cronogramaPrevisto || !cronogramaPrevisto.inicio || !cronogramaPrevisto.termino) return 0;
+  const inicio = new Date(cronogramaPrevisto.inicio + 'T00:00:00');
+  const termino = new Date(cronogramaPrevisto.termino + 'T00:00:00');
+  const ref = new Date(dataRef + 'T00:00:00');
+  if (Number.isNaN(inicio.getTime()) || Number.isNaN(termino.getTime()) || Number.isNaN(ref.getTime())) return 0;
+  if (ref <= inicio) return 0;
+  if (ref >= termino) return 1;
+  const totalMs = termino.getTime() - inicio.getTime();
+  if (totalMs <= 0) return 1;
+  return Math.max(0, Math.min(1, (ref.getTime() - inicio.getTime()) / totalMs));
+}
+
+function addMonthsISO(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setMonth(d.getMonth() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+// Pontos de amostragem mensais entre início e término da obra (inclui o
+// término exato mesmo que não caia num mês redondo) — base do eixo X das
+// curvas S.
+function buildMonthlyCheckpoints(startStr, endStr) {
+  const out = [];
+  let cur = startStr;
+  let i = 0;
+  while (cur < endStr && i < 60) {
+    out.push(cur);
+    i += 1;
+    cur = addMonthsISO(startStr, i);
+  }
+  out.push(endStr);
+  return out;
+}
+
+// Curva S do empreiteiro: planejado = soma do valor orçado de cada categoria
+// ponderado pelo % previsto (cronograma) em cada checkpoint; executado =
+// soma acumulada (PIX + cartão) das parcelas REALIZADO, na data real de
+// ocorrência (mesmo valor que compõe "totalConsumidoContrato" no resumo).
+function buildCurvaEmpreiteiro(checkpoints) {
+  const categorias = STATE.categorias;
+  const totalValue = STATE.resumo.contratoTotalEmpreiteiro;
+
+  const planned = checkpoints.map((cp) => {
+    let total = 0;
+    for (const c of categorias) {
+      total += (Number(c.valorOrcado) || 0) * calcPercPrevistoClient(c.cronogramaPrevisto, cp);
+    }
+    return Math.round(total * 100) / 100;
+  });
+
+  const realizadas = STATE.parcelas
+    .filter((p) => p.status === 'REALIZADO')
+    .map((p) => ({ data: (p.vencimento || p.vencPlanejado || '').slice(0, 10), valor: (Number(p.totalEmpreiteiroPix) || 0) + (Number(p.gastoCartao) || 0) }))
+    .filter((p) => p.data)
+    .sort((a, b) => a.data.localeCompare(b.data));
+
+  let acc = 0;
+  const executedRaw = realizadas.map((p) => { acc += p.valor; return { data: p.data, valor: Math.round(acc * 100) / 100 }; });
+
+  const executed = checkpoints.map((cp) => {
+    let last = 0;
+    for (const e of executedRaw) { if (e.data <= cp) last = e.valor; else break; }
+    return last;
+  });
+
+  return { checkpoints, planned, executed, executedRaw, totalValue };
+}
+
+// Curva S da caixa (liberação PCI): planejado = soma acumulada do valor de
+// cada etapa PCI no mês programado (mesProgramado); executado = único ponto
+// confiável que temos é o valor já liberado hoje (não há registro histórico
+// datado de cada liberação do banco no modelo de dados) — mostrado como um
+// "degrau" a partir de hoje, sem inventar posições intermediárias.
+function buildCurvaCaixa(checkpoints, dataInicio) {
+  const totalValue = STATE.resumo.creditoCaixaTotalPCI;
+  const etapasComData = STATE.liberacaoPCI.map((e) => ({
+    data: addMonthsISO(dataInicio, Math.max(0, (Number(e.mesProgramado) || 1) - 1)),
+    valor: Number(e.valor) || 0,
+  }));
+
+  const planned = checkpoints.map((cp) => {
+    let total = 0;
+    for (const e of etapasComData) if (e.data <= cp) total += e.valor;
+    return Math.round(total * 100) / 100;
+  });
+
+  const hoje = STATE.resumo.dataReferenciaCronograma;
+  const liberadoHoje = STATE.resumo.caixaLiberadaAcumulada;
+  const executedRaw = [{ data: hoje, valor: liberadoHoje }];
+  const executed = checkpoints.map((cp) => (cp >= hoje ? liberadoHoje : 0));
+
+  return { checkpoints, planned, executed, executedRaw, totalValue };
+}
+
+// Componente genérico de curva S (SVG puro): linha "Planejado" (cinza) e
+// "Executado" (cor de destaque) sobre o mesmo eixo de tempo, com legenda,
+// crosshair + tooltip ao passar o mouse, marca de "hoje" e tabela de apoio.
+function renderSCurveCard({ title, subtitle, curve, hojeStr }) {
+  const card = document.createElement('div');
+  card.className = 'panel scurve-card';
+
+  const W = 720, H = 300, padL = 46, padR = 16, padT = 14, padB = 34;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const n = curve.checkpoints.length;
+  const xAt = (i) => padL + (n > 1 ? (i / (n - 1)) * plotW : 0);
+  const maxVal = Math.max(curve.totalValue, ...curve.planned, ...curve.executed) * 1.02 || 1;
+  const yAt = (v) => padT + plotH - (v / maxVal) * plotH;
+
+  const pathFrom = (arr) => arr.map((v, i) => `${i === 0 ? 'M' : 'L'}${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`).join(' ');
+  const plannedPath = pathFrom(curve.planned);
+  const executedPath = pathFrom(curve.executed);
+  const areaPath = `${executedPath} L${xAt(n - 1).toFixed(1)},${(padT + plotH).toFixed(1)} L${xAt(0).toFixed(1)},${(padT + plotH).toFixed(1)} Z`;
+
+  const gridFracs = [0, 0.25, 0.5, 0.75, 1];
+  const hojeIdx = curve.checkpoints.findIndex((cp) => cp >= hojeStr);
+  const hojeI = hojeIdx === -1 ? n - 1 : hojeIdx;
+
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('class', 'scurve-svg');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', `${title}: curva planejado x executado`);
+
+  let defs = `<defs><linearGradient id="scurveFill-${title.replace(/\W+/g, '')}" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="var(--primary)" stop-opacity="0.16" />
+    <stop offset="100%" stop-color="var(--primary)" stop-opacity="0.01" />
+  </linearGradient></defs>`;
+  const gradId = `scurveFill-${title.replace(/\W+/g, '')}`;
+
+  let grid = '';
+  for (const f of gridFracs) {
+    const y = padT + plotH - f * plotH;
+    grid += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" class="scurve-grid" />`;
+    grid += `<text x="${padL - 8}" y="${(y + 3).toFixed(1)}" class="scurve-axis-label" text-anchor="end">${Math.round(f * 100)}%</text>`;
+  }
+
+  // Rótulos do eixo X: um a cada ~2 meses para não poluir.
+  let xlabels = '';
+  const step = Math.max(1, Math.round(n / 8));
+  for (let i = 0; i < n; i += step) {
+    const [y, m] = curve.checkpoints[i].split('-');
+    xlabels += `<text x="${xAt(i).toFixed(1)}" y="${H - 10}" class="scurve-axis-label" text-anchor="middle">${MONTH_NAMES_PT[Number(m) - 1].slice(0, 3)}/${y.slice(2)}</text>`;
+  }
+
+  const hojeX = xAt(hojeI).toFixed(1);
+  const hojeLine = `<line x1="${hojeX}" y1="${padT}" x2="${hojeX}" y2="${padT + plotH}" class="scurve-hoje" />`;
+
+  const endPlanned = curve.planned[hojeI] ?? curve.planned[n - 1];
+  const endExecuted = curve.executed[hojeI] ?? curve.executed[n - 1];
+
+  svg.innerHTML = `
+    ${defs}
+    <g>${grid}</g>
+    <path d="${areaPath}" fill="url(#${gradId})" stroke="none"></path>
+    <path d="${plannedPath}" class="scurve-line planned"></path>
+    <path d="${executedPath}" class="scurve-line executed"></path>
+    ${hojeLine}
+    <circle cx="${hojeX}" cy="${yAt(endExecuted).toFixed(1)}" r="4.5" class="scurve-dot executed"></circle>
+    <circle cx="${hojeX}" cy="${yAt(endPlanned).toFixed(1)}" r="4.5" class="scurve-dot planned"></circle>
+    <g>${xlabels}</g>
+  `;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'scurve-wrap';
+  const tooltip = document.createElement('div');
+  tooltip.className = 'scurve-tooltip';
+  tooltip.hidden = true;
+  wrap.appendChild(svg);
+  wrap.appendChild(tooltip);
+
+  const hitArea = document.createElementNS(svgNS, 'rect');
+  hitArea.setAttribute('x', padL); hitArea.setAttribute('y', padT);
+  hitArea.setAttribute('width', plotW); hitArea.setAttribute('height', plotH);
+  hitArea.setAttribute('fill', 'transparent');
+  svg.appendChild(hitArea);
+  const crosshair = document.createElementNS(svgNS, 'line');
+  crosshair.setAttribute('class', 'scurve-crosshair');
+  crosshair.setAttribute('y1', padT); crosshair.setAttribute('y2', padT + plotH);
+  crosshair.setAttribute('hidden', 'true');
+  svg.appendChild(crosshair);
+
+  const onMove = (evt) => {
+    const rect = svg.getBoundingClientRect();
+    const xFrac = (evt.clientX - rect.left) / rect.width;
+    const xSvg = xFrac * W;
+    let idx = Math.round(((xSvg - padL) / plotW) * (n - 1));
+    idx = Math.max(0, Math.min(n - 1, idx));
+    crosshair.removeAttribute('hidden');
+    crosshair.setAttribute('x1', xAt(idx)); crosshair.setAttribute('x2', xAt(idx));
+    const [y, m, d] = curve.checkpoints[idx].split('-');
+    tooltip.hidden = false;
+    tooltip.style.left = `${(xAt(idx) / W) * 100}%`;
+    tooltip.innerHTML = `
+      <div class="scurve-tooltip-date">${d}/${m}/${y}</div>
+      <div class="scurve-tooltip-row"><span class="scurve-key executed"></span>Executado <strong>${money(curve.executed[idx])}</strong> (${pct(curve.totalValue > 0 ? curve.executed[idx] / curve.totalValue : 0)})</div>
+      <div class="scurve-tooltip-row"><span class="scurve-key planned"></span>Planejado <strong>${money(curve.planned[idx])}</strong> (${pct(curve.totalValue > 0 ? curve.planned[idx] / curve.totalValue : 0)})</div>
+    `;
+  };
+  const onLeave = () => { crosshair.setAttribute('hidden', 'true'); tooltip.hidden = true; };
+  svg.addEventListener('pointermove', onMove);
+  svg.addEventListener('pointerleave', onLeave);
+
+  const gapVal = endExecuted - endPlanned;
+  const gapPct = curve.totalValue > 0 ? gapVal / curve.totalValue : 0;
+
+  card.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <h2>${esc(title)}</h2>
+        <div class="muted">${esc(subtitle)}</div>
+      </div>
+      <div class="scurve-legend">
+        <span><span class="scurve-key executed"></span>Executado</span>
+        <span><span class="scurve-key planned"></span>Planejado</span>
+        <span class="scurve-key-sep"></span>
+        <span>Hoje: <strong>${pct(curve.totalValue > 0 ? endExecuted / curve.totalValue : 0)}</strong> executado vs. <strong>${pct(curve.totalValue > 0 ? endPlanned / curve.totalValue : 0)}</strong> planejado</span>
+      </div>
+    </div>
+  `;
+  card.appendChild(wrap);
+
+  const gapNote = document.createElement('div');
+  gapNote.className = `scurve-gap-note ${gapVal >= 0 ? 'good' : 'warn'}`;
+  gapNote.textContent = gapVal >= 0
+    ? `Adiantado/em dia: ${money(gapVal)} acima do planejado até hoje (${pct(Math.abs(gapPct))}).`
+    : `Atrasado: falta ${money(Math.abs(gapVal))} para alcançar o planejado até hoje (${pct(Math.abs(gapPct))}).`;
+  card.appendChild(gapNote);
+
+  const details = document.createElement('details');
+  details.className = 'scurve-table-details';
+  details.innerHTML = `<summary>Ver tabela de apoio (valores por mês)</summary>`;
+  const tblWrap = document.createElement('div');
+  tblWrap.className = 'table-scroll';
+  tblWrap.innerHTML = `<table class="data"><thead><tr>
+    <th>Mês</th><th class="num">Planejado</th><th class="num">Executado</th><th class="num">Diferença</th>
+  </tr></thead><tbody>${curve.checkpoints.map((cp, i) => {
+    const diff = curve.executed[i] - curve.planned[i];
+    return `<tr><td>${dateBR(cp)}</td><td class="num">${money(curve.planned[i])}</td><td class="num">${money(curve.executed[i])}</td><td class="num">${diff >= 0 ? '+' : ''}${money(diff)}</td></tr>`;
+  }).join('')}</tbody></table>`;
+  details.appendChild(tblWrap);
+  card.appendChild(details);
+
+  return card;
+}
+
+function renderPainel() {
+  const root = document.getElementById('tab-painel');
+  root.innerHTML = '';
+  const r = STATE.resumo;
+
+  const kpis = document.createElement('div');
+  kpis.className = 'cards-grid';
+  kpis.innerHTML = `
+    <div class="card accent">
+      <div class="card-label">Contrato total empreiteiro</div>
+      <div class="card-value">${money(r.contratoTotalEmpreiteiro)}</div>
+      <div class="card-sub">Executado: ${money(r.totalConsumidoContrato)} · ${pct(r.percValorTotalPago)}</div>
+    </div>
+    <div class="card accent">
+      <div class="card-label">Crédito CAIXA (PCI) total</div>
+      <div class="card-value">${money(r.creditoCaixaTotalPCI)}</div>
+      <div class="card-sub">Liberado: ${money(r.caixaLiberadaAcumulada)} · ${pct(r.percCaixaLiberada)}</div>
+    </div>
+    <div class="card ${r.percObraGeral + 0.0001 >= r.percPrevistoGeral ? 'good' : 'warn'}">
+      <div class="card-label">% Obra: real x previsto</div>
+      <div class="card-value">${pct(r.percObraGeral)} <span class="muted" style="font-size:13px">/ ${pct(r.percPrevistoGeral)}</span></div>
+      <div class="card-sub">${r.percObraGeral + 0.0001 >= r.percPrevistoGeral ? 'No prazo ou adiantada' : 'Atrasada vs. cronograma'}</div>
+    </div>
+    <div class="card ${r.saldoParaFuturos < 0 ? 'warn' : 'good'}">
+      <div class="card-label">Margem p/ itens futuros</div>
+      <div class="card-value">${money(r.saldoParaFuturos)}</div>
+      <div class="card-sub">Verba disponível − planejado futuro</div>
+    </div>
+  `;
+  root.appendChild(kpis);
+
+  const hoje = r.dataReferenciaCronograma;
+  const checkpointsEmp = buildMonthlyCheckpoints(STATE.meta.dataInicio, STATE.meta.previsaoTermino);
+  const curvaEmp = buildCurvaEmpreiteiro(checkpointsEmp);
+  const curvaCaixa = buildCurvaCaixa(checkpointsEmp, STATE.meta.dataInicio);
+
+  const chartsGrid = document.createElement('div');
+  chartsGrid.className = 'scurve-grid';
+  chartsGrid.appendChild(renderSCurveCard({
+    title: 'Curva S — Empreiteiro',
+    subtitle: 'Valor pago ao empreiteiro (PIX + cartão) acumulado — planejado (cronograma) x executado (parcelas realizadas)',
+    curve: curvaEmp, hojeStr: hoje,
+  }));
+  chartsGrid.appendChild(renderSCurveCard({
+    title: 'Curva S — Caixa (liberação PCI)',
+    subtitle: 'Crédito CAIXA liberado acumulado — planejado (etapas PCI) x executado (posição atual; o banco não fornece histórico de datas de cada liberação)',
+    curve: curvaCaixa, hojeStr: hoje,
+  }));
+  root.appendChild(chartsGrid);
+
+  // Seleção de categoria: mostra claramente o que falta pagar para o item clicado.
+  const selPanel = document.createElement('div');
+  selPanel.className = 'panel';
+  selPanel.innerHTML = `<div class="panel-header"><div><h2>O que pagar — selecione uma categoria</h2>
+    <div class="muted">Clique numa linha para ver claramente o valor orçado, já medido/pago e o saldo restante do contrato dessa categoria.</div></div></div>`;
+  const selBody = document.createElement('div');
+  selBody.className = 'painel-select-body';
+
+  const listWrap = document.createElement('div');
+  listWrap.className = 'table-scroll painel-select-list';
+  const table = document.createElement('table');
+  table.className = 'data';
+  table.innerHTML = `<thead><tr><th>Nº</th><th class="wrap">Categoria</th><th class="num">% avanço</th><th class="num">Saldo do contrato</th></tr></thead><tbody></tbody>`;
+  const tbody = table.querySelector('tbody');
+  for (const c of STATE.categorias) {
+    const tr = document.createElement('tr');
+    tr.className = 'clickable-row';
+    tr.dataset.catId = c.id;
+    tr.innerHTML = `<td>${c.numero}</td><td class="wrap">${esc(c.nome)}</td><td class="num">${pct(c.percAvancoEfetivo)}</td><td class="num">${money(c.saldoContratoCategoria)}</td>`;
+    tr.onclick = () => { PAINEL_CATEGORIA_SELECIONADA = c.id; renderPainel(); };
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  listWrap.appendChild(table);
+  selBody.appendChild(listWrap);
+
+  const detailWrap = document.createElement('div');
+  detailWrap.className = 'painel-select-detail';
+  const selecionada = STATE.categorias.find((c) => c.id === PAINEL_CATEGORIA_SELECIONADA) || STATE.categorias[0];
+  if (selecionada) {
+    const info = STATUS_CRONOGRAMA_INFO[selecionada.statusCronograma] || STATUS_CRONOGRAMA_INFO['sem-dados'];
+    detailWrap.innerHTML = `
+      <h3>${esc(selecionada.nome)}</h3>
+      <span class="badge ${info.badge}">${info.label}</span>
+      <div class="painel-detail-grid">
+        <div><div class="muted">Valor orçado</div><strong>${money(selecionada.valorOrcado)}</strong></div>
+        <div><div class="muted">% avanço efetivo</div><strong>${pct(selecionada.percAvancoEfetivo)}</strong></div>
+        <div><div class="muted">Valor medido</div><strong>${money(selecionada.valorMedido)}</strong></div>
+        <div><div class="muted">Saldo do contrato (falta pagar)</div><strong>${money(selecionada.saldoContratoCategoria)}</strong></div>
+        <div><div class="muted">% previsto (cronograma)</div><strong>${pct(selecionada.percPrevisto)}</strong></div>
+        <div><div class="muted">Janela prevista</div><strong>${selecionada.cronogramaPrevisto ? `${dateBR(selecionada.cronogramaPrevisto.inicio)} – ${dateBR(selecionada.cronogramaPrevisto.termino)}` : '—'}</strong></div>
+      </div>
+      <div class="muted" style="margin-top:8px">${esc(selecionada.nome)} representa ${pct(selecionada.peso)} do contrato total. O saldo do contrato é o que ainda falta pagar ao empreiteiro por essa categoria especificamente (valor orçado − valor já medido).</div>
+    `;
+  } else {
+    detailWrap.innerHTML = '<div class="muted">Selecione uma categoria na lista.</div>';
+  }
+  selBody.appendChild(detailWrap);
+  selPanel.appendChild(selBody);
+  root.appendChild(selPanel);
 }
 
 /* ==========================================================================

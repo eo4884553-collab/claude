@@ -50,6 +50,7 @@ botão **"Restaurar dados originais da planilha"** na aba **Parâmetros**
 
 | Aba | Papel |
 |---|---|
+| **Dashboard Executivo** | Visão gerencial da obra (primeira aba, aberta por padrão): cards com os KPIs mais importantes (contrato total x executado, crédito CAIXA x liberado, % obra real x previsto, margem para itens futuros), duas **curvas S** (planejado x executado) — uma para o valor pago ao empreiteiro (PIX + cartão) e outra para a liberação de caixa (PCI) — com legenda, crosshair/tooltip ao passar o mouse, marca de "hoje" e tabela de apoio com os valores mês a mês. Abaixo, uma lista de categorias: clique numa linha para ver claramente o valor orçado, medido e o **saldo do contrato** daquela categoria específica (o que falta pagar por ela). |
 | **Contas a Pagar (Cliente)** | Dashboard que vai para o cliente: cards-resumo (contrato, % avanço empreiteiro pago, saldo empreiteiro, % avanço caixa liberado, saldo caixa, saldo de recurso) + tabela de parcelas quinzenais (PIX empreiteiro, ADM, cartão, evolução caixa, data do custo, vencimentos, status). Cada parcela mostra a etiqueta **Mês/Parcela** (ex.: "Agosto/2026 — 1ª Parcela"), calculada automaticamente a partir do vencimento. Editável linha a linha. |
 | **Lançar Avanços** | Onde você informa o % de avanço físico/financeiro de cada uma das 20 categorias da obra. É o principal ponto de entrada de dados do dia a dia. |
 | **Cronograma de Obra** | Cronograma físico previsto x realizado (equivalente à aba "Cronograma de obra" da planilha): datas de início/término previstas por categoria (extraídas da planilha original), % previsto (calculado a partir das datas) comparado ao % realizado, status (No prazo / Atrasado / Concluído) e uma linha do tempo (mini-gantt) por categoria. O % de avanço é editável direto aqui — é a mesma aba/campo de *Lançar Avanços*, só que com o cronograma ao lado para decidir quando cobrar do empreiteiro conforme a etapa PCI correspondente. |
@@ -192,6 +193,28 @@ botão **"Restaurar dados originais da planilha"** na aba **Parâmetros**
     Previsto (cronograma)** vs. **% Executado (real)**) e ligado à etapa PCI
     corrente — a mesma lógica de liberação de caixa do item 3, só que
     mostrando em qual etapa PCI o avanço físico atual se encontra.
+
+11. **Curva S (Dashboard Executivo).** Duas curvas comparam planejado x
+    executado ao longo do tempo, cada uma normalizada como % de um total (o
+    eixo nunca mistura duas escalas diferentes):
+    - **Curva S — Empreiteiro.** Planejado = soma do valor orçado de cada
+      categoria ponderado pelo seu % previsto (item 10) em ~16 pontos mensais
+      entre o início e o término previsto da obra. Executado = soma
+      acumulada de (PIX + cartão) das parcelas com status REALIZADO, na data
+      real de vencimento — os mesmos valores que compõem
+      `totalConsumidoContrato` (item 6), só que abertos mês a mês em vez de
+      um único total.
+    - **Curva S — Caixa.** Planejado = soma acumulada do valor de cada etapa
+      PCI no seu mês programado (`mesProgramado` da aba Liberação PCI).
+      Executado = a posição atual (`caixaLiberadaAcumulada`, item 3) marcada
+      como um degrau a partir de hoje — o modelo de dados não guarda a data
+      exata de cada liberação do banco, então o app mostra só o que
+      realmente sabe (a posição de hoje), sem inventar um histórico.
+
+    Ambas têm legenda, um crosshair com tooltip ao passar o mouse (mostra
+    planejado e executado, em R$ e %, na data apontada), uma marca vertical
+    de "hoje" e uma tabela de apoio (`<details>` recolhível) com o valor
+    mês a mês — para nenhum número ficar disponível só visualmente.
 
 Todo campo calculado pode ser sobrescrito manualmente (ex.: "Total a
 transferir" e "Custo total" de uma parcela, ou o valor liberado de uma etapa

@@ -214,6 +214,55 @@ select.cell-input { color: var(--auto); }
 .gantt-legend { display: flex; gap: 16px; align-items: center; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
 .gantt-legend .dot { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:-1px; }
 
+/* ---------- Dashboard Executivo: curva S ---------- */
+.scurve-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 18px; }
+.scurve-card { min-width: 0; }
+.scurve-legend { display: flex; gap: 14px; align-items: center; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
+.scurve-key { display: inline-block; width: 16px; height: 2px; margin-right: 6px; vertical-align: 2px; border-radius: 2px; }
+.scurve-key.executed { background: var(--primary); height: 3px; }
+.scurve-key.planned { background: #9aa5b1; height: 3px; }
+.scurve-key-sep { width: 1px; height: 14px; background: var(--border); margin: 0 2px; }
+
+.scurve-wrap { position: relative; margin-top: 8px; }
+.scurve-svg { width: 100%; height: auto; display: block; touch-action: none; }
+.scurve-grid-line, .scurve-grid { stroke: #eef0f4; stroke-width: 1; }
+.scurve-axis-label { font-size: 9.5px; fill: var(--muted); font-family: inherit; }
+.scurve-line { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.scurve-line.executed { stroke: var(--primary); }
+.scurve-line.planned { stroke: #9aa5b1; }
+.scurve-dot { stroke: #fff; stroke-width: 2; }
+.scurve-dot.executed { fill: var(--primary); }
+.scurve-dot.planned { fill: #9aa5b1; }
+.scurve-hoje { stroke: var(--amber); stroke-width: 1.5; }
+.scurve-crosshair { stroke: var(--ink, #1b2430); stroke-opacity: 0.25; stroke-width: 1; }
+
+.scurve-tooltip {
+  position: absolute; top: 8px; transform: translateX(-50%);
+  background: #1b2430; color: #fff; border-radius: 8px; padding: 8px 10px;
+  font-size: 12px; white-space: nowrap; pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,.22);
+  z-index: 5;
+}
+.scurve-tooltip-date { font-weight: 700; margin-bottom: 4px; }
+.scurve-tooltip-row { display: flex; align-items: center; gap: 6px; }
+.scurve-tooltip .scurve-key { width: 10px; }
+
+.scurve-gap-note { margin-top: 10px; padding: 8px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 600; }
+.scurve-gap-note.good { background: var(--green-soft); color: var(--green); }
+.scurve-gap-note.warn { background: var(--amber-soft); color: var(--amber); }
+
+.scurve-table-details { margin-top: 10px; font-size: 12.5px; }
+.scurve-table-details summary { cursor: pointer; color: var(--primary); font-weight: 600; }
+.scurve-table-details .table-scroll { margin-top: 8px; max-height: 260px; overflow-y: auto; }
+
+.painel-select-body { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr); gap: 18px; margin-top: 10px; }
+.painel-select-list { max-height: 420px; overflow-y: auto; }
+.clickable-row { cursor: pointer; }
+.clickable-row:hover { background: var(--primary-soft); }
+.painel-select-detail { background: var(--primary-soft); border-radius: 10px; padding: 16px; }
+.painel-select-detail h3 { margin: 0 0 6px 0; }
+.painel-detail-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 12px; font-size: 13px; }
+@media (max-width: 800px) { .painel-select-body { grid-template-columns: 1fr; } }
+
 button.btn {
   border: 1px solid var(--border);
   background: #fff;
