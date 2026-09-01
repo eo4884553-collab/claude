@@ -9,6 +9,7 @@
 
 const categoriasExtraidas = require('./categorias_extracted.json');
 const parcelasExtraidas = require('./parcelas_extracted.json');
+const { recomputeCategoriaPercManual } = require('./calc');
 
 function slug(str) {
   return String(str)
@@ -152,7 +153,12 @@ function buildCategorias(contratoTotalEmpreiteiro) {
       // % de avanço físico/financeiro informado manualmente na aba "Lançar Avanços".
       // Quando null, o sistema usa o percentual derivado da soma dos itens (Detalhamento FC).
       percAvancoManual: numero in AVANCO_FISICO_INICIAL ? AVANCO_FISICO_INICIAL[numero] : 0,
-      dataUltimoAvanco: '2026-06-10',
+      // Data da quinzena do último avanço REALIZADO extraído da planilha (ver
+      // AVANCOS_QUINZENA_POR_CATEGORIA abaixo); categorias sem avanço físico ainda
+      // (percAvancoManual = 0) mantêm a data de início da obra como placeholder.
+      dataUltimoAvanco: (AVANCOS_QUINZENA_POR_CATEGORIA[numero] && AVANCOS_QUINZENA_POR_CATEGORIA[numero].length)
+        ? AVANCOS_QUINZENA_POR_CATEGORIA[numero][AVANCOS_QUINZENA_POR_CATEGORIA[numero].length - 1].data
+        : '2026-06-10',
       observacao: '',
       // Categoria 1 (Serviços Preliminares) é paga direto pelo proprietário a
       // terceiros (topografia, projetos, prefeitura, cartório) — não passa pelo
@@ -169,27 +175,77 @@ function buildCategorias(contratoTotalEmpreiteiro) {
   });
 }
 
-// Registra no histórico de avanços a medição física inicial (AVANCO_FISICO_INICIAL,
-// extraída da planilha) como um avanço REALIZADO datado em dataUltimoAvanco de
-// cada categoria — sem isso, o filtro por quinzena da aba "Lançar Avanços" não
-// tinha nenhum registro para essas medições já feitas antes de a aba existir, e
-// mostrava "nenhum avanço" mesmo para categorias já medidas e com % de avanço
-// efetivo maior que zero. Só categorias com percAvancoManual > 0 entram aqui —
-// 0% não é uma medição, é a ausência de uma (a categoria ainda não começou).
+// Distribuição real do avanço físico por quinzena, extraída da aba "Fluxo de Caixa "
+// da planilha original: linha 6 ("DATAS PG") cruzada com a linha "CAIXA" de cada uma
+// das 7 categorias que já tinham avanço físico registrado antes de a aba "Lançar
+// Avanços" existir no app (as mesmas de AVANCO_FISICO_INICIAL). Cada valor é o
+// crédito CAIXA liberado naquela quinzena para a categoria; só entram aqui as
+// quinzenas até 2026-09-01 (hoje) — a planilha lista o cronograma de liberação
+// completo, incluindo quinzenas futuras ainda PLANEJADAS, não só o já realizado.
+// A soma acumulada dividida pela verba caixa da categoria bate percentualmente com
+// AVANCO_FISICO_INICIAL para 6 das 7 categorias (a 7ª, Outros Serviços, é 83% pela
+// planilha — mais preciso que o 80% antes hardcoded — e passa a valer via
+// recomputeCategoriaPercManual logo abaixo).
+const AVANCOS_QUINZENA_POR_CATEGORIA = {
+  1: [ // Serviços Preliminares e Gerais
+    { data: '2026-06-25', valor: 32252.4 },
+  ],
+  2: [ // Infraestrutura
+    { data: '2026-06-25', valor: 64884.24 },
+    { data: '2026-07-25', valor: 11450.16 },
+  ],
+  3: [ // Supra estrutura
+    { data: '2026-07-25', valor: 76825.44 },
+    { data: '2026-08-25', valor: 19317.97 },
+  ],
+  4: [ // Paredes e Painéis
+    { data: '2026-07-25', valor: 38167.2 },
+  ],
+  8: [ // Impermeabilizações
+    { data: '2026-07-25', valor: 6138 },
+    { data: '2026-08-25', valor: 6138 },
+  ],
+  13: [ // Pisos
+    { data: '2026-08-25', valor: 10367.63 },
+  ],
+  20: [ // Outros Serviços
+    { data: '2026-06-25', valor: 55762.056 },
+  ],
+};
+
+function round4(n) {
+  return Math.round((Number(n) || 0) * 10000) / 10000;
+}
+
+// Registra no histórico de avanços uma entrada REALIZADA por quinzena (não mais um
+// único lançamento lumped em dataUltimoAvanco) — ver AVANCOS_QUINZENA_POR_CATEGORIA
+// acima. Sem isso, o filtro por quinzena da aba "Lançar Avanços" não tinha nenhum
+// registro para essas medições já feitas antes de a aba existir, e mostrava "nenhum
+// avanço" mesmo para categorias já medidas e com % de avanço efetivo maior que zero.
 function buildHistoricoAvancosInicial(categorias) {
-  return categorias
-    .filter((c) => Number(c.percAvancoManual) > 0)
-    .map((c) => ({
-      id: `avanco-inicial-${c.numero}`,
-      categoriaId: c.id,
-      categoriaNome: c.nome,
-      percAvancoAnterior: null,
-      percAvancoNovo: c.percAvancoManual,
-      data: c.dataUltimoAvanco,
-      status: 'REALIZADO',
-      obs: 'Medição física inicial (planilha)',
-      timestamp: `${c.dataUltimoAvanco}T00:00:00.000Z`,
-    }));
+  const historico = [];
+  categorias.forEach((c) => {
+    const quinzenas = AVANCOS_QUINZENA_POR_CATEGORIA[c.numero];
+    if (!quinzenas || !quinzenas.length) return;
+    let acumulado = 0;
+    quinzenas.forEach((q, idx) => {
+      const percAnterior = c.verbaCaixa ? acumulado / c.verbaCaixa : 0;
+      acumulado += q.valor;
+      const percNovo = c.verbaCaixa ? round4(acumulado / c.verbaCaixa) : 0;
+      historico.push({
+        id: `avanco-inicial-${c.numero}-${idx + 1}`,
+        categoriaId: c.id,
+        categoriaNome: c.nome,
+        percAvancoAnterior: idx === 0 ? null : round4(percAnterior),
+        percAvancoNovo: percNovo,
+        data: q.data,
+        status: 'REALIZADO',
+        obs: 'Medição física (liberação CAIXA na planilha)',
+        timestamp: `${q.data}T00:00:00.000Z`,
+      });
+    });
+  });
+  return historico;
 }
 
 function buildParcelas() {
@@ -300,6 +356,11 @@ function buildSeed() {
     saldoRecursoDisponivelManual: null,
   };
   const categorias = buildCategorias(parametros.contratoTotalEmpreiteiro);
+  const historicoAvancos = buildHistoricoAvancosInicial(categorias);
+  // percAvancoManual de cada categoria passa a refletir o último avanço REALIZADO do
+  // histórico recém-construído (fonte: planilha), em vez do valor estático
+  // AVANCO_FISICO_INICIAL usado só para o cálculo intermediário acima.
+  categorias.forEach((c) => recomputeCategoriaPercManual(c, historicoAvancos));
   return {
     meta: {
       obra: 'Casa Newton — Gran Park Toscana',
