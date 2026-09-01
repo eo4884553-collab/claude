@@ -167,12 +167,15 @@ app.put('/api/categorias/:id', async (req, res) => {
   const state = await store.mutate((s) => {
     const cat = s.categorias.find((c) => c.id === req.params.id);
     if (!cat) throw Object.assign(new Error('categoria não encontrada'), { status: 404 });
-    const { nome, valorOrcado, percAvancoManual, observacao, verbaCaixa, liberadoCaixaManual } = req.body || {};
+    const { nome, valorOrcado, percAvancoManual, percItensManual, observacao, verbaCaixa, liberadoCaixaManual } = req.body || {};
     if (nome !== undefined) cat.nome = nome;
     if (valorOrcado !== undefined) cat.valorOrcado = Number(valorOrcado);
     if (observacao !== undefined) cat.observacao = observacao;
     if (verbaCaixa !== undefined) cat.verbaCaixa = Number(verbaCaixa);
     if (liberadoCaixaManual !== undefined) cat.liberadoCaixaManual = liberadoCaixaManual === null ? null : Number(liberadoCaixaManual);
+    // "% itens (FC)" — normalmente a soma dos itens do Detalhamento FC sobre o
+    // orçado, mas pode ser sobrescrito manualmente (ver computeCategoria).
+    if (percItensManual !== undefined) cat.percItensManual = percItensManual === null ? null : Number(percItensManual);
     if (percAvancoManual !== undefined) {
       cat.percAvancoManual = percAvancoManual === null ? null : Number(percAvancoManual);
       cat.dataUltimoAvanco = new Date().toISOString().slice(0, 10);

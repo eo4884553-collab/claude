@@ -115,7 +115,14 @@ function computeCategoria(cat, dataRef) {
   // logo abaixo — não para cada item isoladamente.
   const itens = itensComPlug;
   const valorRealizadoItens = round2(sum(itens, (it) => it.valorRealizado));
-  const percAvancoItens = valorOrcado > 0 ? valorRealizadoItens / valorOrcado : 0;
+  const percAvancoItensCalculado = valorOrcado > 0 ? valorRealizadoItens / valorOrcado : 0;
+  // "% itens (FC)" normalmente é só a soma dos itens do Detalhamento FC sobre
+  // o orçado — mas pode ser sobrescrito manualmente (percItensManual), igual
+  // aos outros campos "automático com override" do app. Só afeta o % avanço
+  // efetivo quando NÃO há um percAvancoManual próprio (que sempre tem
+  // prioridade) — nesse caso funciona como o novo "automático" de baixo.
+  const temOverrideItens = cat.percItensManual !== null && cat.percItensManual !== undefined;
+  const percAvancoItens = temOverrideItens ? Number(cat.percItensManual) : percAvancoItensCalculado;
 
   const temOverride = cat.percAvancoManual !== null && cat.percAvancoManual !== undefined;
   // Teto de medição: nunca mais que 100% da categoria como um todo.
@@ -146,6 +153,7 @@ function computeCategoria(cat, dataRef) {
     itens,
     valorRealizadoItens,
     percAvancoItens: round2(percAvancoItens * 10000) / 10000,
+    origemPercItens: temOverrideItens ? 'manual' : 'auto',
     percAvancoEfetivo: round2(percAvancoEfetivo * 10000) / 10000,
     origemPercAvanco: temOverride ? 'manual' : 'itens',
     valorMedido,

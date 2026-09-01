@@ -468,11 +468,15 @@ function moneyInput({ value, onSave, manual = false, wide = false }) {
 // input percentual: mostra "42,5%" em repouso; ao focar, edita em número
 // simples (0-100), reformatando ao sair. Valor salvo/recebido é sempre
 // fração (0-1), igual aos demais campos de percentual do app.
-function percentInput({ value, onSave, wide = false }) {
+// `max100 = false` permite valores acima de 100% — usado em campos que são
+// uma razão de custo (ex.: % itens do Detalhamento FC sobre o orçado), onde
+// passar de 100% é um sinal real de estouro de orçamento, não um erro de
+// digitação (ver task #22: nunca capar per-item o valor realizado).
+function percentInput({ value, onSave, wide = false, manual = false, max100 = true }) {
   const input = document.createElement('input');
   input.type = 'text';
   input.inputMode = 'decimal';
-  input.className = `cell-input${wide ? ' wide' : ''}`;
+  input.className = `cell-input${wide ? ' wide' : ''}${manual ? ' manual' : ''}`;
   input.value = pct(value);
   input.addEventListener('focus', () => {
     input.value = String(Math.round((Number(value) || 0) * 1000) / 10).replace('.', ',');
@@ -481,7 +485,8 @@ function percentInput({ value, onSave, wide = false }) {
   const commit = () => {
     const raw = input.value.trim().replace(',', '.');
     const n = Number(raw);
-    const v = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) / 100 : 0;
+    const clamped = max100 ? Math.min(100, Math.max(0, n)) : Math.max(0, n);
+    const v = Number.isFinite(n) ? clamped / 100 : 0;
     input.value = pct(v);
     if (v !== value) onSave(v);
   };
@@ -1215,7 +1220,21 @@ function renderAvancos() {
     tr.appendChild(td(`${c.numero}`));
     tr.appendChild(td(`<span class="wrap">${esc(c.nome)}</span>`));
     tr.appendChild(td(`<span class="num">${money(c.valorOrcado)}</span>`));
-    tr.appendChild(td(`<span class="num">${pct(c.percAvancoItens)}</span>`));
+
+    const itensTd = document.createElement('td');
+    itensTd.appendChild(percentInput({
+      value: c.percAvancoItens,
+      manual: c.origemPercItens === 'manual',
+      max100: false,
+      onSave: (v) => api('PUT', `/api/categorias/${c.id}`, { percItensManual: v }),
+    }));
+    if (c.origemPercItens === 'manual') {
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'btn small'; clearBtn.style.marginLeft = '4px'; clearBtn.textContent = 'auto';
+      clearBtn.onclick = () => api('PUT', `/api/categorias/${c.id}`, { percItensManual: null });
+      itensTd.appendChild(clearBtn);
+    }
+    tr.appendChild(itensTd);
 
     const percTd = document.createElement('td');
     percTd.innerHTML = `<span class="num badge-cell ${c.origemPercAvanco === 'manual' ? 'manual' : 'auto'}">${pct(c.percAvancoEfetivo)}</span>`;
