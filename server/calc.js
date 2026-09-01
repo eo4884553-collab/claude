@@ -90,7 +90,8 @@ function calcPercPrevisto(cronogramaPrevisto, dataRef) {
 const ITEM_PLUG_REGEX = /m[ãa]o de obra/i;
 
 /** Calcula os campos derivados de uma categoria (Detalhamento FC). */
-function computeCategoria(cat, dataRef) {
+function computeCategoria(cat, dataRef, tetoAvancoEfetivo) {
+  const teto = Number.isFinite(tetoAvancoEfetivo) ? tetoAvancoEfetivo : 1;
   const valorOrcado = Number(cat.valorOrcado) || 0;
   const itensBrutos = cat.itens || [];
   const itemPlug = itensBrutos.find((it) => ITEM_PLUG_REGEX.test(it.descricao || ''));
@@ -125,8 +126,9 @@ function computeCategoria(cat, dataRef) {
   const percAvancoItens = temOverrideItens ? Number(cat.percItensManual) : percAvancoItensCalculado;
 
   const temOverride = cat.percAvancoManual !== null && cat.percAvancoManual !== undefined;
-  // Teto de medição: nunca mais que 100% da categoria como um todo.
-  const percAvancoEfetivo = clamp(temOverride ? Number(cat.percAvancoManual) : percAvancoItens, 0, 1);
+  // Teto de medição: nunca mais que "teto" (padrão 100%) da categoria como um
+  // todo — configurável em Parâmetros > Regras de cálculo (tetoAvancoEfetivo).
+  const percAvancoEfetivo = clamp(temOverride ? Number(cat.percAvancoManual) : percAvancoItens, 0, teto);
   const valorMedido = round2(valorOrcado * percAvancoEfetivo);
 
   const percPrevisto = calcPercPrevisto(cat.cronogramaPrevisto, dataRef);
@@ -205,7 +207,14 @@ function computeParcela(parcela) {
 
 function recompute(state) {
   const dataRef = (state.meta && state.meta.dataReferenciaCronograma) || new Date().toISOString().slice(0, 10);
-  const categoriasBase = (state.categorias || []).map((c) => computeCategoria(c, dataRef));
+  // Teto de medição por categoria (padrão 100%) — parâmetro configurável em
+  // Parâmetros > Regras de cálculo; ausente/limpo no estado = comportamento
+  // original (100%), preservando os cálculos já lançados.
+  const rawTeto = (state.parametros || {}).tetoAvancoEfetivo;
+  const tetoAvancoEfetivo = (rawTeto !== null && rawTeto !== undefined && Number.isFinite(Number(rawTeto)))
+    ? Number(rawTeto)
+    : 1;
+  const categoriasBase = (state.categorias || []).map((c) => computeCategoria(c, dataRef, tetoAvancoEfetivo));
   const totalOrcadoCategorias = round2(sum(categoriasBase, (c) => c.valorOrcado));
   const totalMedido = round2(sum(categoriasBase, (c) => c.valorMedido));
   const totalPrevistoCronograma = round2(sum(categoriasBase, (c) => c.valorPrevisto));
@@ -440,7 +449,9 @@ function recompute(state) {
   // daqui. Usa o "Custo total" de cada parcela tal como armazenado (respeitando
   // overrides), igual à coluna exibida em Contas a Pagar — não o
   // empreiteiro+adm+cartão recalculado, que pode divergir quando há override.
-  const MARCO_SALDO_CONTA = '2026-06-25';
+  // Configurável em Parâmetros > Regras de cálculo (marcoSaldoConta); ausente
+  // no estado = data original apurada na planilha (25/06/2026).
+  const MARCO_SALDO_CONTA = (state.parametros && state.parametros.marcoSaldoConta) || '2026-06-25';
   function saldoContaNoPeriodo(ateData, incluirPlanejado) {
     const entradas = sum(
       liberacoesCaixa.filter((l) => (
@@ -527,6 +538,7 @@ function recompute(state) {
     saldoParaFuturos: round2(verbaDisponivelFutura - totalPlanejadoFuturo),
     marcoSaldoConta: MARCO_SALDO_CONTA,
     saldoContaRealizado,
+    tetoAvancoEfetivo,
   };
 
   return {

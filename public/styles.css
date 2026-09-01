@@ -115,6 +115,26 @@ main#app { padding: 20px 22px 60px 22px; max-width: 1400px; margin: 0 auto; }
 .panel-header h2 { margin: 0; font-size: 15px; }
 .panel-header .muted { font-size: 12px; }
 
+/* ---------- Glossário de rastreabilidade ---------- */
+.glossary-grid { display: flex; flex-direction: column; gap: 10px; }
+.glossary-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--bg, #f7f8fa);
+}
+.glossary-item .glossary-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.glossary-item .glossary-label { font-weight: 700; font-size: 13.5px; }
+.glossary-item .glossary-value { font-weight: 700; font-size: 15px; color: var(--primary); }
+.glossary-item .glossary-formula { font-size: 12.5px; margin-top: 4px; }
+.glossary-item .glossary-fonte { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
 /* ---------- Tables ---------- */
 .table-scroll { overflow-x: auto; }
 table.data {

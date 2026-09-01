@@ -405,6 +405,7 @@ function renderAll() {
   renderDetalhamento();
   renderFluxo();
   renderPCI();
+  renderRastreabilidade();
   renderParametros();
 }
 
@@ -2362,6 +2363,179 @@ function renderConsumosRecursoProprioPanel() {
 /* ==========================================================================
    TAB 6 — Parâmetros
    ========================================================================== */
+/* ==========================================================================
+   Rastreabilidade — glossário: de onde vem cada número da planilha
+   ========================================================================== */
+function glossarioItens() {
+  const r = STATE.resumo || {};
+  return [
+    {
+      label: '% Itens (FC)',
+      valor: '(por categoria)',
+      formula: 'Soma do "Valor Realizado" dos itens do Detalhamento FC, dividido pelo Valor Orçado da categoria. Editável manualmente (fica destacado em laranja) — o botão "auto" volta ao cálculo automático.',
+      fonte: 'Aba Detalhamento FC (itens lançados) + override em Lançar Avanços.',
+    },
+    {
+      label: '% Avanço efetivo',
+      valor: '(por categoria)',
+      formula: `Usa o "% Avanço" lançado manualmente (se houver); senão usa o "% Itens (FC)". Sempre limitado ao teto configurado em Parâmetros → Regras de cálculo (hoje: ${pct(r.tetoAvancoEfetivo ?? 1)}).`,
+      fonte: 'Aba Lançar Avanços.',
+    },
+    {
+      label: 'Valor medido',
+      valor: '(por categoria)',
+      formula: 'Valor orçado da categoria × % Avanço efetivo.',
+      fonte: 'Calculado — não editável diretamente.',
+    },
+    {
+      label: 'Saldo do contrato (categoria)',
+      valor: '(por categoria)',
+      formula: 'Valor orçado − Valor medido.',
+      fonte: 'Calculado — não editável diretamente.',
+    },
+    {
+      label: 'Verba CAIXA liberada (categoria)',
+      valor: '(por categoria)',
+      formula: 'Verba CAIXA da categoria × % Avanço efetivo. Pode ser sobrescrita manualmente ("Liberado manual").',
+      fonte: 'Aba Liberação PCI.',
+    },
+    {
+      label: 'Saldo CAIXA (categoria)',
+      valor: '(por categoria)',
+      formula: 'Verba CAIXA da categoria − Verba CAIXA liberada.',
+      fonte: 'Aba Liberação PCI.',
+    },
+    {
+      label: '% Avanço geral da obra',
+      valor: pct(r.percObraGeral),
+      formula: 'Soma do Valor medido de todas as categorias, dividido pela soma do Valor orçado de todas as categorias.',
+      fonte: 'Soma de todas as categorias em Lançar Avanços.',
+    },
+    {
+      label: '% Execução financeira',
+      valor: pct(r.percExecucaoFinanceira),
+      formula: 'Gasto acumulado (LOTE + parcelas realizadas) dividido pelo financiamento total disponível (crédito CAIXA do PCI + recurso próprio planejado).',
+      fonte: 'Contas a Pagar (parcelas) + Liberação PCI + Parâmetros (recurso próprio planejado).',
+    },
+    {
+      label: 'Saldo em conta (realizado)',
+      valor: money(r.saldoContaRealizado),
+      formula: `Soma das liberações reais do CAIXA a partir do marco configurado (hoje: ${dateBR(r.marcoSaldoConta)}), menos a soma do "Custo total" das parcelas realizadas no mesmo período.`,
+      fonte: 'Liberação PCI (liberações reais) + Contas a Pagar (parcelas realizadas).',
+    },
+    {
+      label: 'Saldo em conta (projetado)',
+      valor: '(ver janela no Dashboard Executivo)',
+      formula: 'Igual ao "realizado", mas incluindo também liberações e parcelas planejadas, até a data de corte escolhida no filtro da janela.',
+      fonte: 'Liberação PCI + Contas a Pagar (realizado + planejado).',
+    },
+    {
+      label: 'Custo total do período',
+      valor: '(ver janela no Dashboard Executivo)',
+      formula: 'Soma do campo "Custo total" das parcelas nas quinzenas marcadas no filtro (seleção múltipla), independente do status.',
+      fonte: 'Aba Contas a Pagar.',
+    },
+    {
+      label: 'Saldo de recurso próprio disponível',
+      valor: money(r.saldoRecursoDisponivel),
+      formula: 'Recurso próprio planejado, menos o que já foi consumido em itens pagos diretamente pelo proprietário (fora do CAIXA). Pode ser sobrescrito manualmente.',
+      fonte: 'Parâmetros (recurso próprio planejado) + Detalhamento FC / Contas a Pagar (consumo).',
+    },
+    {
+      label: 'Saldo CAIXA disponível (a liberar)',
+      valor: money(r.saldoCaixaDisponivel),
+      formula: 'Crédito CAIXA total do PCI, menos o que o banco já liberou (liberações reais).',
+      fonte: 'Aba Liberação PCI.',
+    },
+    {
+      label: 'Crédito CAIXA disponível (contábil)',
+      valor: money(r.creditoCaixaDisponivelContabil),
+      formula: 'Crédito CAIXA total (PCI), menos o Gasto PLS já executado (LOTE + parcelas realizadas).',
+      fonte: 'Liberação PCI + Contas a Pagar.',
+    },
+    {
+      label: 'Teto de medição (% avanço efetivo)',
+      valor: pct(r.tetoAvancoEfetivo ?? 1),
+      formula: 'Limite máximo aplicado ao % Avanço efetivo de cada categoria. Padrão: 100%.',
+      fonte: 'Parâmetros → Regras de cálculo (editável).',
+    },
+    {
+      label: 'Marco do saldo em conta',
+      valor: dateBR(r.marcoSaldoConta),
+      formula: 'Data a partir da qual as liberações do CAIXA passam a alimentar a conta corrente rastreada em "Saldo em conta" — antes disso, as quinzenas eram cobertas por recurso próprio.',
+      fonte: 'Parâmetros → Regras de cálculo (editável).',
+    },
+  ];
+}
+
+function renderRastreabilidade() {
+  const root = document.getElementById('tab-rastreabilidade');
+  root.innerHTML = '';
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = `<div class="panel-header">
+    <h2>Rastreabilidade dos números</h2>
+    <div class="muted">De onde vem cada indicador mostrado no app — fórmula e origem dos dados. Somente leitura.</div>
+  </div>`;
+  const grid = document.createElement('div');
+  grid.className = 'glossary-grid';
+  for (const item of glossarioItens()) {
+    const el = document.createElement('div');
+    el.className = 'glossary-item';
+    el.innerHTML = `
+      <div class="glossary-top">
+        <span class="glossary-label">${esc(item.label)}</span>
+        <span class="glossary-value">${esc(item.valor)}</span>
+      </div>
+      <div class="glossary-formula">${esc(item.formula)}</div>
+      <div class="glossary-fonte">Fonte: ${esc(item.fonte)}</div>
+    `;
+    grid.appendChild(el);
+  }
+  panel.appendChild(grid);
+  root.appendChild(panel);
+}
+
+function renderRegrasCalculoPanel() {
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = `<div class="panel-header">
+    <h2>Regras de cálculo (avançado)</h2>
+    <div class="muted">Parâmetros que alteram fórmulas usadas em todo o app. Ver detalhes na aba Rastreabilidade.</div>
+  </div>`;
+  const form = document.createElement('div');
+  form.className = 'form-grid';
+
+  const marcoWrap = document.createElement('label');
+  marcoWrap.textContent = 'Marco do saldo em conta (a partir de quando as liberações do CAIXA alimentam a conta)';
+  const marcoInput = document.createElement('input');
+  marcoInput.type = 'date';
+  marcoInput.value = STATE.parametros.marcoSaldoConta || STATE.resumo.marcoSaldoConta || '';
+  marcoInput.addEventListener('blur', () => api('PUT', '/api/parametros', { marcoSaldoConta: marcoInput.value || null }));
+  marcoWrap.appendChild(marcoInput);
+  form.appendChild(marcoWrap);
+
+  const tetoWrap = document.createElement('label');
+  tetoWrap.textContent = 'Teto de medição por categoria (% avanço efetivo máximo — padrão 100%)';
+  const tetoManual = STATE.parametros.tetoAvancoEfetivo !== null && STATE.parametros.tetoAvancoEfetivo !== undefined;
+  tetoWrap.appendChild(percentInput({
+    value: STATE.resumo.tetoAvancoEfetivo ?? 1,
+    manual: tetoManual,
+    max100: false,
+    onSave: (v) => api('PUT', '/api/parametros', { tetoAvancoEfetivo: v }),
+  }));
+  if (tetoManual) {
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'btn small'; clearBtn.style.marginLeft = '4px'; clearBtn.textContent = 'usar padrão (100%)';
+    clearBtn.onclick = () => api('PUT', '/api/parametros', { tetoAvancoEfetivo: null });
+    tetoWrap.appendChild(clearBtn);
+  }
+  form.appendChild(tetoWrap);
+
+  panel.appendChild(form);
+  return panel;
+}
+
 function renderParametros() {
   const root = document.getElementById('tab-parametros');
   root.innerHTML = '';
@@ -2418,6 +2592,8 @@ function renderParametros() {
   }
   paramPanel.appendChild(paramForm);
   root.appendChild(paramPanel);
+
+  root.appendChild(renderRegrasCalculoPanel());
 
   root.appendChild(renderConsumosRecursoProprioPanel());
 
