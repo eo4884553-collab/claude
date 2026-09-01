@@ -106,27 +106,19 @@ function computeCategoria(cat, dataRef) {
           : { ...it, valorRealizado: valorRealizadoAjustado, valorRealizadoOriginal };
       })
     : itensBrutos;
-  // Teto de medição: nenhum item (exceto o "plug", que já tem teto próprio acima)
-  // pode ter valor realizado maior que o seu próprio valor orçado — nunca houve
-  // medição acima de 100% do item. Itens sem orçado definido (valorOrcado 0 — ex.:
-  // custos avulsos lançados no cartão, sem cotação prévia) ficam sem teto aqui, já
-  // que não há "100% de zero" para comparar; o teto da categoria como um todo
-  // continua garantido pelo item plug.
-  const itens = itensComPlug.map((it) => {
-    if (it === itemPlug) return it;
-    const itemOrcado = Number(it.valorOrcado) || 0;
-    if (itemOrcado <= 0) return it;
-    const valorRealizadoOriginal = Number(it.valorRealizado) || 0;
-    const valorRealizadoAjustado = Math.min(valorRealizadoOriginal, itemOrcado);
-    return valorRealizadoAjustado === valorRealizadoOriginal
-      ? it
-      : { ...it, valorRealizado: valorRealizadoAjustado, valorRealizadoOriginal };
-  });
+  // Nota: itens individuais NÃO têm teto no seu próprio valorOrcado — um item
+  // pode legitimamente custar mais do que a cotação inicial (ex.: "REGISTRO DO
+  // LOTE" orçado em R$8.000 mas realizado em R$14.008,01, confirmado na planilha
+  // original: 'Detalhamento F.C'!E16 soma os itens sem cap por linha). O teto de
+  // medição "nunca mais que 100%" vale para a categoria como um todo — garantido
+  // pelo item plug (que só encolhe, nunca infla) e pelo clamp de percAvancoEfetivo
+  // logo abaixo — não para cada item isoladamente.
+  const itens = itensComPlug;
   const valorRealizadoItens = round2(sum(itens, (it) => it.valorRealizado));
   const percAvancoItens = valorOrcado > 0 ? valorRealizadoItens / valorOrcado : 0;
 
   const temOverride = cat.percAvancoManual !== null && cat.percAvancoManual !== undefined;
-  // Teto de medição: nunca mais que 100% (nem do item, nem da categoria como um todo).
+  // Teto de medição: nunca mais que 100% da categoria como um todo.
   const percAvancoEfetivo = clamp(temOverride ? Number(cat.percAvancoManual) : percAvancoItens, 0, 1);
   const valorMedido = round2(valorOrcado * percAvancoEfetivo);
 
@@ -267,7 +259,19 @@ function recompute(state) {
   // prefeitura, cartório). Sem isso, esse dinheiro já gasto não entraria no "gasto
   // acumulado" nem reduziria o saldo de recurso disponível.
   const totalPagoDiretoProprietario = round2(sum(categoriasBase.filter((c) => c.pagoDiretoProprietario), (c) => c.valorRealizadoItens));
-  const totalGastoAcumulado = round2(totalEmpreiteiroPago + totalAdmPago + totalCartaoPago + totalPagoDiretoProprietario);
+  // "GASTO PLS + Provisão da Quizena" — mesma métrica da aba Contas a Pagar da
+  // planilha original (célula C6 = 356168 + soma do "Custo Total" de cada
+  // parcela já realizada). Soma o custoTotal de cada parcela tal como
+  // armazenado (respeitando overrides já ajustados manualmente na planilha —
+  // algumas linhas incluem a parcela de evolução caixa no custo total, outras
+  // não), não o "empreiteiro+adm+cartão+evolução" recalculado — evita
+  // divergir da planilha quando essas duas fórmulas não batem linha a linha.
+  const custoLoteExecutado = Number((state.parametros || {}).custoLoteExecutado) || 0;
+  const gastoAcumuladoPLS = round2(custoLoteExecutado + sum(parcelasRealizadas, (p) => p.custoTotal));
+  // Total geral gasto até agora (qualquer fonte, qualquer categoria) — usado para
+  // o saldo de recurso disponível do app; inclui também o que foi pago direto
+  // pelo proprietário (fora das parcelas de Contas a Pagar).
+  const totalGastoAcumulado = round2(gastoAcumuladoPLS + totalPagoDiretoProprietario);
 
   const parcelasPlanejadas = parcelas.filter((p) => p.status !== 'REALIZADO');
   const totalEmpreiteiroPlanejado = round2(sum(parcelasPlanejadas, (p) => p.totalEmpreiteiroPix));
@@ -390,20 +394,26 @@ function recompute(state) {
     percCaixaLiberada: creditoCaixaTotalPCI > 0 ? round2((caixaLiberadaAcumulada / creditoCaixaTotalPCI) * 10000) / 10000 : 0,
     recursoProprioPlanejado,
     totalInvestidoDisponivel,
-    // % Execução financeira: quanto já foi gasto (empreiteiro + ADM + cartão + pago
-    // direto) sobre o total de financiamento disponível (crédito CAIXA total + recurso
-    // próprio planejado) — mesma fórmula da aba "Contas a pagar"!I6 da planilha original
-    // (=C6/(1500000+A6)). É uma % de execução do financiamento total, não do que já foi
-    // liberado até agora.
+    // % Execução financeira: mesma fórmula da aba "Contas a pagar"!I6 da planilha
+    // original (=C6/(1500000+A6)) — usa GASTO PLS + Provisão da Quizena (C6, sem o
+    // pago direto pelo proprietário) sobre o total de financiamento disponível
+    // (crédito CAIXA total + recurso próprio planejado). É uma % de execução do
+    // financiamento total, não do que já foi liberado até agora.
     percExecucaoFinanceira: (creditoCaixaTotalPCI + recursoProprioPlanejado) > 0
-      ? round2((totalGastoAcumulado / (creditoCaixaTotalPCI + recursoProprioPlanejado)) * 10000) / 10000
+      ? round2((gastoAcumuladoPLS / (creditoCaixaTotalPCI + recursoProprioPlanejado)) * 10000) / 10000
       : 0,
     totalEmpreiteiroPago,
     totalAdmPago,
     totalCartaoPago,
     totalEvolucaoCaixaPago,
     totalPagoDiretoProprietario,
+    gastoAcumuladoPLS,
     totalGastoAcumulado,
+    // "Crédito CAIXA disponível" (H6 da planilha) = crédito CAIXA total (PCI) menos o
+    // GASTO PLS já executado (C6) — quanto ainda resta do financiamento CAIXA depois
+    // de descontar tudo que já foi gasto (LOTE + parcelas realizadas). Diferente do
+    // "Saldo Caixa (a liberar)", que só olha o que o banco ainda não liberou.
+    creditoCaixaDisponivelContabil: round2(creditoCaixaTotalPCI - gastoAcumuladoPLS),
     totalEmpreiteiroPlanejado,
     totalPlanejadoFuturo,
     // Total consumido do contrato do empreiteiro (PIX + cartão) — o cartão também

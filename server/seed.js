@@ -170,23 +170,37 @@ function buildCategorias(contratoTotalEmpreiteiro) {
 }
 
 function buildParcelas() {
-  return parcelasExtraidas.map((p, idx) => ({
-    id: `parcela-${idx + 1}`,
-    label: p.label,
-    totalEmpreiteiroPix: Number(p.totalEmpreiteiroPix) || 0,
-    totalAdmPix: Number(p.totalAdmPix) || 0,
-    gastoCartao: Number(p.gastoCartao) || 0,
-    totalATransferir: Number(p.totalATransferir) || 0,
-    parcelaEvolucaoCaixa: Number(p.parcelaEvolucaoCaixa) || 0,
-    custoTotal: Number(p.custoTotal) || 0,
-    vencimento: p.vencimento ? p.vencimento.slice(0, 10) : null,
-    vencPlanejado: p.vencPlanejado ? p.vencPlanejado.slice(0, 10) : null,
-    status: p.status || 'PLANEJADO',
-    obs: p.obs || '',
-    // campos calculados automaticamente (totalATransferir, custoTotal) podem ser
-    // sobrescritos manualmente; overrides marca quais campos o usuário travou.
-    overrides: {},
-  }));
+  return parcelasExtraidas.map((p, idx) => {
+    const totalEmpreiteiroPix = Number(p.totalEmpreiteiroPix) || 0;
+    const totalAdmPix = Number(p.totalAdmPix) || 0;
+    const gastoCartao = Number(p.gastoCartao) || 0;
+    const parcelaEvolucaoCaixa = Number(p.parcelaEvolucaoCaixa) || 0;
+    const custoTotal = Number(p.custoTotal) || 0;
+    // Na planilha original, "CUSTO TOTAL" (coluna K) nem sempre soma a parcela de
+    // evolução caixa (algumas linhas somam H+I+J, outras só H+I) — uma
+    // inconsistência real da própria planilha, não um padrão fixo. Sempre que o
+    // valor extraído da planilha difere da fórmula "automática" do app
+    // (empreiteiro + adm + cartão + evolução), trava esse campo como override
+    // para preservar o valor real da planilha em vez de recalculá-lo errado.
+    const autoCustoTotal = round2(totalEmpreiteiroPix + totalAdmPix + gastoCartao + parcelaEvolucaoCaixa);
+    return {
+      id: `parcela-${idx + 1}`,
+      label: p.label,
+      totalEmpreiteiroPix,
+      totalAdmPix,
+      gastoCartao,
+      totalATransferir: Number(p.totalATransferir) || 0,
+      parcelaEvolucaoCaixa,
+      custoTotal,
+      vencimento: p.vencimento ? p.vencimento.slice(0, 10) : null,
+      vencPlanejado: p.vencPlanejado ? p.vencPlanejado.slice(0, 10) : null,
+      status: p.status || 'PLANEJADO',
+      obs: p.obs || '',
+      // campos calculados automaticamente (totalATransferir, custoTotal) podem ser
+      // sobrescritos manualmente; overrides marca quais campos o usuário travou.
+      overrides: Math.abs(custoTotal - autoCustoTotal) > 0.01 ? { custoTotal: true } : {},
+    };
+  });
 }
 
 function buildLiberacaoPCI() {
@@ -215,6 +229,13 @@ function buildSeed() {
     contratoTotalEmpreiteiro: 1081900,
     taxaAdministracaoPercent: 0.10,
     taxaJurosAnualCEF: 0.134,
+    // Custo do lote já executado (taxas e projetos do lote, pagos com recurso do
+    // financiamento CAIXA) — linha "TAXAS E PROJETOS LOTE" da aba Fluxo de Caixa
+    // original (=DRE!C9*-1). Não faz parte das 20 categorias do Detalhamento FC
+    // nem das parcelas de Contas a Pagar; entra direto no "gasto acumulado" para
+    // bater com a aba Contas a Pagar da planilha (célula C6: 356168 + custo total
+    // das parcelas já realizadas).
+    custoLoteExecutado: 356168,
   };
   return {
     meta: {

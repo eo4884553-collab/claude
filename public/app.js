@@ -632,12 +632,17 @@ function renderDashboard() {
       <div class="card-label">% Execução financeira</div>
       <div class="card-value">${pct(r.percExecucaoFinanceira)}</div>
       <div class="progress-bar" style="margin-top:6px"><span style="width:${Math.min(100, r.percExecucaoFinanceira * 100)}%"></span></div>
-      <div class="card-sub">Gasto acumulado (${money(r.totalGastoAcumulado)}) sobre o financiamento total disponível: crédito CAIXA (${money(r.creditoCaixaTotalPCI)}) + recurso próprio planejado (${money(r.recursoProprioPlanejado)})</div>
+      <div class="card-sub">Gasto PLS + provisão da quinzena (${money(r.gastoAcumuladoPLS)}) sobre o financiamento total disponível: crédito CAIXA (${money(r.creditoCaixaTotalPCI)}) + recurso próprio planejado (${money(r.recursoProprioPlanejado)})</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Crédito CAIXA disponível</div>
+      <div class="card-value">${money(r.creditoCaixaDisponivelContabil)}</div>
+      <div class="card-sub">Crédito CAIXA total − gasto PLS + provisão da quinzena</div>
     </div>
     <div class="card">
       <div class="card-label">Saldo caixa (a liberar)</div>
       <div class="card-value">${money(r.saldoCaixaDisponivel)}</div>
-      <div class="card-sub">Crédito PCI total − já liberado</div>
+      <div class="card-sub">Crédito PCI total − já liberado pelo banco</div>
     </div>
     <div class="card ${r.saldoRecursoDisponivel < 0 ? 'warn' : 'good'}">
       <div class="card-label">Saldo de recurso disponível</div>
@@ -1737,6 +1742,7 @@ function renderParametros() {
     ['financiamentoObraCaixa', 'Financiamento obra — CAIXA (R$)'],
     ['financiamentoLoteCaixa', 'Financiamento lote — CAIXA (R$)'],
     ['contratoTotalEmpreiteiro', 'Contrato total empreiteiro (R$)'],
+    ['custoLoteExecutado', 'Custo do lote já executado (R$) — taxas e projetos'],
     ['taxaAdministracaoPercent', 'Taxa de administração (%) — RS Engenharia'],
     ['taxaJurosAnualCEF', 'Taxa de juros anual CEF (%)'],
   ];
