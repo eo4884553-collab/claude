@@ -252,12 +252,15 @@ function buildSeed() {
     // bater com a aba Contas a Pagar da planilha (célula C6: 356168 + custo total
     // das parcelas já realizadas).
     custoLoteExecutado: 356168,
-    // "Saldo de Recurso Disponível" (F6 da planilha original) não é uma fórmula viva
-    // — o proprietário ajusta manualmente conforme o saldo real em conta (o recurso
-    // próprio só foi usado nos meses iniciais, antes da liberação do CAIXA começar a
-    // fluir, mas pode voltar a ser usado se o fluxo de caixa exigir). null = calcula
-    // automaticamente (investido − gasto acumulado).
-    saldoRecursoDisponivelManual: null,
+    // "Saldo de Recurso Próprio Disponível" (F6 da planilha original) não é uma
+    // fórmula viva — o proprietário ajusta manualmente conforme o saldo real em
+    // conta. Valor confirmado pelo proprietário: recurso próprio planejado
+    // (571.143,99) − Total a Transferir de Maio/1º (31.000) − Maio/2º (33.500,00)
+    // − Junho/1º (22.271,21) − entrada do lote (144.000) − Serviços Preliminares
+    // pagos direto (60.060,87) = 280.311,91. Editável em Parâmetros; deixe em
+    // branco para voltar ao cálculo automático simples (investido − gasto
+    // acumulado).
+    saldoRecursoDisponivelManual: 280311.91,
   };
   return {
     meta: {

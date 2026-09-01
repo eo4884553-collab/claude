@@ -216,14 +216,21 @@ function recompute(state) {
   const liberacaoPCI = computeLiberacaoPCI(state.liberacaoPCI || []);
   const creditoCaixaTotalPCI = round2(sum(liberacaoPCI, (e) => e.valor));
 
+  // Custo do lote já executado (taxas e projetos, financiados pelo CAIXA) — ver
+  // definição completa mais abaixo, junto de gastoAcumuladoPLS; extraído aqui
+  // primeiro porque "Valor caixa liberado" também depende dele.
+  const custoLoteExecutado = Number((state.parametros || {}).custoLoteExecutado) || 0;
+
   // Liberações reais do CAIXA (medições mensais efetivamente pagas pelo banco,
   // lançadas manualmente pelo proprietário conforme o extrato) — substitui o
   // cronograma de etapas como fonte de "quanto já foi liberado": confirmado
   // contra a planilha original que o banco não libera seguindo o % de obra
   // das 6 etapas, mas em medições mensais próprias (ex.: Junho R$177.000,60,
-  // Julho R$132.580,80, Agosto R$35.823,60, Setembro R$91.071,18).
+  // Julho R$132.580,80, Agosto R$35.823,60, Setembro R$91.071,18), somadas ao
+  // valor que o CAIXA já passou para o lote (R$356.168,00, mesmo valor de
+  // custoLoteExecutado) — "Valor caixa liberado" = medições + lote = R$792.644,18.
   const liberacoesCaixa = [...(state.liberacoesCaixa || [])].sort((a, b) => (a.data || '').localeCompare(b.data || ''));
-  const caixaLiberadaAcumulada = round2(sum(liberacoesCaixa, (l) => l.valor));
+  const caixaLiberadaAcumulada = round2(custoLoteExecutado + sum(liberacoesCaixa, (l) => l.valor));
 
   const parcelas = (state.parcelas || [])
     .map(computeParcela)
@@ -250,7 +257,6 @@ function recompute(state) {
   // algumas linhas incluem a parcela de evolução caixa no custo total, outras
   // não), não o "empreiteiro+adm+cartão+evolução" recalculado — evita
   // divergir da planilha quando essas duas fórmulas não batem linha a linha.
-  const custoLoteExecutado = Number((state.parametros || {}).custoLoteExecutado) || 0;
   const gastoAcumuladoPLS = round2(custoLoteExecutado + sum(parcelasRealizadas, (p) => p.custoTotal));
   // Total geral gasto até agora (qualquer fonte, qualquer categoria) — usado para
   // o saldo de recurso disponível do app; inclui também o que foi pago direto

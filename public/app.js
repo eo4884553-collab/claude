@@ -200,9 +200,9 @@ function td(el) {
 }
 
 /* Bloco "verba para itens futuros": compara o que já está planejado (parcelas
-   ainda não realizadas) com a verba disponível (Saldo Caixa + Saldo de recurso
-   disponível) e avisa quando estoura — não ajusta nada automaticamente, é só
-   acompanhamento (usado no Dashboard e no Fluxo de Caixa). */
+   ainda não realizadas) com a verba disponível (Crédito CAIXA ainda a liberar +
+   Saldo de recurso próprio disponível) e avisa quando estoura — não ajusta nada
+   automaticamente, é só acompanhamento (usado no Dashboard e no Fluxo de Caixa). */
 function renderVerbaFuturaBlock() {
   const r = STATE.resumo;
   const wrap = document.createElement('div');
@@ -224,7 +224,7 @@ function renderVerbaFuturaBlock() {
     <div class="card">
       <div class="card-label">Verba disponível p/ futuros</div>
       <div class="card-value">${money(r.verbaDisponivelFutura)}</div>
-      <div class="card-sub">Saldo caixa (a liberar) + Saldo de recurso disponível</div>
+      <div class="card-sub">Crédito CAIXA ainda a liberar (${money(r.saldoCaixaDisponivel)}) + Saldo de recurso próprio disponível (${money(r.saldoRecursoDisponivel)})</div>
     </div>
     <div class="card ${estourou ? 'warn' : 'good'}">
       <div class="card-label">Margem para itens futuros</div>
@@ -329,13 +329,18 @@ function buildCurvaCaixa(checkpoints, dataInicio) {
     return Math.round(total * 100) / 100;
   });
 
-  // Executado: acumulado real das liberações do CAIXA (medições mensais
-  // lançadas pelo proprietário), na data real de cada uma — igual à curva do
-  // empreiteiro, agora que temos data por liberação (antes só existia o total
-  // acumulado até "hoje", sem histórico por data).
+  // Executado: acumulado real das liberações do CAIXA — começa com o valor que
+  // o CAIXA já passou do lote (taxas e projetos, financiado junto com a
+  // aquisição do lote, etapa 1 do PCI) e soma as medições mensais lançadas
+  // pelo proprietário, na data real de cada uma. Esse total precisa bater com
+  // "Valor caixa liberado" do resumo (resumo.caixaLiberadaAcumulada).
+  const custoLoteExecutado = Number((STATE.parametros || {}).custoLoteExecutado) || 0;
   const liberacoes = [...(STATE.liberacoesCaixa || [])].sort((a, b) => (a.data || '').localeCompare(b.data || ''));
-  let acc = 0;
-  const executedRaw = liberacoes.map((l) => { acc += Number(l.valor) || 0; return { data: l.data, valor: Math.round(acc * 100) / 100 }; });
+  let acc = custoLoteExecutado;
+  const executedRaw = custoLoteExecutado > 0
+    ? [{ data: dataInicio, valor: Math.round(acc * 100) / 100 }]
+    : [];
+  liberacoes.forEach((l) => { acc += Number(l.valor) || 0; executedRaw.push({ data: l.data, valor: Math.round(acc * 100) / 100 }); });
   const executed = checkpoints.map((cp) => {
     let last = 0;
     for (const e of executedRaw) { if (e.data <= cp) last = e.valor; else break; }
@@ -526,7 +531,7 @@ function renderPainel() {
       <div class="card-sub">${r.percObraGeral + 0.0001 >= r.percPrevistoGeral ? 'No prazo ou adiantada' : 'Atrasada vs. cronograma'}</div>
     </div>
     <div class="card ${r.saldoRecursoDisponivel < 0 ? 'warn' : 'good'}">
-      <div class="card-label">Saldo (conforme o gasto)</div>
+      <div class="card-label">Saldo de recurso próprio disponível</div>
       <div class="card-value">${money(r.saldoRecursoDisponivel)}</div>
       <div class="card-sub">${r.origemSaldoRecurso === 'manual' ? 'Ajustado manualmente (ver Parâmetros)' : `Execução financeira − gasto acumulado (${money(r.totalGastoAcumulado)})`}</div>
     </div>
@@ -648,12 +653,12 @@ function renderDashboard() {
       <div class="card-sub">Crédito CAIXA total − gasto PLS + provisão da quinzena</div>
     </div>
     <div class="card">
-      <div class="card-label">Saldo caixa (a liberar)</div>
-      <div class="card-value">${money(r.saldoCaixaDisponivel)}</div>
-      <div class="card-sub">Crédito PCI total − já liberado pelo banco</div>
+      <div class="card-label">Valor caixa liberado</div>
+      <div class="card-value">${money(r.caixaLiberadaAcumulada)}</div>
+      <div class="card-sub">Medições liberadas pelo banco (${money(r.caixaLiberadaAcumulada - (Number(STATE.parametros.custoLoteExecutado) || 0))}) + valor que o CAIXA já passou do lote (${money(STATE.parametros.custoLoteExecutado)})</div>
     </div>
     <div class="card ${r.saldoRecursoDisponivel < 0 ? 'warn' : 'good'}">
-      <div class="card-label">Saldo de recurso disponível</div>
+      <div class="card-label">Saldo de recurso próprio disponível</div>
       <div class="card-value">${money(r.saldoRecursoDisponivel)}</div>
       <div class="card-sub">${r.origemSaldoRecurso === 'manual' ? 'Ajustado manualmente (ver Parâmetros)' : 'Recurso próprio + caixa liberado − gasto acumulado'}</div>
     </div>
@@ -668,9 +673,9 @@ function renderDashboard() {
       <div class="card-sub">Total gasto acumulado: ${money(r.totalGastoAcumulado)}</div>
     </div>
     <div class="card">
-      <div class="card-label">Pago direto (fora do empreiteiro)</div>
+      <div class="card-label">Serviços preliminares</div>
       <div class="card-value">${money(r.totalPagoDiretoProprietario)}</div>
-      <div class="card-sub">Ex.: Serviços Preliminares — topografia, projetos, prefeitura, cartório. Já descontado do saldo de recurso disponível.</div>
+      <div class="card-sub">Pago direto pelo proprietário (fora do empreiteiro): topografia, projetos, prefeitura, cartório. Já descontado do saldo de recurso próprio disponível.</div>
     </div>
   `;
   root.appendChild(cards);
@@ -1488,7 +1493,7 @@ function renderFluxo() {
       <div class="card-label">Avanço caixa (% liberado)</div>
       <div class="card-value">${pct(r.percCaixaLiberada)}</div>
       <div class="progress-bar" style="margin-top:6px"><span style="width:${Math.min(100, r.percCaixaLiberada * 100)}%"></span></div>
-      <div class="card-sub">Saldo caixa (a liberar): ${money(r.saldoCaixaDisponivel)}</div>
+      <div class="card-sub">Crédito CAIXA ainda a liberar: ${money(r.saldoCaixaDisponivel)}</div>
     </div>
   `;
   root.appendChild(tracking);
@@ -1635,16 +1640,19 @@ function renderPCI() {
 // Liberações reais do CAIXA: cada medição efetivamente paga pelo banco,
 // lançada manualmente pelo proprietário conforme o extrato (mesmo padrão da
 // aba "Contas a pagar" da planilha original, que registra "MEDIÇÃO 01, 02,
-// 03..." por mês). É essa lista — não o cronograma de etapas acima — que
-// define resumo.caixaLiberadaAcumulada e "Saldo caixa (a liberar)".
+// 03..." por mês), mais o valor que o CAIXA já passou do lote (taxas e
+// projetos, financiado junto da aquisição do lote). É essa soma — não o
+// cronograma de etapas acima — que define resumo.caixaLiberadaAcumulada e o
+// card "Valor caixa liberado".
 function renderLiberacoesCaixaPanel() {
   const panel = document.createElement('div');
   panel.className = 'panel';
+  const custoLoteExecutado = Number((STATE.parametros || {}).custoLoteExecutado) || 0;
   panel.innerHTML = `
     <div class="panel-header">
       <div>
         <h2>Liberações reais do CAIXA</h2>
-        <div class="muted">Lance aqui cada medição que o banco efetivamente liberou (data e valor), conforme o extrato. O total dessa lista é o que o app usa como "já liberado" — o Saldo caixa (a liberar) é sempre R$ 1.500.000,00 menos esse total.</div>
+        <div class="muted">Lance aqui cada medição que o banco efetivamente liberou (data e valor), conforme o extrato. A soma dessa lista com o valor que o CAIXA já passou do lote (${money(custoLoteExecutado)}, ajustável em Parâmetros) é o card "Valor caixa liberado".</div>
       </div>
       <button class="btn primary" id="btnNovaLiberacao">+ Nova liberação</button>
     </div>
@@ -1652,11 +1660,19 @@ function renderLiberacoesCaixaPanel() {
   `;
   const wrap = panel.querySelector('.table-scroll');
   const liberacoes = STATE.liberacoesCaixa || [];
-  if (!liberacoes.length) {
+  const loteRow = custoLoteExecutado
+    ? `<tr>
+        <td>—</td>
+        <td class="num">${money(custoLoteExecutado)}</td>
+        <td class="wrap">Valor que o CAIXA já passou do lote (taxas e projetos)</td>
+        <td></td>
+      </tr>`
+    : '';
+  if (!liberacoes.length && !custoLoteExecutado) {
     wrap.innerHTML = '<div class="muted">Nenhuma liberação lançada ainda.</div>';
   } else {
     wrap.innerHTML = `<table class="data"><thead><tr><th>Data</th><th class="num">Valor</th><th class="wrap">Observação</th><th></th></tr></thead>
-      <tbody>${liberacoes.map((l) => `
+      <tbody>${loteRow}${liberacoes.map((l) => `
         <tr>
           <td>${dateBR(l.data)}</td>
           <td class="num">${money(l.valor)}</td>
@@ -1818,12 +1834,12 @@ function renderParametros() {
   const r = STATE.resumo;
   const saldoPanel = document.createElement('div');
   saldoPanel.className = 'panel';
-  saldoPanel.innerHTML = `<div class="panel-header"><div><h2>Saldo de recurso disponível</h2>
+  saldoPanel.innerHTML = `<div class="panel-header"><div><h2>Saldo de recurso próprio disponível</h2>
     <div class="muted">Na planilha original esse valor não é uma fórmula que soma tudo automaticamente — o recurso próprio só foi usado nos meses antes da liberação do CAIXA começar a fluir, e pode ser usado de novo se o fluxo de caixa exigir. Por isso é ajustado manualmente conforme o saldo real em conta. Ajuste aqui quando necessário; use "usar automático" para voltar ao cálculo simples do app (investido − gasto acumulado).</div></div></div>`;
   const saldoBody = document.createElement('div');
   saldoBody.className = 'form-grid';
   const saldoWrap = document.createElement('label');
-  saldoWrap.textContent = `Saldo de recurso disponível (R$) — automático seria: ${money(r.saldoRecursoDisponivelAuto)}`;
+  saldoWrap.textContent = `Saldo de recurso próprio disponível (R$) — automático seria: ${money(r.saldoRecursoDisponivelAuto)}`;
   const saldoInputWrap = document.createElement('div');
   saldoInputWrap.style.display = 'flex';
   saldoInputWrap.style.gap = '6px';
