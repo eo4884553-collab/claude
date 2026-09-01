@@ -169,6 +169,29 @@ function buildCategorias(contratoTotalEmpreiteiro) {
   });
 }
 
+// Registra no histórico de avanços a medição física inicial (AVANCO_FISICO_INICIAL,
+// extraída da planilha) como um avanço REALIZADO datado em dataUltimoAvanco de
+// cada categoria — sem isso, o filtro por quinzena da aba "Lançar Avanços" não
+// tinha nenhum registro para essas medições já feitas antes de a aba existir, e
+// mostrava "nenhum avanço" mesmo para categorias já medidas e com % de avanço
+// efetivo maior que zero. Só categorias com percAvancoManual > 0 entram aqui —
+// 0% não é uma medição, é a ausência de uma (a categoria ainda não começou).
+function buildHistoricoAvancosInicial(categorias) {
+  return categorias
+    .filter((c) => Number(c.percAvancoManual) > 0)
+    .map((c) => ({
+      id: `avanco-inicial-${c.numero}`,
+      categoriaId: c.id,
+      categoriaNome: c.nome,
+      percAvancoAnterior: null,
+      percAvancoNovo: c.percAvancoManual,
+      data: c.dataUltimoAvanco,
+      status: 'REALIZADO',
+      obs: 'Medição física inicial (planilha)',
+      timestamp: `${c.dataUltimoAvanco}T00:00:00.000Z`,
+    }));
+}
+
 function buildParcelas() {
   return parcelasExtraidas.map((p, idx) => {
     const totalEmpreiteiroPix = Number(p.totalEmpreiteiroPix) || 0;
@@ -276,6 +299,7 @@ function buildSeed() {
     // lista itemizada reflete (ex.: divergência pontual do extrato real).
     saldoRecursoDisponivelManual: null,
   };
+  const categorias = buildCategorias(parametros.contratoTotalEmpreiteiro);
   return {
     meta: {
       obra: 'Casa Newton — Gran Park Toscana',
@@ -287,12 +311,12 @@ function buildSeed() {
       previsaoTermino: '2027-08-14',
     },
     parametros,
-    categorias: buildCategorias(parametros.contratoTotalEmpreiteiro),
+    categorias,
     liberacaoPCI: buildLiberacaoPCI(),
     liberacoesCaixa: buildLiberacoesCaixa(),
     consumosRecursoProprio: buildConsumosRecursoProprio(),
     parcelas: buildParcelas(),
-    historicoAvancos: [],
+    historicoAvancos: buildHistoricoAvancosInicial(categorias),
     fluxoCaixaAjustes: [], // lançamentos manuais extras na aba Fluxo de Caixa (ex.: ajustes, estornos)
     updatedAt: new Date().toISOString(),
   };
