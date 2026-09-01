@@ -220,13 +220,19 @@ function moneyInput({ value, onSave, manual = false, wide = false }) {
   function parseMoneyText(s) {
     let cleaned = String(s).trim().replace(/^R\$\s*/i, '');
     if (!cleaned) return 0;
-    if (/,\d{1,2}$/.test(cleaned)) cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+    // Uma vírgula seguida só de dígitos até o fim é sempre o separador decimal
+    // (o BRL nunca usa vírgula como separador de milhar) — não travar em 1-2
+    // dígitos: um valor com mais casas decimais (ex.: 24917,0755, vindo de
+    // dados importados da planilha) sem essa correção tinha a vírgula tratada
+    // como separador de milhar e removida, multiplicando o valor por 100/1000/etc.
+    if (/,\d+$/.test(cleaned)) cleaned = cleaned.replace(/\./g, '').replace(',', '.');
     else cleaned = cleaned.replace(/,/g, '');
     const n = Number(cleaned);
     return Number.isFinite(n) ? n : 0;
   }
   input.addEventListener('focus', () => {
-    input.value = (Number(value) || 0) === 0 ? '' : String(Number(value)).replace('.', ',');
+    const rounded = Math.round((Number(value) || 0) * 100) / 100;
+    input.value = rounded === 0 ? '' : String(rounded).replace('.', ',');
     input.select();
   });
   const commit = () => {
