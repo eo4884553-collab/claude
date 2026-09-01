@@ -24,6 +24,10 @@ let FILTRO_MES_PARCELAS = null;
 // independente (FILTRO_SALDO_CONTA_REALIZADO_ATE).
 let FILTRO_SALDO_CONTA_ATE = null;
 let FILTRO_SALDO_CONTA_REALIZADO_ATE = null;
+// Quinzenas marcadas no painel "Custo total do período" (Dashboard
+// Executivo) — Set de "mes|quinzena" (ex.: "2026-07|1"); null = ainda não
+// inicializado (marca todas na primeira renderização).
+let FILTRO_CUSTO_TOTAL_QUINZENAS = null;
 
 const fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtNum = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 });
@@ -230,6 +234,81 @@ function renderSaldoContaGrid() {
     rerender: renderPainel,
   }));
   return grid;
+}
+
+// "Custo total do período": soma o "Custo total" (mesma coluna de Contas a
+// Pagar, respeitando overrides) das quinzenas marcadas — qualquer status
+// (REALIZADO ou PLANEJADO), já que aqui é "quanto custou/vai custar essa
+// quinzena", não um saldo em conta. Lista só as quinzenas que já têm
+// alguma parcela lançada (não o calendário inteiro do contrato). Por
+// padrão todas vêm marcadas (soma o total geral); desmarcando dá pra
+// somar só uma ou algumas quinzenas específicas.
+function renderCustoTotalPeriodoPanel() {
+  const parcelas = STATE.parcelas || [];
+  const periodsMap = new Map();
+  for (const p of parcelas) {
+    if (!p.mesReferencia) continue;
+    const key = `${p.mesReferencia}|${p.quinzena || 1}`;
+    if (!periodsMap.has(key)) {
+      periodsMap.set(key, { mes: p.mesReferencia, quinzena: p.quinzena || 1, label: p.mesReferenciaLabel || mesQuinzenaLabel(p.mesReferencia, p.quinzena || 1) });
+    }
+  }
+  const periods = [...periodsMap.values()].sort((a, b) => a.mes.localeCompare(b.mes) || a.quinzena - b.quinzena);
+
+  if (FILTRO_CUSTO_TOTAL_QUINZENAS === null) {
+    FILTRO_CUSTO_TOTAL_QUINZENAS = new Set(periods.map((p) => `${p.mes}|${p.quinzena}`));
+  }
+
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <h2>Custo total do período</h2>
+        <div class="muted">Soma o "Custo total" das quinzenas marcadas abaixo (mesma coluna de Contas a Pagar) — marque uma ou várias quinzenas para ver o total só daquele período.</div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="btn small" id="btnCustoTodas">Marcar todas</button>
+        <button type="button" class="btn small" id="btnCustoNenhuma">Desmarcar todas</button>
+      </div>
+    </div>
+    <div class="custoTotalChecklist" style="display:flex; flex-wrap:wrap; gap:6px 18px; margin:12px 0;"></div>
+    <div class="card-value" style="font-size:32px; font-weight:700;" id="custoTotalPeriodoValor"></div>
+  `;
+
+  const checklist = panel.querySelector('.custoTotalChecklist');
+  for (const p of periods) {
+    const key = `${p.mes}|${p.quinzena}`;
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = FILTRO_CUSTO_TOTAL_QUINZENAS.has(key);
+    cb.addEventListener('change', () => {
+      if (cb.checked) FILTRO_CUSTO_TOTAL_QUINZENAS.add(key);
+      else FILTRO_CUSTO_TOTAL_QUINZENAS.delete(key);
+      renderPainel();
+    });
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(p.label));
+    checklist.appendChild(label);
+  }
+
+  panel.querySelector('#btnCustoTodas').onclick = () => {
+    FILTRO_CUSTO_TOTAL_QUINZENAS = new Set(periods.map((p) => `${p.mes}|${p.quinzena}`));
+    renderPainel();
+  };
+  panel.querySelector('#btnCustoNenhuma').onclick = () => {
+    FILTRO_CUSTO_TOTAL_QUINZENAS = new Set();
+    renderPainel();
+  };
+
+  const total = parcelas
+    .filter((p) => p.mesReferencia && FILTRO_CUSTO_TOTAL_QUINZENAS.has(`${p.mesReferencia}|${p.quinzena || 1}`))
+    .reduce((a, p) => a + (Number(p.custoTotal) || 0), 0);
+  panel.querySelector('#custoTotalPeriodoValor').textContent = money(total);
+
+  return panel;
 }
 
 // Rótulo "Mês/Ano" (sem quinzena) a partir de um mês (YYYY-MM).
@@ -795,6 +874,7 @@ function renderPainel() {
   `;
   root.appendChild(kpis);
   root.appendChild(renderSaldoContaGrid());
+  root.appendChild(renderCustoTotalPeriodoPanel());
 
   const hoje = r.dataReferenciaCronograma;
   const checkpointsEmp = buildMonthlyCheckpoints(STATE.meta.dataInicio, STATE.meta.previsaoTermino);
