@@ -223,6 +223,7 @@ app.post('/api/categorias/:id/avanco/limpar', async (req, res) => {
 // filtro por quinzena e status Planejado/Realizado). Só os avanços REALIZADO
 // contam no % de avanço efetivo da categoria — ver recomputeCategoriaPercManual. ----
 app.post('/api/historico-avancos', async (req, res) => {
+  let ajuste = null;
   const state = await store.mutate((s) => {
     const b = req.body || {};
     const cat = s.categorias.find((c) => c.id === b.categoriaId);
@@ -252,11 +253,15 @@ app.post('/api/historico-avancos', async (req, res) => {
     s.historicoAvancos.unshift(entry);
     if (status === 'REALIZADO') cat.dataUltimoAvanco = data;
     recomputeCategoriaPercManual(cat, s.historicoAvancos);
+    // Mesma regra de "Contas a Pagar": uma parcela nova marcada REALIZADO
+    // reorganiza as planejadas restantes para caber no orçado do contrato.
+    if (parcela && parcela.status === 'REALIZADO') ajuste = reorganizarPlanejamento(s);
   });
-  ok(res, state);
+  ok(res, state, ajuste);
 });
 
 app.put('/api/historico-avancos/:id', async (req, res) => {
+  let ajuste = null;
   const state = await store.mutate((s) => {
     const h = (s.historicoAvancos || []).find((x) => x.id === req.params.id);
     if (!h) throw Object.assign(new Error('avanço não encontrado'), { status: 404 });
@@ -269,17 +274,25 @@ app.put('/api/historico-avancos/:id', async (req, res) => {
     if (cat) {
       if (h.status === 'REALIZADO') cat.dataUltimoAvanco = h.data;
       recomputeCategoriaPercManual(cat, s.historicoAvancos);
-      // Reflete a edição na parcela de Contas a Pagar gerada por este avanço
-      // (criada/atualizada/removida conforme o novo delta) — mesma lógica do
-      // lançamento inicial, ver gerarOuAtualizarParcelaAvanco.
-      const parcelaExistente = h.parcelaId ? s.parcelas.find((p) => p.id === h.parcelaId) : undefined;
-      const parcela = gerarOuAtualizarParcelaAvanco(s, {
-        categoriaNome: cat.nome, valorOrcado: cat.valorOrcado, percAnterior: h.percAvancoAnterior, percNovo: h.percAvancoNovo, status: h.status, data: h.data,
-      }, parcelaExistente);
-      h.parcelaId = parcela ? parcela.id : null;
+      // Só sincroniza parcela dedicada se este avanço já nasceu vinculado a
+      // uma (chave `parcelaId` presente — criado via "+ Novo avanço" depois
+      // que essa funcionalidade passou a existir). Avanços antigos (lançados
+      // em lote pelo painel de quinzena, ou do backfill inicial da planilha)
+      // nunca tiveram parcela própria — o valor deles já está contabilizado
+      // em outro lugar (uma parcela combinada de várias categorias, ou nem
+      // chegou a entrar em Contas a Pagar). Gerar uma parcela agora para eles
+      // duplicaria o valor inteiro do avanço (não só o incremento da edição).
+      if ('parcelaId' in h) {
+        const parcelaExistente = h.parcelaId ? s.parcelas.find((p) => p.id === h.parcelaId) : undefined;
+        const parcela = gerarOuAtualizarParcelaAvanco(s, {
+          categoriaNome: cat.nome, valorOrcado: cat.valorOrcado, percAnterior: h.percAvancoAnterior, percNovo: h.percAvancoNovo, status: h.status, data: h.data,
+        }, parcelaExistente);
+        h.parcelaId = parcela ? parcela.id : null;
+        if (parcela && parcela.status === 'REALIZADO') ajuste = reorganizarPlanejamento(s);
+      }
     }
   });
-  ok(res, state);
+  ok(res, state, ajuste);
 });
 
 app.delete('/api/historico-avancos/:id', async (req, res) => {

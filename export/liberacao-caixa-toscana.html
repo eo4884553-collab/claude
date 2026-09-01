@@ -1360,6 +1360,9 @@ function addHistoricoAvanco(b) {
   STATE.historicoAvancos.unshift(entry);
   if (status === 'REALIZADO') cat.dataUltimoAvanco = data;
   recomputeCategoriaPercManual(cat, STATE.historicoAvancos);
+  // Mesma regra de "Contas a Pagar": uma parcela nova marcada REALIZADO
+  // reorganiza as planejadas restantes para caber no orçado do contrato.
+  if (parcela && parcela.status === 'REALIZADO') toastAjuste(reorganizarPlanejamento(STATE));
   afterMutation();
 }
 
@@ -1374,14 +1377,22 @@ function updateHistoricoAvanco(id, patch) {
   if (cat) {
     if (h.status === 'REALIZADO') cat.dataUltimoAvanco = h.data;
     recomputeCategoriaPercManual(cat, STATE.historicoAvancos);
-    // Reflete a edição na parcela de Contas a Pagar gerada por este avanço
-    // (criada/atualizada/removida conforme o novo delta) — mesma lógica do
-    // lançamento inicial, ver gerarOuAtualizarParcelaAvanco.
-    const parcelaExistente = h.parcelaId ? STATE.parcelas.find((p) => p.id === h.parcelaId) : undefined;
-    const parcela = gerarOuAtualizarParcelaAvanco({
-      categoriaNome: cat.nome, valorOrcado: cat.valorOrcado, percAnterior: h.percAvancoAnterior, percNovo: h.percAvancoNovo, status: h.status, data: h.data,
-    }, parcelaExistente);
-    h.parcelaId = parcela ? parcela.id : null;
+    // Só sincroniza parcela dedicada se este avanço já nasceu vinculado a
+    // uma (chave `parcelaId` presente — criado via "+ Novo avanço" depois
+    // que essa funcionalidade passou a existir). Avanços antigos (lançados
+    // em lote pelo painel de quinzena, ou do backfill inicial da planilha)
+    // nunca tiveram parcela própria — o valor deles já está contabilizado
+    // em outro lugar (uma parcela combinada de várias categorias, ou nem
+    // chegou a entrar em Contas a Pagar). Gerar uma parcela agora para eles
+    // duplicaria o valor inteiro do avanço (não só o incremento da edição).
+    if ('parcelaId' in h) {
+      const parcelaExistente = h.parcelaId ? STATE.parcelas.find((p) => p.id === h.parcelaId) : undefined;
+      const parcela = gerarOuAtualizarParcelaAvanco({
+        categoriaNome: cat.nome, valorOrcado: cat.valorOrcado, percAnterior: h.percAvancoAnterior, percNovo: h.percAvancoNovo, status: h.status, data: h.data,
+      }, parcelaExistente);
+      h.parcelaId = parcela ? parcela.id : null;
+      if (parcela && parcela.status === 'REALIZADO') toastAjuste(reorganizarPlanejamento(STATE));
+    }
   }
   afterMutation();
 }
