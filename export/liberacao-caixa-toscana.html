@@ -457,6 +457,26 @@ function computeCategoria(cat, dataRef) {
   };
 }
 
+// Recalcula cat.percAvancoManual a partir do avanço REALIZADO mais recente
+// (por data) no histórico dessa categoria — avanços PLANEJADO não contam,
+// igual à lógica de "parcela REALIZADO" em Contas a Pagar: um avanço fica
+// visível e editável na aba Lançar Avanços, mas só passa a valer no % de
+// avanço efetivo (e em tudo que depende dele — Execução financeira, Crédito
+// CAIXA disponível etc.) quando confirmado como REALIZADO. Chamada sempre
+// que um item do histórico é criado/editado/excluído/tem o status alterado.
+// Se não houver nenhum avanço REALIZADO para a categoria (ex.: o único foi
+// excluído), o valor atual de percAvancoManual é preservado — o % de obra
+// não "volta atrás" para um estado sem histórico algum (ex.: os valores
+// iniciais vindos da planilha, que não têm entrada correspondente aqui).
+function recomputeCategoriaPercManual(categoria, historicoAvancos) {
+  const realizados = (historicoAvancos || [])
+    .filter((h) => h.categoriaId === categoria.id && h.status === 'REALIZADO')
+    .sort((a, b) => (a.data || '').localeCompare(b.data || '') || (a.timestamp || '').localeCompare(b.timestamp || ''));
+  if (realizados.length) {
+    categoria.percAvancoManual = realizados[realizados.length - 1].percAvancoNovo;
+  }
+}
+
 // Etapas do cronograma macro planejado (puramente informativo/planejamento —
 // define o total de 1.5M e a curva "planejada"). O valor REALMENTE liberado
 // pelo banco não segue esse cronograma por % de obra (confirmado contra a
@@ -1178,13 +1198,18 @@ function lancamentoQuinzena(b) {
     valorGeradoPeriodo += valorOrcado * (novoPerc - percAnteriorEfetivo);
 
     const percAvancoManualAnterior = cat.percAvancoManual;
-    cat.percAvancoManual = novoPerc;
-    cat.dataUltimoAvanco = b.dataGeracaoCusto || vencPlanejado;
+    const statusAvanco = b.status === 'REALIZADO' ? 'REALIZADO' : 'PLANEJADO';
+    const dataAvanco = b.dataGeracaoCusto || vencPlanejado;
     STATE.historicoAvancos.unshift({
       id: newId('avanco'), categoriaId: cat.id, categoriaNome: cat.nome,
       percAvancoAnterior: percAvancoManualAnterior, percAvancoNovo: novoPerc,
-      data: b.dataGeracaoCusto || vencPlanejado, obs: b.obs || '', timestamp: new Date().toISOString(),
+      data: dataAvanco, status: statusAvanco, obs: b.obs || '', timestamp: new Date().toISOString(),
     });
+    // Um avanço lançado como PLANEJADO fica registrado, mas só passa a
+    // contar no % efetivo da categoria (e em tudo que depende dele) quando
+    // confirmado como REALIZADO — ver recomputeCategoriaPercManual.
+    if (statusAvanco === 'REALIZADO') cat.dataUltimoAvanco = dataAvanco;
+    recomputeCategoriaPercManual(cat, STATE.historicoAvancos);
     detalhes.push(`${cat.nome}: ${(percAnteriorEfetivo * 100).toFixed(1)}% → ${(novoPerc * 100).toFixed(1)}%`);
   }
 
@@ -1230,6 +1255,58 @@ function addAjuste(patch) {
   afterMutation();
 }
 function deleteAjuste(id) { STATE.fluxoCaixaAjustes = STATE.fluxoCaixaAjustes.filter((a) => a.id !== id); afterMutation(); }
+
+// ---- Histórico de avanços (aba Lançar Avanços — tabela única editável, com
+// filtro por quinzena e status Planejado/Realizado). Só os avanços REALIZADO
+// contam no % de avanço efetivo da categoria — ver recomputeCategoriaPercManual. ----
+function addHistoricoAvanco(b) {
+  const cat = STATE.categorias.find((c) => c.id === b.categoriaId);
+  if (!cat) { toast('categoria não encontrada', true); return; }
+  const novoPerc = Number(b.percAvancoNovo);
+  if (!Number.isFinite(novoPerc)) { toast('percAvancoNovo é obrigatório', true); return; }
+  const status = b.status === 'PLANEJADO' ? 'PLANEJADO' : 'REALIZADO';
+  const data = b.data || new Date().toISOString().slice(0, 10);
+  STATE.historicoAvancos = STATE.historicoAvancos || [];
+  STATE.historicoAvancos.unshift({
+    id: newId('avanco'),
+    categoriaId: cat.id,
+    categoriaNome: cat.nome,
+    percAvancoAnterior: computeCategoria(cat).percAvancoEfetivo,
+    percAvancoNovo: novoPerc,
+    data,
+    status,
+    obs: b.obs || '',
+    timestamp: new Date().toISOString(),
+  });
+  if (status === 'REALIZADO') cat.dataUltimoAvanco = data;
+  recomputeCategoriaPercManual(cat, STATE.historicoAvancos);
+  afterMutation();
+}
+
+function updateHistoricoAvanco(id, patch) {
+  const h = (STATE.historicoAvancos || []).find((x) => x.id === id);
+  if (!h) return;
+  if (patch.percAvancoNovo !== undefined) h.percAvancoNovo = Number(patch.percAvancoNovo);
+  if (patch.data !== undefined) h.data = patch.data;
+  if (patch.status !== undefined) h.status = patch.status === 'PLANEJADO' ? 'PLANEJADO' : 'REALIZADO';
+  if (patch.obs !== undefined) h.obs = patch.obs;
+  const cat = STATE.categorias.find((c) => c.id === h.categoriaId);
+  if (cat) {
+    if (h.status === 'REALIZADO') cat.dataUltimoAvanco = h.data;
+    recomputeCategoriaPercManual(cat, STATE.historicoAvancos);
+  }
+  afterMutation();
+}
+
+function deleteHistoricoAvanco(id) {
+  const h = (STATE.historicoAvancos || []).find((x) => x.id === id);
+  STATE.historicoAvancos = (STATE.historicoAvancos || []).filter((x) => x.id !== id);
+  if (h) {
+    const cat = STATE.categorias.find((c) => c.id === h.categoriaId);
+    if (cat) recomputeCategoriaPercManual(cat, STATE.historicoAvancos);
+  }
+  afterMutation();
+}
 
 function resetToSeed() {
   const fresh = JSON.parse(JSON.stringify(ORIGINAL_SEED));
@@ -1333,6 +1410,31 @@ function origemSaldoRecursoLabel(origem, r) {
   if (origem === 'manual') return 'Ajustado manualmente (ver Parâmetros → Avançado)';
   if (origem === 'itens') return `Recurso próprio − itens consumidos (ver Parâmetros): ${money(r.totalConsumoRecursoProprio)}`;
   return `Execução financeira − gasto acumulado (${money(r.totalGastoAcumulado)})`;
+}
+
+// input percentual: mostra "42,5%" em repouso; ao focar, edita em número
+// simples (0-100), reformatando ao sair. Valor salvo/recebido é sempre
+// fração (0-1), igual aos demais campos de percentual do app.
+function percentInput({ value, onSave, wide = false }) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.inputMode = 'decimal';
+  input.className = `cell-input${wide ? ' wide' : ''}`;
+  input.value = pct(value);
+  input.addEventListener('focus', () => {
+    input.value = String(Math.round((Number(value) || 0) * 1000) / 10).replace('.', ',');
+    input.select();
+  });
+  const commit = () => {
+    const raw = input.value.trim().replace(',', '.');
+    const n = Number(raw);
+    const v = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) / 100 : 0;
+    input.value = pct(v);
+    if (v !== value) onSave(v);
+  };
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
+  return input;
 }
 
 function textInput({ value, onSave, wide = false }) {
@@ -2057,35 +2159,104 @@ function renderAvancos() {
     <td></td>
   </tr>`;
 
-  const hist = document.createElement('div');
-  hist.className = 'panel';
-  hist.innerHTML = `<div class="panel-header"><div><h2>Histórico de avanços lançados</h2>
-    <div class="muted">Filtre por quinzena para ver só o avanço realizado naquele período específico.</div></div></div>`;
+  root.appendChild(renderHistoricoAvancosPanel());
+}
+
+// Histórico de avanços — tabela única editável com avanços PLANEJADO e
+// REALIZADO lado a lado, filtro por quinzena igual ao Fluxo de Caixa (mesmo
+// componente renderQuinzenaFilter). Edite % novo, data, status ou observação
+// de qualquer linha, ou confirme um Planejado como Realizado quando o avanço
+// acontecer de fato — só REALIZADO conta no % de avanço efetivo da
+// categoria (ver recomputeCategoriaPercManual).
+function renderHistoricoAvancosPanel() {
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <h2>Histórico de avanços — planejados e realizados</h2>
+        <div class="muted">Edite o % ou a data de qualquer avanço já lançado, ou confirme o status (Planejado → Realizado) quando o avanço acontecer de fato. Um avanço Planejado fica visível aqui, mas só entra no % efetivo da categoria depois de confirmado como Realizado. Filtre por quinzena para ver só aquele período.</div>
+      </div>
+      <button class="btn primary" id="btnNovoAvanco">+ Novo avanço</button>
+    </div>
+    <div class="quinzenaFilterSlot"></div>
+    <div class="table-scroll"></div>
+  `;
   const periods = buildQuinzenaPeriods(VIEW.meta?.dataInicio, VIEW.meta?.previsaoTermino);
-  hist.appendChild(renderQuinzenaFilter({
+  panel.querySelector('.quinzenaFilterSlot').appendChild(renderQuinzenaFilter({
     periods,
     selected: FILTRO_QUINZENA_AVANCOS,
     onChange: (v) => { FILTRO_QUINZENA_AVANCOS = v; renderAvancos(); },
   }));
-  const histEntries = VIEW.historicoAvancos.filter((h) => dataNaQuinzena(h.data, FILTRO_QUINZENA_AVANCOS));
-  const histTable = document.createElement('div');
-  histTable.className = 'table-scroll';
-  if (!histEntries.length) {
-    histTable.innerHTML = `<div class="muted">${FILTRO_QUINZENA_AVANCOS ? 'Nenhum avanço lançado nessa quinzena.' : 'Nenhum avanço lançado ainda.'}</div>`;
+  const wrap = panel.querySelector('.table-scroll');
+  const entries = [...(STATE.historicoAvancos || [])]
+    .filter((h) => dataNaQuinzena(h.data, FILTRO_QUINZENA_AVANCOS))
+    .sort((a, b) => (a.data || '').localeCompare(b.data || ''));
+  if (!entries.length) {
+    wrap.innerHTML = `<div class="muted">${FILTRO_QUINZENA_AVANCOS ? 'Nenhum avanço lançado nessa quinzena.' : 'Nenhum avanço lançado ainda.'}</div>`;
   } else {
-    histTable.innerHTML = `<table class="data"><thead><tr>
-      <th>Data</th><th class="wrap">Categoria</th><th class="num">% anterior</th><th class="num">% novo</th><th class="wrap">Observação</th>
-    </tr></thead><tbody>${histEntries.map((h) => `
-      <tr>
-        <td>${dateBR(h.data)}</td>
-        <td class="wrap">${esc(h.categoriaNome)}</td>
-        <td class="num">${h.percAvancoAnterior == null ? '—' : pct(h.percAvancoAnterior)}</td>
-        <td class="num">${pct(h.percAvancoNovo)}</td>
-        <td class="wrap">${esc(h.obs)}</td>
-      </tr>`).join('')}</tbody></table>`;
+    const tbl = document.createElement('table');
+    tbl.className = 'data';
+    tbl.innerHTML = `<thead><tr>
+      <th>Data</th><th class="wrap">Categoria</th><th class="num">% anterior</th><th class="num">% novo</th>
+      <th>Status</th><th class="wrap">Observação</th><th></th>
+    </tr></thead><tbody></tbody>`;
+    const tbody = tbl.querySelector('tbody');
+    for (const h of entries) {
+      const tr = document.createElement('tr');
+      tr.appendChild(td(dateInput({ value: h.data, onSave: (v) => updateHistoricoAvanco(h.id, { data: v }) })));
+      tr.appendChild(td(`<span class="wrap">${esc(h.categoriaNome)}</span>`));
+      tr.appendChild(td(`<span class="num">${h.percAvancoAnterior == null ? '—' : pct(h.percAvancoAnterior)}</span>`));
+      tr.appendChild(td(percentInput({ value: h.percAvancoNovo, onSave: (v) => updateHistoricoAvanco(h.id, { percAvancoNovo: v }) })));
+      tr.appendChild(td(selectInput({
+        value: h.status || 'REALIZADO',
+        options: ['PLANEJADO', 'REALIZADO'],
+        onSave: (v) => updateHistoricoAvanco(h.id, { status: v }),
+      })));
+      tr.appendChild(td(textInput({ value: h.obs, wide: true, onSave: (v) => updateHistoricoAvanco(h.id, { obs: v }) })));
+      const delTd = document.createElement('td');
+      const delBtn = document.createElement('button');
+      delBtn.className = 'icon-btn'; delBtn.textContent = '🗑';
+      delBtn.onclick = () => { if (confirm(`Remover avanço de "${h.categoriaNome}"?`)) deleteHistoricoAvanco(h.id); };
+      delTd.appendChild(delBtn);
+      tr.appendChild(delTd);
+      tbody.appendChild(tr);
+    }
+    wrap.appendChild(tbl);
   }
-  hist.appendChild(histTable);
-  root.appendChild(hist);
+  panel.querySelector('#btnNovoAvanco').onclick = () => openNovoAvancoModal();
+  return panel;
+}
+
+function openNovoAvancoModal() {
+  openModal('Novo avanço', (body, close) => {
+    const form = document.createElement('form');
+    form.className = 'form-grid';
+    form.innerHTML = `
+      <label style="grid-column: 1 / -1">Categoria
+        <select name="categoriaId" required>${STATE.categorias.map((c) => `<option value="${c.id}">${c.numero}. ${esc(c.nome)}</option>`).join('')}</select>
+      </label>
+      <label>% novo acumulado<input name="percAvancoNovo" type="number" step="0.1" min="0" max="100" required /></label>
+      <label>Data<input name="data" type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>
+      <label>Status
+        <select name="status"><option value="PLANEJADO">Planejado</option><option value="REALIZADO" selected>Realizado</option></select>
+      </label>
+      <label style="grid-column: 1 / -1">Observação<input name="obs" /></label>
+      <div style="grid-column: 1 / -1; display:flex; gap:8px; justify-content:flex-end;">
+        <button type="button" class="btn" id="cancelBtn">Cancelar</button>
+        <button type="submit" class="btn primary">Adicionar</button>
+      </div>
+    `;
+    form.querySelector('#cancelBtn').onclick = close;
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const payload = Object.fromEntries(new FormData(form).entries());
+      payload.percAvancoNovo = Number(payload.percAvancoNovo) / 100;
+      addHistoricoAvanco(payload);
+      close();
+    });
+    body.appendChild(form);
+  });
 }
 
 /* ==========================================================================
