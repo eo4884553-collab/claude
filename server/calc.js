@@ -519,7 +519,27 @@ function reorganizarPlanejamento(state, dataAjuste) {
   return { fator: round2(fator * 10000) / 10000, tetoPlanejado: tetoParaPix, somaPlanejadoAnterior: somaPixPlanejado, qtd: planejadas.length };
 }
 
+// Recalcula cat.percAvancoManual a partir do avanço REALIZADO mais recente
+// (por data) no histórico dessa categoria — avanços PLANEJADO não contam,
+// igual à lógica de "parcela REALIZADO" em Contas a Pagar: um avanço fica
+// visível e editável na aba Lançar Avanços, mas só passa a valer no % de
+// avanço efetivo (e em tudo que depende dele — Execução financeira, Crédito
+// CAIXA disponível etc.) quando confirmado como REALIZADO. Chamada sempre
+// que um item do histórico é criado/editado/excluído/tem o status alterado.
+// Se não houver nenhum avanço REALIZADO para a categoria (ex.: o único foi
+// excluído), o valor atual de percAvancoManual é preservado — o % de obra
+// não "volta atrás" para um estado sem histórico algum (ex.: os valores
+// iniciais vindos da planilha, que não têm entrada correspondente aqui).
+function recomputeCategoriaPercManual(categoria, historicoAvancos) {
+  const realizados = (historicoAvancos || [])
+    .filter((h) => h.categoriaId === categoria.id && h.status === 'REALIZADO')
+    .sort((a, b) => (a.data || '').localeCompare(b.data || '') || (a.timestamp || '').localeCompare(b.timestamp || ''));
+  if (realizados.length) {
+    categoria.percAvancoManual = realizados[realizados.length - 1].percAvancoNovo;
+  }
+}
+
 module.exports = {
-  recompute, computeCategoria, reorganizarPlanejamento, round2, clamp,
+  recompute, computeCategoria, reorganizarPlanejamento, recomputeCategoriaPercManual, round2, clamp,
   monthKeyFromDateStr, quinzenaFromDateStr, monthQuinzenaLabel, addMonthsToKey, monthLabel,
 };

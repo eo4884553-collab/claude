@@ -4,7 +4,7 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const store = require('./store');
-const { recompute, computeCategoria, reorganizarPlanejamento, monthKeyFromDateStr, quinzenaFromDateStr, monthQuinzenaLabel } = require('./calc');
+const { recompute, computeCategoria, reorganizarPlanejamento, recomputeCategoriaPercManual, monthKeyFromDateStr, quinzenaFromDateStr, monthQuinzenaLabel } = require('./calc');
 
 const app = express();
 app.use(express.json());
@@ -131,27 +131,31 @@ app.put('/api/categorias/:id', async (req, res) => {
   ok(res, state);
 });
 
-// Lança um avanço físico (registra no histórico e define o % manual da categoria).
+// Lança um avanço físico (registra no histórico; só passa a valer no % da
+// categoria quando o status é REALIZADO — ver recomputeCategoriaPercManual).
 app.post('/api/categorias/:id/avanco', async (req, res) => {
   const state = await store.mutate((s) => {
     const cat = s.categorias.find((c) => c.id === req.params.id);
     if (!cat) throw Object.assign(new Error('categoria não encontrada'), { status: 404 });
-    const { perc, data, obs } = req.body || {};
+    const { perc, data, obs, status } = req.body || {};
     if (perc === undefined || perc === null) throw Object.assign(new Error('perc é obrigatório'), { status: 400 });
     const percAvancoAnterior = cat.percAvancoManual;
-    cat.percAvancoManual = Number(perc);
-    cat.dataUltimoAvanco = data || new Date().toISOString().slice(0, 10);
+    const dataAvanco = data || new Date().toISOString().slice(0, 10);
+    const statusAvanco = status === 'PLANEJADO' ? 'PLANEJADO' : 'REALIZADO';
     if (obs !== undefined) cat.observacao = obs;
     s.historicoAvancos.unshift({
       id: newId('avanco'),
       categoriaId: cat.id,
       categoriaNome: cat.nome,
       percAvancoAnterior,
-      percAvancoNovo: cat.percAvancoManual,
-      data: cat.dataUltimoAvanco,
+      percAvancoNovo: Number(perc),
+      data: dataAvanco,
+      status: statusAvanco,
       obs: obs || '',
       timestamp: new Date().toISOString(),
     });
+    if (statusAvanco === 'REALIZADO') cat.dataUltimoAvanco = dataAvanco;
+    recomputeCategoriaPercManual(cat, s.historicoAvancos);
   });
   ok(res, state);
 });
@@ -162,6 +166,66 @@ app.post('/api/categorias/:id/avanco/limpar', async (req, res) => {
     const cat = s.categorias.find((c) => c.id === req.params.id);
     if (!cat) throw Object.assign(new Error('categoria não encontrada'), { status: 404 });
     cat.percAvancoManual = null;
+  });
+  ok(res, state);
+});
+
+// ---- Histórico de avanços (aba Lançar Avanços — tabela única editável, com
+// filtro por quinzena e status Planejado/Realizado). Só os avanços REALIZADO
+// contam no % de avanço efetivo da categoria — ver recomputeCategoriaPercManual. ----
+app.post('/api/historico-avancos', async (req, res) => {
+  const state = await store.mutate((s) => {
+    const b = req.body || {};
+    const cat = s.categorias.find((c) => c.id === b.categoriaId);
+    if (!cat) throw Object.assign(new Error('categoria não encontrada'), { status: 404 });
+    const novoPerc = Number(b.percAvancoNovo);
+    if (!Number.isFinite(novoPerc)) throw Object.assign(new Error('percAvancoNovo é obrigatório'), { status: 400 });
+    const status = b.status === 'PLANEJADO' ? 'PLANEJADO' : 'REALIZADO';
+    const data = b.data || new Date().toISOString().slice(0, 10);
+    s.historicoAvancos = s.historicoAvancos || [];
+    s.historicoAvancos.unshift({
+      id: newId('avanco'),
+      categoriaId: cat.id,
+      categoriaNome: cat.nome,
+      percAvancoAnterior: computeCategoria(cat).percAvancoEfetivo,
+      percAvancoNovo: novoPerc,
+      data,
+      status,
+      obs: b.obs || '',
+      timestamp: new Date().toISOString(),
+    });
+    if (status === 'REALIZADO') cat.dataUltimoAvanco = data;
+    recomputeCategoriaPercManual(cat, s.historicoAvancos);
+  });
+  ok(res, state);
+});
+
+app.put('/api/historico-avancos/:id', async (req, res) => {
+  const state = await store.mutate((s) => {
+    const h = (s.historicoAvancos || []).find((x) => x.id === req.params.id);
+    if (!h) throw Object.assign(new Error('avanço não encontrado'), { status: 404 });
+    const { percAvancoNovo, data, status, obs } = req.body || {};
+    if (percAvancoNovo !== undefined) h.percAvancoNovo = Number(percAvancoNovo);
+    if (data !== undefined) h.data = data;
+    if (status !== undefined) h.status = status === 'PLANEJADO' ? 'PLANEJADO' : 'REALIZADO';
+    if (obs !== undefined) h.obs = obs;
+    const cat = s.categorias.find((c) => c.id === h.categoriaId);
+    if (cat) {
+      if (h.status === 'REALIZADO') cat.dataUltimoAvanco = h.data;
+      recomputeCategoriaPercManual(cat, s.historicoAvancos);
+    }
+  });
+  ok(res, state);
+});
+
+app.delete('/api/historico-avancos/:id', async (req, res) => {
+  const state = await store.mutate((s) => {
+    const h = (s.historicoAvancos || []).find((x) => x.id === req.params.id);
+    s.historicoAvancos = (s.historicoAvancos || []).filter((x) => x.id !== req.params.id);
+    if (h) {
+      const cat = s.categorias.find((c) => c.id === h.categoriaId);
+      if (cat) recomputeCategoriaPercManual(cat, s.historicoAvancos);
+    }
   });
   ok(res, state);
 });
@@ -431,18 +495,24 @@ app.post('/api/lancamento-quinzena', async (req, res) => {
       valorGeradoPeriodo += valorOrcado * (novoPerc - percAnteriorEfetivo);
 
       const percAvancoManualAnterior = cat.percAvancoManual;
-      cat.percAvancoManual = novoPerc;
-      cat.dataUltimoAvanco = b.dataGeracaoCusto || vencPlanejado;
+      const statusAvanco = b.status === 'REALIZADO' ? 'REALIZADO' : 'PLANEJADO';
+      const dataAvanco = b.dataGeracaoCusto || vencPlanejado;
       s.historicoAvancos.unshift({
         id: newId('avanco'),
         categoriaId: cat.id,
         categoriaNome: cat.nome,
         percAvancoAnterior: percAvancoManualAnterior,
         percAvancoNovo: novoPerc,
-        data: b.dataGeracaoCusto || vencPlanejado,
+        data: dataAvanco,
+        status: statusAvanco,
         obs: b.obs || '',
         timestamp: new Date().toISOString(),
       });
+      // Um avanço lançado como PLANEJADO fica registrado, mas só passa a
+      // contar no % efetivo da categoria (e em tudo que depende dele) quando
+      // confirmado como REALIZADO — ver recomputeCategoriaPercManual.
+      if (statusAvanco === 'REALIZADO') cat.dataUltimoAvanco = dataAvanco;
+      recomputeCategoriaPercManual(cat, s.historicoAvancos);
       detalhes.push(`${cat.nome}: ${(percAnteriorEfetivo * 100).toFixed(1)}% → ${(novoPerc * 100).toFixed(1)}%`);
     }
 

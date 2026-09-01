@@ -239,6 +239,31 @@ function moneyInput({ value, onSave, manual = false, wide = false }) {
   return input;
 }
 
+// input percentual: mostra "42,5%" em repouso; ao focar, edita em número
+// simples (0-100), reformatando ao sair. Valor salvo/recebido é sempre
+// fração (0-1), igual aos demais campos de percentual do app.
+function percentInput({ value, onSave, wide = false }) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.inputMode = 'decimal';
+  input.className = `cell-input${wide ? ' wide' : ''}`;
+  input.value = pct(value);
+  input.addEventListener('focus', () => {
+    input.value = String(Math.round((Number(value) || 0) * 1000) / 10).replace('.', ',');
+    input.select();
+  });
+  const commit = () => {
+    const raw = input.value.trim().replace(',', '.');
+    const n = Number(raw);
+    const v = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) / 100 : 0;
+    input.value = pct(v);
+    if (v !== value) onSave(v);
+  };
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
+  return input;
+}
+
 function textInput({ value, onSave, wide = false }) {
   const input = document.createElement('input');
   input.type = 'text';
@@ -989,35 +1014,104 @@ function renderAvancos() {
     <td></td>
   </tr>`;
 
-  const hist = document.createElement('div');
-  hist.className = 'panel';
-  hist.innerHTML = `<div class="panel-header"><div><h2>Histórico de avanços lançados</h2>
-    <div class="muted">Filtre por quinzena para ver só o avanço realizado naquele período específico.</div></div></div>`;
+  root.appendChild(renderHistoricoAvancosPanel());
+}
+
+// Histórico de avanços — tabela única editável com avanços PLANEJADO e
+// REALIZADO lado a lado, filtro por quinzena igual ao Fluxo de Caixa (mesmo
+// componente renderQuinzenaFilter). Edite % novo, data, status ou observação
+// de qualquer linha, ou confirme um Planejado como Realizado quando o avanço
+// acontecer de fato — só REALIZADO conta no % de avanço efetivo da
+// categoria (ver recomputeCategoriaPercManual no servidor).
+function renderHistoricoAvancosPanel() {
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <h2>Histórico de avanços — planejados e realizados</h2>
+        <div class="muted">Edite o % ou a data de qualquer avanço já lançado, ou confirme o status (Planejado → Realizado) quando o avanço acontecer de fato. Um avanço Planejado fica visível aqui, mas só entra no % efetivo da categoria depois de confirmado como Realizado. Filtre por quinzena para ver só aquele período.</div>
+      </div>
+      <button class="btn primary" id="btnNovoAvanco">+ Novo avanço</button>
+    </div>
+    <div class="quinzenaFilterSlot"></div>
+    <div class="table-scroll"></div>
+  `;
   const periods = buildQuinzenaPeriods(STATE.meta?.dataInicio, STATE.meta?.previsaoTermino);
-  hist.appendChild(renderQuinzenaFilter({
+  panel.querySelector('.quinzenaFilterSlot').appendChild(renderQuinzenaFilter({
     periods,
     selected: FILTRO_QUINZENA_AVANCOS,
     onChange: (v) => { FILTRO_QUINZENA_AVANCOS = v; renderAvancos(); },
   }));
-  const histEntries = STATE.historicoAvancos.filter((h) => dataNaQuinzena(h.data, FILTRO_QUINZENA_AVANCOS));
-  const histTable = document.createElement('div');
-  histTable.className = 'table-scroll';
-  if (!histEntries.length) {
-    histTable.innerHTML = `<div class="muted">${FILTRO_QUINZENA_AVANCOS ? 'Nenhum avanço lançado nessa quinzena.' : 'Nenhum avanço lançado ainda.'}</div>`;
+  const wrap = panel.querySelector('.table-scroll');
+  const entries = [...(STATE.historicoAvancos || [])]
+    .filter((h) => dataNaQuinzena(h.data, FILTRO_QUINZENA_AVANCOS))
+    .sort((a, b) => (a.data || '').localeCompare(b.data || ''));
+  if (!entries.length) {
+    wrap.innerHTML = `<div class="muted">${FILTRO_QUINZENA_AVANCOS ? 'Nenhum avanço lançado nessa quinzena.' : 'Nenhum avanço lançado ainda.'}</div>`;
   } else {
-    histTable.innerHTML = `<table class="data"><thead><tr>
-      <th>Data</th><th class="wrap">Categoria</th><th class="num">% anterior</th><th class="num">% novo</th><th class="wrap">Observação</th>
-    </tr></thead><tbody>${histEntries.map((h) => `
-      <tr>
-        <td>${dateBR(h.data)}</td>
-        <td class="wrap">${esc(h.categoriaNome)}</td>
-        <td class="num">${h.percAvancoAnterior == null ? '—' : pct(h.percAvancoAnterior)}</td>
-        <td class="num">${pct(h.percAvancoNovo)}</td>
-        <td class="wrap">${esc(h.obs)}</td>
-      </tr>`).join('')}</tbody></table>`;
+    const tbl = document.createElement('table');
+    tbl.className = 'data';
+    tbl.innerHTML = `<thead><tr>
+      <th>Data</th><th class="wrap">Categoria</th><th class="num">% anterior</th><th class="num">% novo</th>
+      <th>Status</th><th class="wrap">Observação</th><th></th>
+    </tr></thead><tbody></tbody>`;
+    const tbody = tbl.querySelector('tbody');
+    for (const h of entries) {
+      const tr = document.createElement('tr');
+      tr.appendChild(td(dateInput({ value: h.data, onSave: (v) => api('PUT', `/api/historico-avancos/${h.id}`, { data: v }) })));
+      tr.appendChild(td(`<span class="wrap">${esc(h.categoriaNome)}</span>`));
+      tr.appendChild(td(`<span class="num">${h.percAvancoAnterior == null ? '—' : pct(h.percAvancoAnterior)}</span>`));
+      tr.appendChild(td(percentInput({ value: h.percAvancoNovo, onSave: (v) => api('PUT', `/api/historico-avancos/${h.id}`, { percAvancoNovo: v }) })));
+      tr.appendChild(td(selectInput({
+        value: h.status || 'REALIZADO',
+        options: ['PLANEJADO', 'REALIZADO'],
+        onSave: (v) => api('PUT', `/api/historico-avancos/${h.id}`, { status: v }),
+      })));
+      tr.appendChild(td(textInput({ value: h.obs, wide: true, onSave: (v) => api('PUT', `/api/historico-avancos/${h.id}`, { obs: v }) })));
+      const delTd = document.createElement('td');
+      const delBtn = document.createElement('button');
+      delBtn.className = 'icon-btn'; delBtn.textContent = '🗑';
+      delBtn.onclick = () => { if (confirm(`Remover avanço de "${h.categoriaNome}"?`)) api('DELETE', `/api/historico-avancos/${h.id}`); };
+      delTd.appendChild(delBtn);
+      tr.appendChild(delTd);
+      tbody.appendChild(tr);
+    }
+    wrap.appendChild(tbl);
   }
-  hist.appendChild(histTable);
-  root.appendChild(hist);
+  panel.querySelector('#btnNovoAvanco').onclick = () => openNovoAvancoModal();
+  return panel;
+}
+
+function openNovoAvancoModal() {
+  openModal('Novo avanço', (body, close) => {
+    const form = document.createElement('form');
+    form.className = 'form-grid';
+    form.innerHTML = `
+      <label style="grid-column: 1 / -1">Categoria
+        <select name="categoriaId" required>${STATE.categorias.map((c) => `<option value="${c.id}">${c.numero}. ${esc(c.nome)}</option>`).join('')}</select>
+      </label>
+      <label>% novo acumulado<input name="percAvancoNovo" type="number" step="0.1" min="0" max="100" required /></label>
+      <label>Data<input name="data" type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>
+      <label>Status
+        <select name="status"><option value="PLANEJADO">Planejado</option><option value="REALIZADO" selected>Realizado</option></select>
+      </label>
+      <label style="grid-column: 1 / -1">Observação<input name="obs" /></label>
+      <div style="grid-column: 1 / -1; display:flex; gap:8px; justify-content:flex-end;">
+        <button type="button" class="btn" id="cancelBtn">Cancelar</button>
+        <button type="submit" class="btn primary">Adicionar</button>
+      </div>
+    `;
+    form.querySelector('#cancelBtn').onclick = close;
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const payload = Object.fromEntries(new FormData(form).entries());
+      payload.percAvancoNovo = Number(payload.percAvancoNovo) / 100;
+      await api('POST', '/api/historico-avancos', payload);
+      close();
+    });
+    body.appendChild(form);
+  });
 }
 
 /* ==========================================================================

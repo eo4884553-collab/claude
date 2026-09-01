@@ -28,15 +28,18 @@ function save(state) {
 }
 
 // Fila simples para serializar escritas (evita corrida entre requisições concorrentes).
+// Encadeada com .catch() para não "envenenar" a fila: uma mutação que falha (ex.:
+// erro de validação 400) não pode travar todas as requisições seguintes.
 let queue = Promise.resolve();
 function mutate(fn) {
-  queue = queue.then(async () => {
+  const run = queue.catch(() => {}).then(async () => {
     const state = load();
     const result = await fn(state);
     save(state);
     return result !== undefined ? result : state;
   });
-  return queue;
+  queue = run.catch(() => {});
+  return run;
 }
 
 function resetToSeed() {
