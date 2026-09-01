@@ -2,6 +2,7 @@
 
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const store = require('./store');
 const { recompute, computeCategoria, reorganizarPlanejamento, recomputeCategoriaPercManual, monthKeyFromDateStr, quinzenaFromDateStr, monthQuinzenaLabel } = require('./calc');
@@ -693,6 +694,24 @@ app.delete('/api/fluxo-caixa-ajustes/:id', async (req, res) => {
     s.fluxoCaixaAjustes = s.fluxoCaixaAjustes.filter((a) => a.id !== req.params.id);
   });
   ok(res, state);
+});
+
+// Baixa uma cópia local do app inteiro (um único arquivo .html autocontido,
+// igual ao Artifact publicado) com os dados atuais do servidor embutidos —
+// reaproveita o mesmo "molde" (export/liberacao-caixa-toscana.html) e só
+// troca o bloco de estado, então abre em qualquer navegador, mesmo sem
+// internet, e pode ser guardado como backup.
+app.get('/api/export-html', (req, res) => {
+  const state = store.load();
+  const shellPath = path.join(__dirname, '..', 'export', 'liberacao-caixa-toscana.html');
+  const shell = fs.readFileSync(shellPath, 'utf8');
+  const json = JSON.stringify(state).replace(/</g, '\\u003c');
+  const newTag = `<script id="state-data" type="application/json">${json}</script>`;
+  const html = shell.replace(/<script id="state-data" type="application\/json">[\s\S]*?<\/script>/, newTag);
+  const filename = `liberacao-caixa-toscana-${new Date().toISOString().slice(0, 10)}.html`;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(`<!doctype html>\n${html}`);
 });
 
 // eslint-disable-next-line no-unused-vars

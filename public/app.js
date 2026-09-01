@@ -15,6 +15,9 @@ let FILTRO_QUINZENA_AVANCOS = null;
 let FILTRO_QUINZENA_CRONOGRAMA = null;
 let FILTRO_QUINZENA_FLUXO = null;
 let FILTRO_QUINZENA_PCI = null;
+// Filtro por mês (não quinzena) da tabela de Contas a Pagar — mesReferencia
+// (ex.: "2026-09") ou null = "Todos os meses".
+let FILTRO_MES_PARCELAS = null;
 
 const fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtNum = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 });
@@ -117,6 +120,35 @@ function renderQuinzenaFilter({ periods, selected, onChange }) {
     const [mes, quinzena] = select.value.split('|');
     onChange({ mes, quinzena: Number(quinzena) });
   });
+  return wrap;
+}
+
+// Rótulo "Mês/Ano" (sem quinzena) a partir de um mês (YYYY-MM).
+function monthLabel(monthKey) {
+  if (!monthKey) return 'Sem data';
+  const [y, m] = monthKey.split('-');
+  return `${MONTH_NAMES_PT[Number(m) - 1] || m}/${y}`;
+}
+
+// Seletor "Filtrar por mês" — variante mais simples do filtro de quinzena,
+// usada em Contas a Pagar (mostra as duas parcelas do mês juntas, já que a
+// tabela ali é o documento enviado ao cliente por mês). `months` é a lista
+// de mesReferencia ("2026-09") já presentes na tabela, na ordem em que
+// devem aparecer.
+function renderMesFilter({ months, selected, onChange }) {
+  const wrap = document.createElement('div');
+  wrap.className = 'form-grid';
+  wrap.style.maxWidth = '280px';
+  wrap.style.marginBottom = '4px';
+  wrap.innerHTML = `<label>Filtrar por mês
+    <select class="cell-input">
+      <option value="">Todos os meses</option>
+      ${months.map((m) => `<option value="${m}">${esc(monthLabel(m))}</option>`).join('')}
+    </select>
+  </label>`;
+  const select = wrap.querySelector('select');
+  if (selected) select.value = selected;
+  select.addEventListener('change', () => onChange(select.value || null));
   return wrap;
 }
 
@@ -802,6 +834,7 @@ function renderDashboard() {
       </div>
       <button class="btn primary" id="btnNovaParcela">+ Nova parcela</button>
     </div>
+    <div class="mesFilterSlot"></div>
     <div class="table-scroll"><table class="data" id="tblParcelas">
       <thead><tr>
         <th>Parcela</th><th>Mês / Parcela</th><th class="num">Empreiteiro (PIX)</th><th class="num">ADM (PIX)</th>
@@ -814,8 +847,19 @@ function renderDashboard() {
   `;
   root.appendChild(panel);
 
+  const mesesParcelas = [...new Set(STATE.parcelas.map((p) => p.mesReferencia).filter(Boolean))].sort();
+  panel.querySelector('.mesFilterSlot').appendChild(renderMesFilter({
+    months: mesesParcelas,
+    selected: FILTRO_MES_PARCELAS,
+    onChange: (v) => { FILTRO_MES_PARCELAS = v; renderDashboard(); },
+  }));
+  const parcelasFiltradas = STATE.parcelas.filter((p) => !FILTRO_MES_PARCELAS || p.mesReferencia === FILTRO_MES_PARCELAS);
+
   const tbody = panel.querySelector('tbody');
-  for (const p of STATE.parcelas) {
+  if (!parcelasFiltradas.length) {
+    tbody.innerHTML = `<tr><td colspan="14" class="muted">${FILTRO_MES_PARCELAS ? 'Nenhuma parcela nesse mês.' : 'Nenhuma parcela lançada ainda.'}</td></tr>`;
+  }
+  for (const p of parcelasFiltradas) {
     const tr = document.createElement('tr');
     tr.appendChild(td(textInput({ value: p.label, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { label: v }) })));
     tr.appendChild(td(`<span class="badge gray">${esc(p.mesReferenciaLabel || 'Sem data')}</span>`));
@@ -840,9 +884,9 @@ function renderDashboard() {
   }
 
   const tfoot = panel.querySelector('tfoot');
-  const sum = (f) => STATE.parcelas.reduce((a, p) => a + (Number(p[f]) || 0), 0);
+  const sum = (f) => parcelasFiltradas.reduce((a, p) => a + (Number(p[f]) || 0), 0);
   tfoot.innerHTML = `<tr>
-    <td>TOTAL</td>
+    <td>${FILTRO_MES_PARCELAS ? 'TOTAL DO MÊS' : 'TOTAL'}</td>
     <td></td>
     <td class="num">${money(sum('totalEmpreiteiroPix'))}</td>
     <td class="num">${money(sum('totalAdmPix'))}</td>
@@ -2167,6 +2211,17 @@ function renderParametros() {
   root.appendChild(paramPanel);
 
   root.appendChild(renderConsumosRecursoProprioPanel());
+
+  const exportPanel = document.createElement('div');
+  exportPanel.className = 'panel';
+  exportPanel.innerHTML = `<div class="panel-header"><h2>Salvar cópia local</h2></div>
+    <div class="muted" style="margin-bottom:8px">Baixa uma cópia deste app num único arquivo .html, com os dados de hoje já embutidos — abre em qualquer navegador, mesmo sem internet, e pode ser guardada como backup.</div>`;
+  const exportBtn = document.createElement('button');
+  exportBtn.className = 'btn primary';
+  exportBtn.textContent = 'Salvar cópia em HTML';
+  exportBtn.onclick = () => { window.location.href = '/api/export-html'; };
+  exportPanel.appendChild(exportBtn);
+  root.appendChild(exportPanel);
 
   const dangerPanel = document.createElement('div');
   dangerPanel.className = 'panel';
