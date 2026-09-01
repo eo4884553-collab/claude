@@ -157,6 +157,14 @@
   td.num, th.num { text-align: right; font-family: "IBM Plex Mono", monospace; }
   td.wrap { white-space: normal; min-width: 180px; }
 
+  /* Contas a Pagar: fixa a coluna de excluir (🗑) na borda direita — a tabela
+     é larga (14 colunas) e o ícone ficava fora da tela sem rolar até o fim. */
+  #tblParcelas th:last-child, #tblParcelas td:last-child {
+    position: sticky; right: 0; background: var(--surface); border-left: 1px solid var(--border);
+  }
+  #tblParcelas th:last-child { background: var(--surface-2); z-index: 2; }
+  #tblParcelas tbody tr:hover td:last-child { background: var(--surface-2); }
+
   .cell-input {
     border: 1px solid transparent; background: transparent; font: inherit; color: var(--ink);
     width: 100%; min-width: 70px; padding: 3px 5px; border-radius: 5px; font-family: "IBM Plex Mono", monospace;
