@@ -80,6 +80,55 @@ function sugestaoCartaoDoMes(s, mes) {
   return Math.round(total * 100) / 100;
 }
 
+function round2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+// Cria (ou atualiza, se `parcelaExistente` for passada) a parcela de Contas a
+// Pagar ligada a um avanço individual lançado em "Histórico de avanços" — o
+// mesmo cálculo de "valor gerado" que "Lançar avanço da quinzena" já faz para
+// vários avanços de uma vez (valorOrcado × delta de %), aqui para um avanço
+// só. Sem isso, um avanço lançado/editado fora do painel de quinzena nunca
+// aparecia em Contas a Pagar nem no Fluxo de Caixa — só mudava o % da
+// categoria. Retorna a parcela (nova ou atualizada), ou `null` se o delta for
+// zero (nada a gerar/atualizar). Só entra aqui o efeito do "Detalhamento FC"
+// (cartão) fica de fora — não há campo de cartão no formulário de avanço.
+function gerarOuAtualizarParcelaAvanco(s, { categoriaNome, valorOrcado, percAnterior, percNovo, status, data }, parcelaExistente) {
+  const valorGerado = round2((Number(valorOrcado) || 0) * ((Number(percNovo) || 0) - (Number(percAnterior) || 0)));
+  if (!valorGerado) {
+    // Sem valor a gerar: se havia uma parcela ligada de uma edição anterior,
+    // remove — o avanço deixou de ter efeito financeiro (ex.: % voltou ao que já estava).
+    if (parcelaExistente) s.parcelas = s.parcelas.filter((p) => p !== parcelaExistente);
+    return null;
+  }
+  const mes = monthKeyFromDateStr(data);
+  const quinzena = quinzenaFromDateStr(data) || 1;
+  const taxaAdm = Number(s.parametros.taxaAdministracaoPercent) || 0;
+  const totalEmpreiteiroPix = valorGerado;
+  const totalAdmPix = round2(valorGerado * taxaAdm);
+  const custoTotal = round2(totalEmpreiteiroPix + totalAdmPix);
+  const vencPlanejado = mes ? dataQuinzena(mes, quinzena) : data;
+  const label = `${monthQuinzenaLabel(mes, quinzena)} — ${categoriaNome} (avanço)`;
+  const obsAuto = `Avanço automático de ${categoriaNome}: ${((Number(percAnterior) || 0) * 100).toFixed(1)}% → ${((Number(percNovo) || 0) * 100).toFixed(1)}% (valor gerado: R$ ${valorGerado.toFixed(2)})`;
+  const parcela = parcelaExistente || { id: newId('parcela'), overrides: {} };
+  Object.assign(parcela, {
+    label,
+    totalEmpreiteiroPix,
+    totalAdmPix,
+    gastoCartao: 0,
+    totalATransferir: custoTotal,
+    parcelaEvolucaoCaixa: 0,
+    custoTotal,
+    dataGeracaoCusto: data,
+    vencimento: status === 'REALIZADO' ? data : null,
+    vencPlanejado,
+    status,
+    obs: obsAuto,
+  });
+  if (!parcelaExistente) s.parcelas.push(parcela);
+  return parcela;
+}
+
 function ok(res, state, ajuste) {
   const body = recompute(state);
   if (ajuste) body.ajusteAutomatico = ajuste;
@@ -182,18 +231,25 @@ app.post('/api/historico-avancos', async (req, res) => {
     if (!Number.isFinite(novoPerc)) throw Object.assign(new Error('percAvancoNovo é obrigatório'), { status: 400 });
     const status = b.status === 'PLANEJADO' ? 'PLANEJADO' : 'REALIZADO';
     const data = b.data || new Date().toISOString().slice(0, 10);
-    s.historicoAvancos = s.historicoAvancos || [];
-    s.historicoAvancos.unshift({
+    const percAvancoAnterior = computeCategoria(cat).percAvancoEfetivo;
+    const entry = {
       id: newId('avanco'),
       categoriaId: cat.id,
       categoriaNome: cat.nome,
-      percAvancoAnterior: computeCategoria(cat).percAvancoEfetivo,
+      percAvancoAnterior,
       percAvancoNovo: novoPerc,
       data,
       status,
       obs: b.obs || '',
       timestamp: new Date().toISOString(),
+      parcelaId: null,
+    };
+    const parcela = gerarOuAtualizarParcelaAvanco(s, {
+      categoriaNome: cat.nome, valorOrcado: cat.valorOrcado, percAnterior: percAvancoAnterior, percNovo: novoPerc, status, data,
     });
+    if (parcela) entry.parcelaId = parcela.id;
+    s.historicoAvancos = s.historicoAvancos || [];
+    s.historicoAvancos.unshift(entry);
     if (status === 'REALIZADO') cat.dataUltimoAvanco = data;
     recomputeCategoriaPercManual(cat, s.historicoAvancos);
   });
@@ -213,6 +269,14 @@ app.put('/api/historico-avancos/:id', async (req, res) => {
     if (cat) {
       if (h.status === 'REALIZADO') cat.dataUltimoAvanco = h.data;
       recomputeCategoriaPercManual(cat, s.historicoAvancos);
+      // Reflete a edição na parcela de Contas a Pagar gerada por este avanço
+      // (criada/atualizada/removida conforme o novo delta) — mesma lógica do
+      // lançamento inicial, ver gerarOuAtualizarParcelaAvanco.
+      const parcelaExistente = h.parcelaId ? s.parcelas.find((p) => p.id === h.parcelaId) : undefined;
+      const parcela = gerarOuAtualizarParcelaAvanco(s, {
+        categoriaNome: cat.nome, valorOrcado: cat.valorOrcado, percAnterior: h.percAvancoAnterior, percNovo: h.percAvancoNovo, status: h.status, data: h.data,
+      }, parcelaExistente);
+      h.parcelaId = parcela ? parcela.id : null;
     }
   });
   ok(res, state);
@@ -223,6 +287,7 @@ app.delete('/api/historico-avancos/:id', async (req, res) => {
     const h = (s.historicoAvancos || []).find((x) => x.id === req.params.id);
     s.historicoAvancos = (s.historicoAvancos || []).filter((x) => x.id !== req.params.id);
     if (h) {
+      if (h.parcelaId) s.parcelas = s.parcelas.filter((p) => p.id !== h.parcelaId);
       const cat = s.categorias.find((c) => c.id === h.categoriaId);
       if (cat) recomputeCategoriaPercManual(cat, s.historicoAvancos);
     }
