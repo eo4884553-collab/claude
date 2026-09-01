@@ -265,7 +265,9 @@ app.post('/api/lancamento-mensal', async (req, res) => {
     const gastoCartao = Math.round((Number(b.gastoCartao) || 0) * 100) / 100;
     const taxaAdm = Number(s.parametros.taxaAdministracaoPercent) || 0;
     const totalEmpreiteiroPix = Math.round(Math.max(0, valorGeradoMes - gastoCartao) * 100) / 100;
-    const totalAdmPix = Math.round(totalEmpreiteiroPix * taxaAdm * 100) / 100;
+    // ADM (10%) incide sobre PIX + cartão juntos — o cartão também consome a verba
+    // do empreiteiro, só muda o canal de pagamento.
+    const totalAdmPix = Math.round((totalEmpreiteiroPix + gastoCartao) * taxaAdm * 100) / 100;
     const obsAuto = `Avanço do mês (valor gerado: R$ ${valorGeradoMes.toFixed(2)}) — ${detalhes.join('; ')}`;
 
     s.parcelas.push({

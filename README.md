@@ -52,6 +52,7 @@ botão **"Restaurar dados originais da planilha"** na aba **Parâmetros**
 |---|---|
 | **Contas a Pagar (Cliente)** | Dashboard que vai para o cliente: cards-resumo (contrato, % avanço empreiteiro pago, saldo empreiteiro, % avanço caixa liberado, saldo caixa, saldo de recurso) + tabela de parcelas quinzenais (PIX empreiteiro, ADM, cartão, evolução caixa, data do custo, vencimentos, status). Cada parcela mostra a etiqueta **Mês/Parcela** (ex.: "Agosto/2026 — 1ª Parcela"), calculada automaticamente a partir do vencimento. Editável linha a linha. |
 | **Lançar Avanços** | Onde você informa o % de avanço físico/financeiro de cada uma das 20 categorias da obra. É o principal ponto de entrada de dados do dia a dia. |
+| **Cronograma de Obra** | Cronograma físico previsto x realizado (equivalente à aba "Cronograma de obra" da planilha): datas de início/término previstas por categoria (extraídas da planilha original), % previsto (calculado a partir das datas) comparado ao % realizado, status (No prazo / Atrasado / Concluído) e uma linha do tempo (mini-gantt) por categoria. O % de avanço é editável direto aqui — é a mesma aba/campo de *Lançar Avanços*, só que com o cronograma ao lado para decidir quando cobrar do empreiteiro conforme a etapa PCI correspondente. |
 | **Detalhamento FC** | Itens orçado x realizado de cada categoria (equivalente à aba "Detalhamento F.C" da planilha). Cada categoria soma seus itens automaticamente. |
 | **Fluxo de Caixa** | Cards de acompanhamento (% avanço empreiteiro pago, saldo empreiteiro, % avanço caixa liberado, saldo caixa) + tabela mensal já organizada por **Mês/1º e 2º Parcela** (mesma divisão quinzenal de Contas a Pagar, na ordem cronológica correta), com entradas (recurso próprio + liberação PCI) e saídas (parcelas + ajustes manuais), saldo acumulado. Tem o botão **"Lançar avanço do mês"**: informe o novo % de cada categoria que avançou, a data em que o custo foi gerado e para qual mês/parcela ele vai vencer — o app rateia pelo peso já estipulado (valor orçado), desconta o cartão informado e já cria a parcela correspondente em Contas a Pagar. |
 | **Liberação PCI** | Cronograma de liberação do financiamento CAIXA em 6 etapas (aquisição do lote + 5 etapas de 20%), com liberação automática proporcional ao % de obra. |
@@ -174,6 +175,23 @@ botão **"Restaurar dados originais da planilha"** na aba **Parâmetros**
    aviso aparece explicando quantas parcelas foram ajustadas e por quê, e
    cada parcela alterada ganha uma nota no campo Observação registrando a
    data do ajuste.
+
+10. **Cronograma físico previsto x realizado.** Cada categoria tem uma janela
+    prevista (`início` / `término`, extraídos da aba "Cronograma de obra" da
+    planilha original) e um **% previsto** calculado no próprio app: 0% antes
+    do início, 100% depois do término, proporcional aos dias corridos no
+    meio — uma curva planejada linear padrão. (A coluna "% REAL." da linha
+    PREVISTO na planilha original não é usada aqui: ela mistura valores fixos
+    com fórmulas inconsistentes — ex. `=3/9`, somas de faixas de semanas
+    diferentes por linha — e não alimenta nenhum outro cálculo da planilha, só
+    o resumo "% EXECUTADA DE OBRA", que usa a linha REALIZADO. Por isso o app
+    calcula o % previsto do zero, de forma limpa e consistente.) Comparando
+    **% previsto** com **% avanço efetivo** (o mesmo valor de *Lançar
+    Avanços*) o app classifica cada categoria como **Concluído**, **No
+    prazo** ou **Atrasado**, e mostra isso também de forma agregada (**%
+    Previsto (cronograma)** vs. **% Executado (real)**) e ligado à etapa PCI
+    corrente — a mesma lógica de liberação de caixa do item 3, só que
+    mostrando em qual etapa PCI o avanço físico atual se encontra.
 
 Todo campo calculado pode ser sobrescrito manualmente (ex.: "Total a
 transferir" e "Custo total" de uma parcela, ou o valor liberado de uma etapa

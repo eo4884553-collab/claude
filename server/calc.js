@@ -61,8 +61,27 @@ function monthQuinzenaLabel(monthKey, quinzena) {
   return quinzena ? `${base} — ${quinzena}ª Parcela` : base;
 }
 
+/** % previsto (cronograma) de uma categoria na data de referência, com base no
+ * intervalo início/término previsto: 0 antes de começar, 1 depois de terminar,
+ * proporcional aos dias corridos no meio — abordagem linear padrão de curva S
+ * planejada. Calculado no app (não reproduz a coluna "% REAL." da linha PREVISTO
+ * da planilha original, que mistura valores fixos com fórmulas inconsistentes
+ * e não é usada em nenhum outro cálculo da planilha). */
+function calcPercPrevisto(cronogramaPrevisto, dataRef) {
+  if (!cronogramaPrevisto || !cronogramaPrevisto.inicio || !cronogramaPrevisto.termino) return 0;
+  const inicio = new Date(cronogramaPrevisto.inicio + 'T00:00:00');
+  const termino = new Date(cronogramaPrevisto.termino + 'T00:00:00');
+  const ref = new Date(dataRef + 'T00:00:00');
+  if (Number.isNaN(inicio.getTime()) || Number.isNaN(termino.getTime()) || Number.isNaN(ref.getTime())) return 0;
+  if (ref <= inicio) return 0;
+  if (ref >= termino) return 1;
+  const totalMs = termino.getTime() - inicio.getTime();
+  if (totalMs <= 0) return 1;
+  return clamp((ref.getTime() - inicio.getTime()) / totalMs, 0, 1);
+}
+
 /** Calcula os campos derivados de uma categoria (Detalhamento FC). */
-function computeCategoria(cat) {
+function computeCategoria(cat, dataRef) {
   const valorOrcado = Number(cat.valorOrcado) || 0;
   const valorRealizadoItens = round2(sum(cat.itens || [], (it) => it.valorRealizado));
   const percAvancoItens = valorOrcado > 0 ? valorRealizadoItens / valorOrcado : 0;
@@ -70,6 +89,16 @@ function computeCategoria(cat) {
   const temOverride = cat.percAvancoManual !== null && cat.percAvancoManual !== undefined;
   const percAvancoEfetivo = clamp(temOverride ? Number(cat.percAvancoManual) : percAvancoItens, 0, 5);
   const valorMedido = round2(valorOrcado * percAvancoEfetivo);
+
+  const percPrevisto = calcPercPrevisto(cat.cronogramaPrevisto, dataRef);
+  const valorPrevisto = round2(valorOrcado * percPrevisto);
+  const statusCronograma = !cat.cronogramaPrevisto
+    ? 'sem-dados'
+    : percAvancoEfetivo >= 1
+      ? 'concluido'
+      : percAvancoEfetivo + 0.0001 >= percPrevisto
+        ? 'no-prazo'
+        : 'atrasado';
 
   return {
     ...cat,
@@ -79,6 +108,9 @@ function computeCategoria(cat) {
     origemPercAvanco: temOverride ? 'manual' : 'itens',
     valorMedido,
     saldoContratoCategoria: round2(valorOrcado - valorMedido),
+    percPrevisto: round2(percPrevisto * 10000) / 10000,
+    valorPrevisto,
+    statusCronograma,
   };
 }
 
@@ -141,10 +173,13 @@ function computeParcela(parcela) {
 }
 
 function recompute(state) {
-  const categoriasBase = (state.categorias || []).map(computeCategoria);
+  const dataRef = (state.meta && state.meta.dataReferenciaCronograma) || new Date().toISOString().slice(0, 10);
+  const categoriasBase = (state.categorias || []).map((c) => computeCategoria(c, dataRef));
   const totalOrcadoCategorias = round2(sum(categoriasBase, (c) => c.valorOrcado));
   const totalMedido = round2(sum(categoriasBase, (c) => c.valorMedido));
+  const totalPrevistoCronograma = round2(sum(categoriasBase, (c) => c.valorPrevisto));
   const percObraGeral = totalOrcadoCategorias > 0 ? totalMedido / totalOrcadoCategorias : 0;
+  const percPrevistoGeral = totalOrcadoCategorias > 0 ? totalPrevistoCronograma / totalOrcadoCategorias : 0;
 
   // Peso de cada categoria sobre o orçado total — é o "peso já estipulado" usado
   // para ratear o avanço lançado na aba Fluxo de Caixa em valor financeiro.
@@ -187,13 +222,20 @@ function recompute(state) {
   const contratoTotalEmpreiteiro = Number(parametros.contratoTotalEmpreiteiro) || totalOrcadoCategorias;
   const recursoProprioPlanejado = Number(parametros.recursoProprioPlanejado) || 0;
 
-  const saldoAPagarEmpreiteiro = round2(totalMedido - totalEmpreiteiroPago);
+  // O que já saiu do "orçado" do contrato do empreiteiro: o cartão também conta,
+  // porque quando o proprietário compra material no cartão em vez de repassar via
+  // PIX, isso consome a mesma verba do contrato (só muda o canal de pagamento).
+  const totalConsumidoContrato = round2(totalEmpreiteiroPago + totalCartaoPago);
+  const saldoAPagarEmpreiteiro = round2(totalMedido - totalConsumidoContrato);
   const saldoContratoRestante = round2(contratoTotalEmpreiteiro - totalMedido);
   const totalInvestidoDisponivel = round2(recursoProprioPlanejado + caixaLiberadaAcumulada);
   const saldoRecursoDisponivel = round2(totalInvestidoDisponivel - totalGastoAcumulado);
 
   // Sugestão para a próxima parcela: o que já foi medido (avanço lançado) e ainda
-  // não foi pago via nenhuma parcela realizada.
+  // não foi pago via nenhum canal (PIX ou cartão) em nenhuma parcela realizada.
+  // A administração (10%) incide sobre o valor total do empreiteiro incluindo o
+  // que for pago via cartão — aqui, na sugestão, ainda não se sabe quanto será
+  // cartão, então a base é só o PIX estimado (o usuário pode ajustar ao editar).
   const sugestaoProximaParcelaEmpreiteiro = Math.max(0, saldoAPagarEmpreiteiro);
   const sugestaoProximaParcelaAdm = round2(sugestaoProximaParcelaEmpreiteiro * (Number(parametros.taxaAdministracaoPercent) || 0));
 
@@ -281,6 +323,9 @@ function recompute(state) {
     contratoTotalEmpreiteiro,
     totalMedido,
     percObraGeral: round2(percObraGeral * 10000) / 10000,
+    totalPrevistoCronograma,
+    percPrevistoGeral: round2(percPrevistoGeral * 10000) / 10000,
+    dataReferenciaCronograma: dataRef,
     creditoCaixaTotalPCI,
     caixaLiberadaAcumulada,
     percCaixaLiberada: creditoCaixaTotalPCI > 0 ? round2((caixaLiberadaAcumulada / creditoCaixaTotalPCI) * 10000) / 10000 : 0,
@@ -294,15 +339,20 @@ function recompute(state) {
     totalGastoAcumulado,
     totalEmpreiteiroPlanejado,
     totalPlanejadoFuturo,
+    // Total consumido do contrato do empreiteiro (PIX + cartão) — o cartão também
+    // reduz a verba dele, porque o valor gasto no cartão é abatido do que sobra
+    // pra pagar via PIX (mesma regra usada em "Lançar avanço do mês").
+    totalConsumidoContrato,
     saldoAPagarEmpreiteiro,
     saldoContratoRestante,
     saldoRecursoDisponivel,
     // "Saldo Caixa": quanto do crédito CAIXA (PCI) ainda falta ser liberado pelo banco.
     saldoCaixaDisponivel,
-    // "Saldo Empreiteiro": quanto do contrato total ainda falta ser efetivamente pago.
-    saldoContratoAPagarEmpreiteiro: round2(contratoTotalEmpreiteiro - totalEmpreiteiroPago),
+    // "Saldo Empreiteiro": quanto do contrato total ainda falta ser efetivamente pago
+    // (PIX + cartão já consumido, contra o orçado do contrato).
+    saldoContratoAPagarEmpreiteiro: round2(contratoTotalEmpreiteiro - totalConsumidoContrato),
     // % Avanço Empreiteiro (pago) e % Avanço Caixa (liberado) — para acompanhamento.
-    percValorTotalPago: contratoTotalEmpreiteiro > 0 ? round2((totalEmpreiteiroPago / contratoTotalEmpreiteiro) * 10000) / 10000 : 0,
+    percValorTotalPago: contratoTotalEmpreiteiro > 0 ? round2((totalConsumidoContrato / contratoTotalEmpreiteiro) * 10000) / 10000 : 0,
     sugestaoProximaParcelaEmpreiteiro: round2(sugestaoProximaParcelaEmpreiteiro),
     sugestaoProximaParcelaAdm: round2(sugestaoProximaParcelaAdm),
     // Verba disponível para itens futuros = Saldo Caixa (a liberar) + Saldo de recurso
@@ -328,13 +378,16 @@ function recompute(state) {
 }
 
 /**
- * Reorganiza as parcelas PLANEJADAS para que o total (já realizado + ainda
- * planejado) do empreiteiro nunca ultrapasse o orçado do contrato
- * (parametros.contratoTotalEmpreiteiro). Só encolhe (nunca infla de volta)
- * e só mexe em totalEmpreiteiroPix/totalAdmPix — o cartão fica intocado,
- * porque normalmente já é gasto real (comprado), diferente do que ainda
- * será transferido ao empreiteiro. Retorna um resumo do ajuste, ou `null`
- * se nada precisou mudar. Muta `state.parcelas` diretamente.
+ * Reorganiza as parcelas PLANEJADAS para que o total consumido do contrato do
+ * empreiteiro (já realizado + ainda planejado) nunca ultrapasse o orçado
+ * (parametros.contratoTotalEmpreiteiro). O cartão TAMBÉM consome essa verba
+ * (mesma regra de "Lançar avanço do mês": cartão abate do que sobra pra pagar
+ * via PIX) — por isso primeiro reserva-se o cartão já planejado, e só o PIX
+ * planejado é reduzido proporcionalmente para caber no que sobra. O valor do
+ * cartão em si nunca é alterado (normalmente já é gasto real/comprado); a
+ * administração (10%) é sempre recalculada sobre PIX + cartão da parcela. Só
+ * encolhe (nunca infla de volta sozinho). Retorna um resumo do ajuste, ou
+ * `null` se nada precisou mudar. Muta `state.parcelas` diretamente.
  */
 function reorganizarPlanejamento(state, dataAjuste) {
   const parametros = state.parametros || {};
@@ -343,27 +396,29 @@ function reorganizarPlanejamento(state, dataAjuste) {
 
   const parcelas = state.parcelas || [];
   const realizadas = parcelas.filter((p) => p.status === 'REALIZADO');
-  const totalRealizado = round2(sum(realizadas, (p) => p.totalEmpreiteiroPix));
-  const tetoPlanejado = Math.max(0, round2(contratoTotalEmpreiteiro - totalRealizado));
+  const totalConsumidoRealizado = round2(sum(realizadas, (p) => (Number(p.totalEmpreiteiroPix) || 0) + (Number(p.gastoCartao) || 0)));
+  const tetoRestante = Math.max(0, round2(contratoTotalEmpreiteiro - totalConsumidoRealizado));
 
   const planejadas = parcelas.filter((p) => p.status !== 'REALIZADO');
-  const somaPlanejado = round2(sum(planejadas, (p) => p.totalEmpreiteiroPix));
+  const somaCartaoPlanejado = round2(sum(planejadas, (p) => p.gastoCartao));
+  const tetoParaPix = Math.max(0, round2(tetoRestante - somaCartaoPlanejado));
+  const somaPixPlanejado = round2(sum(planejadas, (p) => p.totalEmpreiteiroPix));
 
-  if (somaPlanejado <= 0 || somaPlanejado <= tetoPlanejado) return null;
+  if (somaPixPlanejado <= 0 || somaPixPlanejado <= tetoParaPix) return null;
 
-  const fator = tetoPlanejado / somaPlanejado;
+  const fator = tetoParaPix / somaPixPlanejado;
   const taxaAdm = Number(parametros.taxaAdministracaoPercent) || 0;
   const data = dataAjuste || new Date().toISOString().slice(0, 10);
   const nota = `[Ajustado automaticamente em ${data} para caber no orçado restante do contrato]`;
   for (const p of planejadas) {
     p.totalEmpreiteiroPix = round2((Number(p.totalEmpreiteiroPix) || 0) * fator);
-    p.totalAdmPix = round2(p.totalEmpreiteiroPix * taxaAdm);
+    p.totalAdmPix = round2((p.totalEmpreiteiroPix + (Number(p.gastoCartao) || 0)) * taxaAdm);
     if (p.overrides) { p.overrides.totalATransferir = false; p.overrides.custoTotal = false; }
     if (!p.obs || !p.obs.includes('[Ajustado automaticamente')) {
       p.obs = p.obs ? `${p.obs} ${nota}` : nota;
     }
   }
-  return { fator: round2(fator * 10000) / 10000, tetoPlanejado, somaPlanejadoAnterior: somaPlanejado, qtd: planejadas.length };
+  return { fator: round2(fator * 10000) / 10000, tetoPlanejado: tetoParaPix, somaPlanejadoAnterior: somaPixPlanejado, qtd: planejadas.length };
 }
 
 module.exports = { recompute, computeCategoria, reorganizarPlanejamento, round2, clamp };

@@ -95,6 +95,7 @@ function renderAll() {
   document.getElementById('obraEndereco').textContent = STATE.meta?.endereco || '';
   renderDashboard();
   renderAvancos();
+  renderCronograma();
   renderDetalhamento();
   renderFluxo();
   renderPCI();
@@ -218,12 +219,12 @@ function renderDashboard() {
       <div class="card-label">Avanço empreiteiro (% pago)</div>
       <div class="card-value">${pct(r.percValorTotalPago)}</div>
       <div class="progress-bar" style="margin-top:6px"><span style="width:${Math.min(100, r.percValorTotalPago * 100)}%"></span></div>
-      <div class="card-sub">Pago: ${money(r.totalEmpreiteiroPago)} · Saldo a pagar: ${money(r.saldoAPagarEmpreiteiro)}</div>
+      <div class="card-sub">Consumido (PIX + cartão): ${money(r.totalConsumidoContrato)} · Saldo a pagar: ${money(r.saldoAPagarEmpreiteiro)}</div>
     </div>
     <div class="card">
       <div class="card-label">Saldo empreiteiro (falta do contrato)</div>
       <div class="card-value">${money(r.saldoContratoAPagarEmpreiteiro)}</div>
-      <div class="card-sub">Contrato total − já pago ao empreiteiro</div>
+      <div class="card-sub">Contrato total − já consumido (PIX + cartão)</div>
     </div>
     <div class="card accent">
       <div class="card-label">Avanço caixa (% liberado)</div>
@@ -487,6 +488,141 @@ function renderAvancos() {
   }
   hist.appendChild(histTable);
   root.appendChild(hist);
+}
+
+/* ==========================================================================
+   TAB — Cronograma de Obra (previsto x realizado)
+   ========================================================================== */
+const STATUS_CRONOGRAMA_INFO = {
+  'concluido': { label: 'Concluído', badge: 'green' },
+  'no-prazo': { label: 'No prazo', badge: 'blue' },
+  'atrasado': { label: 'Atrasado', badge: 'red' },
+  'sem-dados': { label: 'Sem cronograma', badge: 'gray' },
+};
+
+function renderCronograma() {
+  const root = document.getElementById('tab-cronograma');
+  root.innerHTML = '';
+  const r = STATE.resumo;
+
+  // Escala do timeline geral (do início da obra ao término previsto) usada para
+  // posicionar as barras de cada categoria proporcionalmente às suas datas.
+  const projInicio = new Date((STATE.meta?.dataInicio || '2026-05-11') + 'T00:00:00');
+  const projTermino = new Date((STATE.meta?.previsaoTermino || '2027-08-14') + 'T00:00:00');
+  const projTotalMs = Math.max(1, projTermino.getTime() - projInicio.getTime());
+  const hojeDate = new Date((r.dataReferenciaCronograma || new Date().toISOString().slice(0, 10)) + 'T00:00:00');
+  const hojePerc = clampPerc((hojeDate.getTime() - projInicio.getTime()) / projTotalMs);
+
+  const diasDecorridos = Math.round((hojeDate.getTime() - projInicio.getTime()) / 86400000);
+  const diasTotais = Math.round(projTotalMs / 86400000);
+
+  // Etapa PCI corrente (onde o % de obra geral está posicionado agora) — liga o
+  // avanço físico do cronograma à liberação de caixa correspondente.
+  const etapaAtual = (STATE.liberacaoPCI || []).find((e) => r.percObraGeral < e.percLimiteAcumulado)
+    || STATE.liberacaoPCI[STATE.liberacaoPCI.length - 1];
+
+  const cards = document.createElement('div');
+  cards.className = 'cards-grid';
+  cards.innerHTML = `
+    <div class="card accent">
+      <div class="card-label">% Executado (real)</div>
+      <div class="card-value">${pct(r.percObraGeral)}</div>
+      <div class="progress-bar" style="margin-top:6px"><span style="width:${Math.min(100, r.percObraGeral * 100)}%"></span></div>
+      <div class="card-sub">Medido: ${money(r.totalMedido)} de ${money(r.totalOrcadoCategorias)}</div>
+    </div>
+    <div class="card ${r.percObraGeral + 0.0001 >= r.percPrevistoGeral ? 'good' : 'warn'}">
+      <div class="card-label">% Previsto (cronograma)</div>
+      <div class="card-value">${pct(r.percPrevistoGeral)}</div>
+      <div class="progress-bar" style="margin-top:6px"><span style="width:${Math.min(100, r.percPrevistoGeral * 100)}%"></span></div>
+      <div class="card-sub">${r.percObraGeral + 0.0001 >= r.percPrevistoGeral ? 'Obra no prazo ou adiantada' : `Obra atrasada em ${pct(r.percPrevistoGeral - r.percObraGeral)} vs. planejado`}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Prazo decorrido</div>
+      <div class="card-value">${diasDecorridos} / ${diasTotais} dias</div>
+      <div class="card-sub">Início: ${dateBR(STATE.meta?.dataInicio)} · Término previsto: ${dateBR(STATE.meta?.previsaoTermino)}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Etapa PCI corrente</div>
+      <div class="card-value">${etapaAtual ? `${etapaAtual.etapa} — ${esc(etapaAtual.descricao)}` : '—'}</div>
+      <div class="card-sub">${etapaAtual ? `Libera a ${pct(etapaAtual.percLimiteAcumulado)} de obra executada · ${money(etapaAtual.valor)}` : ''}</div>
+    </div>
+  `;
+  root.appendChild(cards);
+
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <h2>Cronograma físico — previsto × realizado</h2>
+        <div class="muted">Datas previstas extraídas da planilha original (aba Cronograma de obra). O % realizado é o mesmo lançado na aba "Lançar Avanços" — edite aqui também. A barra clara mostra a janela planejada; a barra colorida mostra o quanto já foi executado; a linha âmbar marca a data de hoje (${dateBR(r.dataReferenciaCronograma)}).</div>
+      </div>
+      <div class="gantt-legend">
+        <span><span class="dot" style="background:#d7deec"></span>Janela planejada</span>
+        <span><span class="dot" style="background:var(--primary)"></span>Executado — no prazo</span>
+        <span><span class="dot" style="background:var(--red)"></span>Executado — atrasado</span>
+        <span><span class="dot" style="background:var(--green)"></span>Concluído</span>
+        <span><span class="dot" style="background:var(--amber)"></span>Hoje</span>
+      </div>
+    </div>
+    <div class="table-scroll"><table class="data">
+      <thead><tr>
+        <th>Nº</th><th class="wrap">Categoria</th><th>Início prev.</th><th>Término prev.</th>
+        <th class="num">Dur. (d)</th><th class="num">% Previsto</th><th class="num">% Realizado</th>
+        <th>Status</th><th style="min-width:240px">Linha do tempo</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table></div>
+  `;
+  root.appendChild(panel);
+
+  const tbody = panel.querySelector('tbody');
+  for (const c of STATE.categorias) {
+    const tr = document.createElement('tr');
+    tr.appendChild(td(`${c.numero}`));
+    tr.appendChild(td(`<span class="wrap">${esc(c.nome)}</span>`));
+    tr.appendChild(td(c.cronogramaPrevisto ? dateBR(c.cronogramaPrevisto.inicio) : '—'));
+    tr.appendChild(td(c.cronogramaPrevisto ? dateBR(c.cronogramaPrevisto.termino) : '—'));
+    tr.appendChild(td(`<span class="num">${c.cronogramaPrevisto ? c.cronogramaPrevisto.duracaoDias : '—'}</span>`));
+    tr.appendChild(td(`<span class="num">${pct(c.percPrevisto)}</span>`));
+
+    const percCell = document.createElement('td');
+    percCell.appendChild(numberInput({
+      value: Math.round(c.percAvancoEfetivo * 1000) / 10,
+      manual: c.origemPercAvanco === 'manual',
+      step: '0.1', min: 0,
+      onSave: (v) => api('POST', `/api/categorias/${c.id}/avanco`, { perc: v / 100 }),
+    }));
+    tr.appendChild(percCell);
+
+    const info = STATUS_CRONOGRAMA_INFO[c.statusCronograma] || STATUS_CRONOGRAMA_INFO['sem-dados'];
+    tr.appendChild(td(`<span class="badge ${info.badge}">${info.label}</span>`));
+
+    const ganttTd = document.createElement('td');
+    if (c.cronogramaPrevisto) {
+      const ini = new Date(c.cronogramaPrevisto.inicio + 'T00:00:00');
+      const fim = new Date(c.cronogramaPrevisto.termino + 'T00:00:00');
+      const barStart = clampPerc((ini.getTime() - projInicio.getTime()) / projTotalMs);
+      const barEnd = clampPerc((fim.getTime() - projInicio.getTime()) / projTotalMs);
+      const barWidth = Math.max(0.6, (barEnd - barStart) * 100);
+      const actualWidth = Math.min(100, c.percAvancoEfetivo * 100);
+      const statusClass = c.statusCronograma === 'atrasado' ? 'status-atrasado' : c.statusCronograma === 'concluido' ? 'status-concluido' : '';
+      ganttTd.innerHTML = `
+        <div class="gantt-track">
+          <div class="gantt-planned" style="left:${barStart * 100}%; width:${barWidth}%"></div>
+          <div class="gantt-actual ${statusClass}" style="left:${barStart * 100}%; width:${(barWidth * actualWidth) / 100}%"></div>
+          <div class="gantt-hoje" style="left:${hojePerc * 100}%"></div>
+        </div>`;
+    } else {
+      ganttTd.innerHTML = '<span class="muted">Sem datas na planilha</span>';
+    }
+    tr.appendChild(ganttTd);
+    tbody.appendChild(tr);
+  }
+}
+
+function clampPerc(v) {
+  return Math.max(0, Math.min(1, v));
 }
 
 /* ==========================================================================

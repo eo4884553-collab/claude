@@ -30,6 +30,37 @@ const AVANCO_FISICO_INICIAL = {
   // Demais categorias (05 a 19): ainda não iniciadas fisicamente (0%).
 };
 
+// Datas previstas de início/término por categoria, extraídas da aba "Cronograma de
+// obra" (linha PREVISTO, colunas D/E/F) da planilha original. A própria coluna
+// "% REAL." (G) dessa linha PREVISTO na planilha é inconsistente (mistura valores
+// fixos com fórmulas como =3/9 e =SOMA(faixa de semanas) que não são usadas em
+// nenhum outro cálculo da planilha — o resumo "% EXECUTADA DE OBRA" em B48 só
+// referencia a linha REALIZADO). Por isso o app calcula o "% previsto" de forma
+// limpa a partir das datas (ver calcPercPrevisto em calc.js) em vez de reproduzir
+// aquela coluna quebrada.
+const CRONOGRAMA_PREVISTO = {
+  1: { inicio: '2026-05-11', termino: '2026-06-05', duracaoDias: 26 },
+  2: { inicio: '2026-06-08', termino: '2026-08-07', duracaoDias: 61 },
+  3: { inicio: '2026-08-10', termino: '2026-10-16', duracaoDias: 68 },
+  4: { inicio: '2026-10-05', termino: '2026-11-06', duracaoDias: 33 },
+  5: { inicio: '2026-11-02', termino: '2026-12-11', duracaoDias: 40 },
+  6: { inicio: '2026-12-07', termino: '2027-01-08', duracaoDias: 33 },
+  7: { inicio: '2026-10-19', termino: '2026-12-04', duracaoDias: 47 },
+  8: { inicio: '2026-12-07', termino: '2027-01-16', duracaoDias: 41 },
+  9: { inicio: '2027-01-11', termino: '2027-03-12', duracaoDias: 61 },
+  10: { inicio: '2027-02-15', termino: '2027-03-26', duracaoDias: 40 },
+  11: { inicio: '2027-02-22', termino: '2027-04-09', duracaoDias: 47 },
+  12: { inicio: '2027-03-22', termino: '2027-05-14', duracaoDias: 54 },
+  13: { inicio: '2027-03-29', termino: '2027-05-28', duracaoDias: 61 },
+  14: { inicio: '2027-05-12', termino: '2027-06-13', duracaoDias: 33 },
+  15: { inicio: '2026-10-26', termino: '2027-02-05', duracaoDias: 103 },
+  16: { inicio: '2026-10-26', termino: '2027-01-29', duracaoDias: 96 },
+  17: { inicio: '2026-10-26', termino: '2027-01-09', duracaoDias: 76 },
+  18: { inicio: '2027-05-26', termino: '2027-06-27', duracaoDias: 33 },
+  19: { inicio: '2027-06-28', termino: '2027-07-23', duracaoDias: 26 },
+  20: { inicio: '2027-07-21', termino: '2027-08-14', duracaoDias: 25 },
+};
+
 function buildCategorias() {
   return categoriasExtraidas.map((c, idx) => {
     const numero = idx + 1;
@@ -60,6 +91,7 @@ function buildCategorias() {
       // saldo de recurso disponível, senão o dinheiro já gasto aqui "some" do
       // acompanhamento financeiro.
       pagoDiretoProprietario: numero === 1,
+      cronogramaPrevisto: CRONOGRAMA_PREVISTO[numero] || null,
       itens,
     };
   });
