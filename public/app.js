@@ -833,7 +833,7 @@ function renderDashboard() {
     const delTd = document.createElement('td');
     const delBtn = document.createElement('button');
     delBtn.className = 'icon-btn'; delBtn.textContent = '🗑';
-    delBtn.onclick = () => { if (confirm(`Remover parcela "${p.label}"?`)) api('DELETE', `/api/parcelas/${p.id}`); };
+    delBtn.onclick = async () => { if (await confirmDialog(`Remover parcela "${p.label || '(sem rótulo)'}"?`)) api('DELETE', `/api/parcelas/${p.id}`); };
     delTd.appendChild(delBtn);
     tr.appendChild(delTd);
     tbody.appendChild(tr);
@@ -1078,7 +1078,7 @@ function renderHistoricoAvancosPanel() {
       const delTd = document.createElement('td');
       const delBtn = document.createElement('button');
       delBtn.className = 'icon-btn'; delBtn.textContent = '🗑';
-      delBtn.onclick = () => { if (confirm(`Remover avanço de "${h.categoriaNome}"?`)) api('DELETE', `/api/historico-avancos/${h.id}`); };
+      delBtn.onclick = async () => { if (await confirmDialog(`Remover avanço de "${h.categoriaNome}"?`)) api('DELETE', `/api/historico-avancos/${h.id}`); };
       delTd.appendChild(delBtn);
       tr.appendChild(delTd);
       tbody.appendChild(tr);
@@ -1357,7 +1357,7 @@ function renderDetalhamento() {
       const delTd = document.createElement('td');
       const delBtn = document.createElement('button');
       delBtn.className = 'icon-btn'; delBtn.textContent = '🗑';
-      delBtn.onclick = () => { if (confirm('Remover este item?')) api('DELETE', `/api/categorias/${c.id}/itens/${it.id}`); };
+      delBtn.onclick = async () => { if (await confirmDialog('Remover este item?')) api('DELETE', `/api/categorias/${c.id}/itens/${it.id}`); };
       delTd.appendChild(delBtn);
       tr.appendChild(delTd);
       tbody.appendChild(tr);
@@ -1905,7 +1905,7 @@ function renderLiberacoesCaixaPanel() {
       const delTd = document.createElement('td');
       const delBtn = document.createElement('button');
       delBtn.className = 'icon-btn'; delBtn.textContent = '🗑';
-      delBtn.onclick = () => { if (confirm('Remover esta liberação?')) api('DELETE', `/api/liberacoes-caixa/${l.id}`); };
+      delBtn.onclick = async () => { if (await confirmDialog('Remover esta liberação?')) api('DELETE', `/api/liberacoes-caixa/${l.id}`); };
       delTd.appendChild(delBtn);
       tr.appendChild(delTd);
       tbody.appendChild(tr);
@@ -2040,7 +2040,7 @@ function renderConsumosRecursoProprioPanel() {
       const delTd = document.createElement('td');
       const delBtn = document.createElement('button');
       delBtn.className = 'icon-btn'; delBtn.textContent = '🗑';
-      delBtn.onclick = () => { if (confirm(`Remover "${item.descricao}"?`)) api('DELETE', `/api/consumos-recurso-proprio/${item.id}`); };
+      delBtn.onclick = async () => { if (await confirmDialog(`Remover "${item.descricao}"?`)) api('DELETE', `/api/consumos-recurso-proprio/${item.id}`); };
       delTd.appendChild(delBtn);
       tr.appendChild(delTd);
       tbody.appendChild(tr);
@@ -2176,7 +2176,7 @@ function renderParametros() {
   resetBtn.className = 'btn danger';
   resetBtn.textContent = 'Restaurar dados originais da planilha';
   resetBtn.onclick = async () => {
-    if (confirm('Tem certeza? Todas as edições feitas no app serão perdidas.')) {
+    if (await confirmDialog('Tem certeza? Todas as edições feitas no app serão perdidas.', { title: 'Restaurar dados originais' })) {
       await api('POST', '/api/reset');
       toast('Dados restaurados.');
     }
@@ -2188,6 +2188,37 @@ function renderParametros() {
 /* ==========================================================================
    Modal genérico
    ========================================================================== */
+// Confirmação em modal próprio (não usa window.confirm) — mesma implementação
+// do Artifact (export/liberacao-caixa-toscana.html), onde window.confirm é
+// bloqueado pelo sandbox do iframe. Usar o mesmo modal aqui também garante
+// comportamento idêntico nos dois apps. Retorna uma Promise<boolean>.
+function confirmDialog(message, { title = 'Confirmar', okLabel = 'Remover', danger = true } = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v, close) => { if (!done) { done = true; resolve(v); } close(); };
+    openModal(title, (body, close) => {
+      body.innerHTML = `<p style="margin:0 0 16px; white-space:pre-wrap;">${esc(message)}</p>`;
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex; gap:8px; justify-content:flex-end;';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button'; cancelBtn.className = 'btn'; cancelBtn.textContent = 'Cancelar';
+      cancelBtn.onclick = () => finish(false, close);
+      const okBtn = document.createElement('button');
+      okBtn.type = 'button'; okBtn.className = danger ? 'btn danger' : 'btn primary'; okBtn.textContent = okLabel;
+      okBtn.onclick = () => finish(true, close);
+      actions.appendChild(cancelBtn);
+      actions.appendChild(okBtn);
+      body.appendChild(actions);
+      const backdrop = body.closest('.modal-backdrop');
+      if (backdrop) {
+        backdrop.querySelector('.modal-close').onclick = () => finish(false, close);
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) finish(false, close); });
+      }
+      okBtn.focus();
+    });
+  });
+}
+
 function openModal(title, buildBody) {
   const tpl = document.getElementById('tpl-modal');
   const node = tpl.content.cloneNode(true);
