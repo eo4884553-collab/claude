@@ -16,18 +16,23 @@ function slug(str) {
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
-// % de avanço FÍSICO real, extraído da aba "Cronograma de obra" (linha REALIZADO)
-// da planilha original. Usado como override inicial porque, para várias categorias
-// (05 a 19), a coluna "Realizado" do Detalhamento FC apenas espelha o valor total do
-// contrato (fórmula ='Fluxo de Caixa '!AS..) e NÃO reflete execução real — o avanço
-// físico do Cronograma é a fonte confiável até que medições reais sejam lançadas.
+// % de avanço FÍSICO real, extraído do quadro "HABITAÇÃO — Execução do Item"
+// da planilha original (Incidência × % Execução do Item = % Execução na Obra,
+// conferido linha a linha: total acumulado 28,80% bate com o quadro "Mensurado
+// Acumulado Atual"). Usado como override inicial porque, para várias categorias,
+// a coluna "Realizado" do Detalhamento FC apenas espelha o valor total do
+// contrato (fórmula ='Fluxo de Caixa '!AS..) e NÃO reflete execução real — o
+// quadro de execução por item é a fonte confiável até que novas medições sejam
+// lançadas (a partir de setembro os avanços entram pela aba Lançar Avanços).
 const AVANCO_FISICO_INICIAL = {
   1: 1.0, // Serviços Preliminares e Gerais — concluído
   2: 1.0, // Infraestrutura — concluído
   3: 0.5, // Suprastrutura — em execução
   4: 0.5, // Paredes e Painéis — em execução
-  20: 0.5, // Outros Serviços — em execução
-  // Demais categorias (05 a 19): ainda não iniciadas fisicamente (0%).
+  8: 0.4, // Impermeabilizações — em execução
+  13: 0.1, // Pisos — em execução
+  20: 0.8, // Outros Serviços — em execução
+  // Demais categorias: ainda não iniciadas fisicamente (0%).
 };
 
 // Datas previstas de início/término por categoria, extraídas da aba "Cronograma de
