@@ -95,7 +95,7 @@ function computeCategoria(cat, dataRef) {
   const itensBrutos = cat.itens || [];
   const itemPlug = itensBrutos.find((it) => ITEM_PLUG_REGEX.test(it.descricao || ''));
   const somaOutrosItens = round2(sum(itensBrutos.filter((it) => it !== itemPlug), (it) => it.valorRealizado));
-  const itens = itemPlug
+  const itensComPlug = itemPlug
     ? itensBrutos.map((it) => {
         if (it !== itemPlug) return it;
         const tetoPlug = Math.max(0, round2(valorOrcado - somaOutrosItens));
@@ -106,11 +106,28 @@ function computeCategoria(cat, dataRef) {
           : { ...it, valorRealizado: valorRealizadoAjustado, valorRealizadoOriginal };
       })
     : itensBrutos;
+  // Teto de medição: nenhum item (exceto o "plug", que já tem teto próprio acima)
+  // pode ter valor realizado maior que o seu próprio valor orçado — nunca houve
+  // medição acima de 100% do item. Itens sem orçado definido (valorOrcado 0 — ex.:
+  // custos avulsos lançados no cartão, sem cotação prévia) ficam sem teto aqui, já
+  // que não há "100% de zero" para comparar; o teto da categoria como um todo
+  // continua garantido pelo item plug.
+  const itens = itensComPlug.map((it) => {
+    if (it === itemPlug) return it;
+    const itemOrcado = Number(it.valorOrcado) || 0;
+    if (itemOrcado <= 0) return it;
+    const valorRealizadoOriginal = Number(it.valorRealizado) || 0;
+    const valorRealizadoAjustado = Math.min(valorRealizadoOriginal, itemOrcado);
+    return valorRealizadoAjustado === valorRealizadoOriginal
+      ? it
+      : { ...it, valorRealizado: valorRealizadoAjustado, valorRealizadoOriginal };
+  });
   const valorRealizadoItens = round2(sum(itens, (it) => it.valorRealizado));
   const percAvancoItens = valorOrcado > 0 ? valorRealizadoItens / valorOrcado : 0;
 
   const temOverride = cat.percAvancoManual !== null && cat.percAvancoManual !== undefined;
-  const percAvancoEfetivo = clamp(temOverride ? Number(cat.percAvancoManual) : percAvancoItens, 0, 5);
+  // Teto de medição: nunca mais que 100% (nem do item, nem da categoria como um todo).
+  const percAvancoEfetivo = clamp(temOverride ? Number(cat.percAvancoManual) : percAvancoItens, 0, 1);
   const valorMedido = round2(valorOrcado * percAvancoEfetivo);
 
   const percPrevisto = calcPercPrevisto(cat.cronogramaPrevisto, dataRef);
@@ -373,6 +390,14 @@ function recompute(state) {
     percCaixaLiberada: creditoCaixaTotalPCI > 0 ? round2((caixaLiberadaAcumulada / creditoCaixaTotalPCI) * 10000) / 10000 : 0,
     recursoProprioPlanejado,
     totalInvestidoDisponivel,
+    // % Execução financeira: quanto já foi gasto (empreiteiro + ADM + cartão + pago
+    // direto) sobre o total de financiamento disponível (crédito CAIXA total + recurso
+    // próprio planejado) — mesma fórmula da aba "Contas a pagar"!I6 da planilha original
+    // (=C6/(1500000+A6)). É uma % de execução do financiamento total, não do que já foi
+    // liberado até agora.
+    percExecucaoFinanceira: (creditoCaixaTotalPCI + recursoProprioPlanejado) > 0
+      ? round2((totalGastoAcumulado / (creditoCaixaTotalPCI + recursoProprioPlanejado)) * 10000) / 10000
+      : 0,
     totalEmpreiteiroPago,
     totalAdmPago,
     totalCartaoPago,

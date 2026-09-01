@@ -7,7 +7,6 @@ let STATE = null;
 let ACTIVE_TAB = 'painel';
 let PAINEL_CATEGORIA_SELECIONADA = null;
 const OPEN_CATEGORIES = new Set();
-let LANCAMENTO_MENSAL_OPEN = false;
 
 const fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtNum = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 });
@@ -31,6 +30,42 @@ function mesParcelaLabel(dateStr) {
   if (!y || !m || !d) return '';
   const quinzena = d <= 15 ? '1º' : '2º';
   return `${MONTH_NAMES_PT[m - 1].toUpperCase()}/${quinzena} PARCELA`;
+}
+
+// Rótulo "Mês/Ano — 1ª/2ª Parcela" a partir de um mês (YYYY-MM) + quinzena (1|2) —
+// mesma convenção usada no servidor (monthQuinzenaLabel em calc.js).
+function mesQuinzenaLabel(mes, quinzena) {
+  if (!mes) return 'Sem data';
+  const [y, m] = mes.split('-');
+  return `${MONTH_NAMES_PT[Number(m) - 1]}/${y} — ${quinzena}ª Parcela`;
+}
+
+// {mes, quinzena} a partir de uma data 'YYYY-MM-DD' (dia ≤15 = 1ª parcela).
+function periodoFromDateStr(dateStr) {
+  if (!dateStr) return null;
+  const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return { mes: `${y}-${String(m).padStart(2, '0')}`, quinzena: d <= 15 ? 1 : 2 };
+}
+
+// Lista todos os períodos (mês/quinzena) entre o início da obra e a previsão de
+// término, na mesma convenção de data usada nas parcelas reais (dia 10 = 1ª
+// parcela, dia 25 = 2ª) — usada para o seletor de período em "Lançar Avanços".
+function buildQuinzenaPeriods(dataInicio, previsaoTermino) {
+  const out = [];
+  if (!dataInicio) return out;
+  let [y, m] = dataInicio.slice(0, 7).split('-').map(Number);
+  const [yEnd, mEnd] = (previsaoTermino || dataInicio).slice(0, 7).split('-').map(Number);
+  let guard = 0;
+  while ((y < yEnd || (y === yEnd && m <= mEnd)) && guard < 120) {
+    const mes = `${y}-${String(m).padStart(2, '0')}`;
+    out.push({ mes, quinzena: 1, vencPlanejado: `${mes}-10`, label: mesQuinzenaLabel(mes, 1) });
+    out.push({ mes, quinzena: 2, vencPlanejado: `${mes}-25`, label: mesQuinzenaLabel(mes, 2) });
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+    guard += 1;
+  }
+  return out;
 }
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -594,10 +629,10 @@ function renderDashboard() {
       <div class="card-sub">Contrato total − já consumido (PIX + cartão)</div>
     </div>
     <div class="card accent">
-      <div class="card-label">Execução financeira</div>
-      <div class="card-value">${money(r.totalInvestidoDisponivel)}</div>
-      <div class="progress-bar" style="margin-top:6px"><span style="width:${Math.min(100, r.percCaixaLiberada * 100)}%"></span></div>
-      <div class="card-sub">Crédito CAIXA liberado (${money(r.caixaLiberadaAcumulada)} de ${money(r.creditoCaixaTotalPCI)}, ${pct(r.percCaixaLiberada)}) + recurso próprio planejado (${money(r.recursoProprioPlanejado)}) — soma conforme o avanço</div>
+      <div class="card-label">% Execução financeira</div>
+      <div class="card-value">${pct(r.percExecucaoFinanceira)}</div>
+      <div class="progress-bar" style="margin-top:6px"><span style="width:${Math.min(100, r.percExecucaoFinanceira * 100)}%"></span></div>
+      <div class="card-sub">Gasto acumulado (${money(r.totalGastoAcumulado)}) sobre o financiamento total disponível: crédito CAIXA (${money(r.creditoCaixaTotalPCI)}) + recurso próprio planejado (${money(r.recursoProprioPlanejado)})</div>
     </div>
     <div class="card">
       <div class="card-label">Saldo caixa (a liberar)</div>
@@ -734,6 +769,31 @@ function openNovaParcelaModal() {
       </div>
     `;
     form.querySelector('#cancelBtn').onclick = close;
+
+    // Cartão é sempre pago na 1ª quinzena do mês — nunca na 2ª (fechamento dia
+    // 05, vencimento dia 15). Ao escolher a data, detecta a quinzena e já
+    // sugere o valor de cartão lançado no Detalhamento FC para aquele mês.
+    const cartaoInput = form.querySelector('[name="gastoCartao"]');
+    const vencField = form.querySelector('[name="vencPlanejado"]');
+    async function atualizarCartaoPorData() {
+      const p = periodoFromDateStr(vencField.value);
+      if (!p) return;
+      if (p.quinzena === 2) {
+        cartaoInput.value = '0';
+        cartaoInput.disabled = true;
+        cartaoInput.title = 'Cartão é sempre pago na 1ª quinzena do mês — nunca na 2ª.';
+      } else {
+        cartaoInput.disabled = false;
+        cartaoInput.title = '';
+        try {
+          const res = await fetch(`/api/sugestao-cartao/${p.mes}`);
+          const data = await res.json();
+          cartaoInput.value = data.gastoCartao || 0;
+        } catch { /* mantém o que já estava digitado */ }
+      }
+    }
+    vencField.addEventListener('change', atualizarCartaoPorData);
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(form);
@@ -752,22 +812,25 @@ function openNovaParcelaModal() {
 }
 
 /* ==========================================================================
-   TAB 2 — Lançar Avanços
+   TAB 2 — Lançar Avanços (modelo quinzenal — 2 lançamentos por mês, cada um
+   já gera a parcela correspondente em Contas a Pagar)
    ========================================================================== */
 function renderAvancos() {
   const root = document.getElementById('tab-avancos');
   root.innerHTML = '';
+
+  root.appendChild(renderLancamentoQuinzenaPanel());
 
   const info = document.createElement('div');
   info.className = 'panel';
   info.innerHTML = `
     <div class="panel-header">
       <div>
-        <h2>Lançar avanços da obra</h2>
-        <div class="muted">Informe o % de avanço físico/financeiro de cada categoria. O sistema recalcula automaticamente a liberação de caixa (PCI), o valor a pagar ao empreiteiro e o saldo disponível.</div>
+        <h2>Avanço acumulado por categoria</h2>
+        <div class="muted">Somatório de todas as quinzenas já lançadas para cada categoria — o teto de medição é sempre 100% (nunca mais que o valor orçado do item ou da categoria). Para lançar um novo avanço, use o formulário acima.</div>
       </div>
       <div class="legend">
-        <span><span class="dot manual"></span>% lançado manualmente</span>
+        <span><span class="dot manual"></span>% lançado (quinzena)</span>
         <span><span class="dot auto"></span>% calculado pela soma dos itens (Detalhamento FC)</span>
       </div>
     </div>
@@ -791,15 +854,9 @@ function renderAvancos() {
     tr.appendChild(td(`<span class="num">${money(c.valorOrcado)}</span>`));
     tr.appendChild(td(`<span class="num">${pct(c.percAvancoItens)}</span>`));
 
-    const percCell = document.createElement('td');
-    percCell.appendChild(numberInput({
-      value: Math.round(c.percAvancoEfetivo * 1000) / 10,
-      manual: c.origemPercAvanco === 'manual',
-      step: '0.1', min: 0,
-      onSave: (v) => api('POST', `/api/categorias/${c.id}/avanco`, { perc: v / 100 }),
-    }));
-    percCell.querySelector('input').title = '% de avanço (0-100). Define manualmente e desacopla da soma dos itens.';
-    tr.appendChild(percCell);
+    const percTd = document.createElement('td');
+    percTd.innerHTML = `<span class="num badge-cell ${c.origemPercAvanco === 'manual' ? 'manual' : 'auto'}">${pct(c.percAvancoEfetivo)}</span>`;
+    tr.appendChild(percTd);
 
     const barTd = document.createElement('td');
     barTd.innerHTML = `<div class="progress-bar small"><span style="width:${Math.min(100, c.percAvancoEfetivo * 100)}%"></span></div>`;
@@ -953,14 +1010,7 @@ function renderCronograma() {
     tr.appendChild(td(`<span class="num">${c.cronogramaPrevisto ? c.cronogramaPrevisto.duracaoDias : '—'}</span>`));
     tr.appendChild(td(`<span class="num">${pct(c.percPrevisto)}</span>`));
 
-    const percCell = document.createElement('td');
-    percCell.appendChild(numberInput({
-      value: Math.round(c.percAvancoEfetivo * 1000) / 10,
-      manual: c.origemPercAvanco === 'manual',
-      step: '0.1', min: 0,
-      onSave: (v) => api('POST', `/api/categorias/${c.id}/avanco`, { perc: v / 100 }),
-    }));
-    tr.appendChild(percCell);
+    tr.appendChild(td(`<span class="num badge-cell ${c.origemPercAvanco === 'manual' ? 'manual' : 'auto'}">${pct(c.percAvancoEfetivo)}</span>`));
 
     const info = STATUS_CRONOGRAMA_INFO[c.statusCronograma] || STATUS_CRONOGRAMA_INFO['sem-dados'];
     tr.appendChild(td(`<span class="badge ${info.badge}">${info.label}</span>`));
@@ -995,6 +1045,47 @@ function clampPerc(v) {
 /* ==========================================================================
    TAB 3 — Detalhamento FC (itens por categoria)
    ========================================================================== */
+// Extrai o mês da fatura de um item de cartão: usa a tag "fatura YYYY-MM"
+// (gravada pela compra parcelada) quando existe; senão cai para o mês da data
+// de pagamento do item.
+function itemFaturaMes(it) {
+  const m = /fatura\s+(\d{4}-\d{2})/i.exec(it.formaPagamento || '');
+  if (m) return m[1];
+  return it.dataPagamento ? String(it.dataPagamento).slice(0, 7) : null;
+}
+
+function renderGastoCartaoMensal() {
+  const totals = new Map();
+  for (const c of STATE.categorias) {
+    for (const it of c.itens) {
+      if (!/cart/i.test(it.formaPagamento || '')) continue;
+      const mes = itemFaturaMes(it) || 'sem-data';
+      totals.set(mes, (totals.get(mes) || 0) + (Number(it.valorRealizado) || 0));
+    }
+  }
+  const meses = [...totals.keys()].sort();
+  const details = document.createElement('details');
+  details.className = 'scurve-table-details';
+  const totalGeral = [...totals.values()].reduce((a, v) => a + v, 0);
+  details.innerHTML = `<summary>Ver gasto no cartão por mês (${money(totalGeral)} no total)</summary>`;
+  const wrap = document.createElement('div');
+  wrap.className = 'table-scroll';
+  if (!meses.length) {
+    wrap.innerHTML = '<div class="muted" style="padding:8px 0">Nenhum lançamento no cartão ainda.</div>';
+  } else {
+    wrap.innerHTML = `<table class="data"><thead><tr><th>Mês (fatura)</th><th class="num">Total no cartão</th></tr></thead><tbody>${meses.map((mes) => `
+      <tr><td>${mes === 'sem-data' ? 'Sem data' : monthLabelPt(mes)}</td><td class="num">${money(totals.get(mes))}</td></tr>
+    `).join('')}</tbody></table>`;
+  }
+  details.appendChild(wrap);
+  return details;
+}
+
+function monthLabelPt(mes) {
+  const [y, m] = mes.split('-');
+  return `${MONTH_NAMES_PT[Number(m) - 1]}/${y}`;
+}
+
 function renderDetalhamento() {
   const root = document.getElementById('tab-detalhamento');
   root.innerHTML = '';
@@ -1004,9 +1095,10 @@ function renderDetalhamento() {
   header.innerHTML = `<div class="panel-header">
     <div>
       <h2>Detalhamento FC — orçado x realizado por item</h2>
-      <div class="muted">Cada categoria soma seus itens automaticamente. Edite valores realizados, orçados, datas e forma de pagamento; adicione ou remova itens conforme o lançamento real.</div>
+      <div class="muted">Cada categoria soma seus itens automaticamente. Edite valores realizados, orçados, datas e forma de pagamento; adicione ou remova itens conforme o lançamento real. O teto de medição de cada item é sempre 100% do seu valor orçado.</div>
     </div>
   </div>`;
+  header.appendChild(renderGastoCartaoMensal());
   root.appendChild(header);
 
   for (const c of STATE.categorias) {
@@ -1143,35 +1235,53 @@ function openCompraParceladaModal(categoria) {
 }
 
 /* ==========================================================================
-   TAB 4 — Fluxo de Caixa: lançar avanço do mês (gera parcela em Contas a Pagar)
+   Lançar avanço da quinzena (aba "Lançar Avanços"): igual à planilha original
+   — 2 lançamentos por mês, cada um define o % acumulado de cada categoria que
+   avançou naquela quinzena e já gera a parcela correspondente em Contas a
+   Pagar. Cartão é sempre 1ª quinzena (fechamento dia 05, vencimento dia 15).
    ========================================================================== */
-function renderLancamentoMensalPanel() {
+function renderLancamentoQuinzenaPanel() {
   const panel = document.createElement('div');
   panel.className = 'panel';
-
-  const header = document.createElement('div');
-  header.className = 'panel-header';
-  header.innerHTML = `
-    <div>
-      <h2>Lançar avanço do mês</h2>
-      <div class="muted">Informe o novo % acumulado das categorias que avançaram — o peso de cada uma (já estipulado pelo valor orçado) rateia o valor gerado. O sistema desconta o cartão, sugere o PIX ao empreiteiro e à administração, e cria a parcela em Contas a Pagar.</div>
+  panel.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <h2>Lançar avanço da quinzena</h2>
+        <div class="muted">Escolha a quinzena (mês/1ª ou 2ª parcela) e informe o novo % acumulado de cada categoria que avançou — o valor orçado de cada categoria rateia o valor gerado. O sistema desconta o cartão (já lançado no Detalhamento FC), sugere o PIX ao empreiteiro e à administração, e gera automaticamente a parcela em Contas a Pagar para essa quinzena exata.</div>
+      </div>
     </div>
   `;
-  const toggleBtn = document.createElement('button');
-  toggleBtn.className = 'btn primary';
-  toggleBtn.textContent = LANCAMENTO_MENSAL_OPEN ? 'Fechar' : 'Lançar avanço do mês';
-  toggleBtn.onclick = () => { LANCAMENTO_MENSAL_OPEN = !LANCAMENTO_MENSAL_OPEN; renderFluxo(); };
-  header.appendChild(toggleBtn);
-  panel.appendChild(header);
 
-  if (!LANCAMENTO_MENSAL_OPEN) return panel;
+  const periods = buildQuinzenaPeriods(STATE.meta?.dataInicio, STATE.meta?.previsaoTermino);
+  const hoje = STATE.resumo.dataReferenciaCronograma || new Date().toISOString().slice(0, 10);
+  const periodoAtual = periodoFromDateStr(hoje);
+  const defaultIdx = Math.max(0, periods.findIndex((p) => p.mes === periodoAtual?.mes && p.quinzena === periodoAtual?.quinzena));
+
+  const periodoRow = document.createElement('div');
+  periodoRow.className = 'form-grid';
+  periodoRow.innerHTML = `
+    <label>Quinzena
+      <select id="lqPeriodo">${periods.map((p, i) => `<option value="${i}">${esc(p.label)}</option>`).join('')}</select>
+    </label>
+    <label>Status
+      <select id="lqStatus"><option value="PLANEJADO">PLANEJADO</option><option value="REALIZADO">REALIZADO</option></select>
+    </label>
+    <label>Data em que o custo foi gerado
+      <input id="lqDataCusto" type="date" value="${new Date().toISOString().slice(0, 10)}" />
+    </label>
+    <label>Gasto no cartão nesta quinzena (R$)
+      <input id="lqCartao" type="number" step="0.01" value="0" />
+    </label>
+  `;
+  periodoRow.querySelector('#lqPeriodo').value = String(defaultIdx);
+  panel.appendChild(periodoRow);
 
   const body = document.createElement('div');
   body.className = 'table-scroll';
   body.innerHTML = `<table class="data">
     <thead><tr>
       <th>Nº</th><th class="wrap">Categoria</th><th class="num">Peso</th><th class="num">Valor orçado</th>
-      <th class="num">% atual</th><th class="num">Novo % acumulado</th><th class="num">Valor gerado</th>
+      <th class="num">% atual (acumulado)</th><th class="num">Novo % acumulado</th><th class="num">Valor gerado</th>
     </tr></thead>
     <tbody></tbody>
   </table>`;
@@ -1188,9 +1298,10 @@ function renderLancamentoMensalPanel() {
 
     const percAtual = Math.round(c.percAvancoEfetivo * 1000) / 10;
     const novoPercInput = document.createElement('input');
-    novoPercInput.type = 'number'; novoPercInput.step = '0.1'; novoPercInput.min = '0';
+    novoPercInput.type = 'number'; novoPercInput.step = '0.1'; novoPercInput.min = '0'; novoPercInput.max = '100';
     novoPercInput.className = 'cell-input';
     novoPercInput.value = percAtual;
+    novoPercInput.title = 'Teto de medição: nunca mais que 100%.';
     tr.appendChild(td(novoPercInput));
 
     const valorGeradoCell = document.createElement('td');
@@ -1203,92 +1314,146 @@ function renderLancamentoMensalPanel() {
   }
   panel.appendChild(body);
 
-  const summary = document.createElement('div');
-  summary.className = 'form-grid';
-  summary.style.marginTop = '12px';
-  summary.innerHTML = `
-    <label>Rótulo da parcela
-      <input id="lmLabel" type="text" value="Avanço ${new Date().toISOString().slice(0, 10)}" />
-    </label>
-    <label>Gasto no cartão neste mês (R$)
-      <input id="lmCartao" type="number" step="0.01" value="0" />
-    </label>
-    <label>Data em que o custo foi gerado
-      <input id="lmDataCusto" type="date" value="${new Date().toISOString().slice(0, 10)}" />
-    </label>
-    <label>Para qual mês/parcela ele vai ocorrer (vencimento planejado)
-      <input id="lmVenc" type="date" />
-    </label>
-    <label style="grid-column: 1 / -1">Observação
-      <textarea id="lmObs"></textarea>
-    </label>
-  `;
-  panel.appendChild(summary);
-  summary.querySelector('#lmVenc').addEventListener('change', (e) => {
-    const suggestion = mesParcelaLabel(e.target.value);
-    if (suggestion) summary.querySelector('#lmLabel').value = suggestion;
-  });
-
   const totals = document.createElement('div');
   totals.className = 'cards-grid';
   totals.style.marginTop = '4px';
   totals.innerHTML = `
-    <div class="card"><div class="card-label">Valor gerado no mês</div><div class="card-value" id="lmValorGerado">${money(0)}</div></div>
-    <div class="card"><div class="card-label">Sugestão empreiteiro (PIX)</div><div class="card-value" id="lmEmpreiteiro">${money(0)}</div></div>
-    <div class="card"><div class="card-label">Sugestão administração (PIX)</div><div class="card-value" id="lmAdm">${money(0)}</div></div>
+    <div class="card"><div class="card-label">Valor gerado na quinzena</div><div class="card-value" id="lqValorGerado">${money(0)}</div></div>
+    <div class="card"><div class="card-label">Sugestão empreiteiro (PIX)</div><div class="card-value" id="lqEmpreiteiro">${money(0)}</div></div>
+    <div class="card"><div class="card-label">Sugestão administração (PIX)</div><div class="card-value" id="lqAdm">${money(0)}</div></div>
   `;
   panel.appendChild(totals);
 
+  const obsRow = document.createElement('div');
+  obsRow.className = 'form-grid';
+  obsRow.style.marginTop = '4px';
+  obsRow.innerHTML = `<label style="grid-column: 1 / -1">Observação<textarea id="lqObs"></textarea></label>`;
+  panel.appendChild(obsRow);
+
+  const cartaoInput = periodoRow.querySelector('#lqCartao');
+
+  function quinzenaAtual() { return periods[Number(periodoRow.querySelector('#lqPeriodo').value)]; }
+
+  async function atualizarSugestaoCartao() {
+    const p = quinzenaAtual();
+    if (!p) return;
+    if (p.quinzena === 2) {
+      cartaoInput.value = '0';
+      cartaoInput.disabled = true;
+      cartaoInput.title = 'Cartão é sempre pago na 1ª quinzena do mês — nunca na 2ª.';
+    } else {
+      cartaoInput.disabled = false;
+      cartaoInput.title = '';
+      try {
+        const res = await fetch(`/api/sugestao-cartao/${p.mes}`);
+        const data = await res.json();
+        cartaoInput.value = data.gastoCartao || 0;
+      } catch { /* mantém o que já estava digitado */ }
+    }
+    recalcPreview();
+  }
+
   function recalcPreview() {
-    let valorGeradoMes = 0;
+    let valorGeradoPeriodo = 0;
     for (const r of rows) {
-      const novoPerc = Number(r.novoPercInput.value) || 0;
+      const novoPerc = Math.min(100, Math.max(0, Number(r.novoPercInput.value) || 0));
       const deltaValor = r.categoria.valorOrcado * ((novoPerc - r.percAtual) / 100);
       r.valorGeradoCell.textContent = money(deltaValor);
-      r.valorGeradoCell.style.color = deltaValor > 0.004 ? 'var(--green)' : deltaValor < -0.004 ? 'var(--red)' : '';
-      valorGeradoMes += deltaValor;
+      r.valorGeradoCell.style.color = deltaValor > 0.004 ? 'var(--good, var(--green))' : deltaValor < -0.004 ? 'var(--danger, var(--red))' : '';
+      valorGeradoPeriodo += deltaValor;
     }
-    const gastoCartao = Number(panel.querySelector('#lmCartao').value) || 0;
+    const gastoCartao = Number(cartaoInput.value) || 0;
     const taxaAdm = STATE.parametros.taxaAdministracaoPercent || 0;
-    const empreiteiro = Math.max(0, valorGeradoMes - gastoCartao);
-    const adm = empreiteiro * taxaAdm;
-    panel.querySelector('#lmValorGerado').textContent = money(valorGeradoMes);
-    panel.querySelector('#lmEmpreiteiro').textContent = money(empreiteiro);
-    panel.querySelector('#lmAdm').textContent = money(adm);
+    const empreiteiro = Math.max(0, valorGeradoPeriodo - gastoCartao);
+    const adm = (empreiteiro + gastoCartao) * taxaAdm;
+    panel.querySelector('#lqValorGerado').textContent = money(valorGeradoPeriodo);
+    panel.querySelector('#lqEmpreiteiro').textContent = money(empreiteiro);
+    panel.querySelector('#lqAdm').textContent = money(adm);
   }
   rows.forEach((r) => r.novoPercInput.addEventListener('input', recalcPreview));
-  summary.querySelector('#lmCartao').addEventListener('input', recalcPreview);
-  recalcPreview();
+  cartaoInput.addEventListener('input', recalcPreview);
+  periodoRow.querySelector('#lqPeriodo').addEventListener('change', atualizarSugestaoCartao);
+  atualizarSugestaoCartao();
 
   const actions = document.createElement('div');
   actions.style.cssText = 'display:flex; justify-content:flex-end; margin-top:12px;';
   const submitBtn = document.createElement('button');
   submitBtn.className = 'btn primary';
-  submitBtn.textContent = 'Gerar parcela em Contas a Pagar';
+  submitBtn.textContent = 'Lançar avanço e gerar parcela';
   submitBtn.onclick = async () => {
     const avancos = rows
       .filter((r) => Math.abs(Number(r.novoPercInput.value) - r.percAtual) > 0.001)
-      .map((r) => ({ categoriaId: r.categoria.id, novoPerc: Number(r.novoPercInput.value) / 100 }));
+      .map((r) => ({ categoriaId: r.categoria.id, novoPerc: Math.min(1, Math.max(0, Number(r.novoPercInput.value) / 100)) }));
     if (!avancos.length) { toast('Altere o % de ao menos uma categoria.', true); return; }
+    const p = quinzenaAtual();
     const payload = {
+      mes: p.mes,
+      quinzena: p.quinzena,
       avancos,
-      gastoCartao: Number(panel.querySelector('#lmCartao').value) || 0,
-      label: panel.querySelector('#lmLabel').value,
-      dataGeracaoCusto: panel.querySelector('#lmDataCusto').value || null,
-      data: panel.querySelector('#lmDataCusto').value || null,
-      vencPlanejado: panel.querySelector('#lmVenc').value || null,
-      obs: panel.querySelector('#lmObs').value,
+      gastoCartao: Number(cartaoInput.value) || 0,
+      dataGeracaoCusto: periodoRow.querySelector('#lqDataCusto').value || null,
+      status: periodoRow.querySelector('#lqStatus').value,
+      obs: obsRow.querySelector('#lqObs').value,
     };
     try {
-      const data = await api('POST', '/api/lancamento-mensal', payload);
-      LANCAMENTO_MENSAL_OPEN = false;
-      renderAll();
-      if (!toastAjuste(data)) toast('Parcela gerada em Contas a Pagar.');
+      const data = await api('POST', '/api/lancamento-quinzena', payload);
+      if (!toastAjuste(data)) toast(`Avanço lançado — parcela "${p.label}" atualizada em Contas a Pagar.`);
     } catch (e) { /* erro já mostrado pelo api() */ }
   };
   actions.appendChild(submitBtn);
   panel.appendChild(actions);
 
+  return panel;
+}
+
+// Painel compacto no Fluxo de Caixa: por categoria, o que será pago ao
+// empreiteiro (contrato) lado a lado com o que será liberado pela CAIXA
+// (verba específica de cada categoria) — mesmas 20 linhas, duas fontes de
+// dinheiro diferentes (ver "Liberação por categoria" na aba Liberação PCI
+// para editar/ajustar valores manuais).
+function renderLiberacaoPorCategoriaResumo() {
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <h2>O que pagar x o que liberar, por categoria</h2>
+        <div class="muted">Empreiteiro (PIX, contrato) é pago por quinzena; CAIXA (crédito PCI) é liberado mensalmente. Cada categoria tem sua própria verba nas duas fontes. Para ajustar liberação manual, use a aba Liberação PCI.</div>
+      </div>
+    </div>
+    <div class="table-scroll"><table class="data"><thead><tr>
+      <th>Nº</th><th class="wrap">Categoria</th><th class="num">% avanço</th>
+      <th class="num">Orçado empreiteiro</th><th class="num">Medido/pago empreiteiro</th><th class="num">Saldo empreiteiro</th>
+      <th class="num">Verba CAIXA</th><th class="num">Liberado CAIXA</th><th class="num">Saldo CAIXA</th>
+    </tr></thead><tbody></tbody>
+    <tfoot></tfoot></table></div>
+  `;
+  const tbody = panel.querySelector('tbody');
+  for (const c of STATE.categorias) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${c.numero}</td>
+      <td class="wrap">${esc(c.nome)}</td>
+      <td class="num">${pct(c.percAvancoEfetivo)}</td>
+      <td class="num">${money(c.valorOrcado)}</td>
+      <td class="num">${money(c.valorMedido)}</td>
+      <td class="num">${money(c.saldoContratoCategoria)}</td>
+      <td class="num">${money(c.verbaCaixa)}</td>
+      <td class="num">${money(c.caixaLiberadoCategoria)}</td>
+      <td class="num">${money(c.saldoCaixaCategoria)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  const r = STATE.resumo;
+  panel.querySelector('tfoot').innerHTML = `<tr>
+    <td colspan="3">TOTAL</td>
+    <td class="num">${money(r.totalOrcadoCategorias)}</td>
+    <td class="num">${money(r.totalMedido)}</td>
+    <td class="num">${money(r.totalOrcadoCategorias - r.totalMedido)}</td>
+    <td class="num">${money(r.totalVerbaCaixaCategorias)}</td>
+    <td class="num">${money(r.totalCaixaLiberadoCategorias)}</td>
+    <td class="num">${money(r.totalVerbaCaixaCategorias - r.totalCaixaLiberadoCategorias)}</td>
+  </tr>`;
   return panel;
 }
 
@@ -1316,7 +1481,7 @@ function renderFluxo() {
   root.appendChild(tracking);
   root.appendChild(renderVerbaFuturaBlock());
 
-  root.appendChild(renderLancamentoMensalPanel());
+  root.appendChild(renderLiberacaoPorCategoriaResumo());
 
   const panel = document.createElement('div');
   panel.className = 'panel';

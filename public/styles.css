@@ -155,6 +155,8 @@ td.wrap { white-space: normal; min-width: 180px; }
 .cell-input:hover { border-color: var(--border); }
 .cell-input:focus { border-color: var(--primary); background: #fff; outline: none; }
 .cell-input.manual { color: var(--manual); font-weight: 600; }
+.badge-cell.manual { color: var(--manual); font-weight: 600; }
+.badge-cell.auto { color: var(--ink, #1b2430); }
 .cell-input.wide { min-width: 140px; }
 select.cell-input { color: var(--auto); }
 

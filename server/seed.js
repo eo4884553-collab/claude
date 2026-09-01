@@ -191,7 +191,13 @@ function buildLiberacaoPCI() {
     { etapa: 3, descricao: 'Estrutura', percLimiteAcumulado: 0.40, valor: 244000, mesProgramado: 6, liberadoManual: null },
     { etapa: 4, descricao: 'Alvenaria', percLimiteAcumulado: 0.60, valor: 244000, mesProgramado: 9, liberadoManual: null },
     { etapa: 5, descricao: 'Cobertura + Instalações', percLimiteAcumulado: 0.80, valor: 254000, mesProgramado: 12, liberadoManual: null },
-    { etapa: 6, descricao: 'Acabamento Final', percLimiteAcumulado: 1.00, valor: 220000, mesProgramado: 15, liberadoManual: null },
+    // Etapa 6 ajustada de R$220.000 para R$221.000: a aba "Liberação PCI" da
+    // planilha original soma as 6 etapas em R$1.499.000, mas a aba "Fluxo de
+    // Caixa" trata o crédito CAIXA total como R$1.500.000 fixo (célula B63,
+    // fonte dos R$1.116.000 usados na distribuição por incidência) — pequena
+    // divergência interna do workbook original. Ajustado aqui para eliminar
+    // a divergência em vez de reproduzi-la.
+    { etapa: 6, descricao: 'Acabamento Final', percLimiteAcumulado: 1.00, valor: 221000, mesProgramado: 15, liberadoManual: null },
   ];
 }
 
@@ -200,7 +206,7 @@ function buildSeed() {
     recursoProprioPlanejado: 571143.99,
     financiamentoObraCaixa: 1200000,
     financiamentoLoteCaixa: 384000,
-    creditoCaixaTotalPCI: 1499000,
+    creditoCaixaTotalPCI: 1500000,
     contratoTotalEmpreiteiro: 1081900,
     taxaAdministracaoPercent: 0.10,
     taxaJurosAnualCEF: 0.134,

@@ -28,7 +28,10 @@ function addMonthsToDate(dateStr, n) {
 // gasto de cartão lançado no Detalhamento FC, sem duplicar parcelas.
 function findOrCreateParcelaPorData(s, dataStr, labelSufixo) {
   const mesReferencia = monthKeyFromDateStr(dataStr);
-  const quinzena = quinzenaFromDateStr(dataStr);
+  // Cartão é sempre pago na 1ª quinzena do mês da fatura (fechamento dia 05,
+  // vencimento dia 15 — ver aba "Contas a pagar" da planilha original) — nunca
+  // cai na 2ª parcela, independentemente do dia exato informado na compra.
+  const quinzena = 1;
   let parcela = s.parcelas.find((p) => {
     const dataOcorrencia = p.vencimento || p.vencPlanejado || null;
     return monthKeyFromDateStr(dataOcorrencia) === mesReferencia && quinzenaFromDateStr(dataOcorrencia) === quinzena;
@@ -53,6 +56,28 @@ function findOrCreateParcelaPorData(s, dataStr, labelSufixo) {
     s.parcelas.push(parcela);
   }
   return parcela;
+}
+
+// Data "de calendário" de uma quinzena (mês/1ª ou 2ª parcela), seguindo a mesma
+// convenção usada em toda a app (dia ≤15 = 1ª parcela, dia >15 = 2ª parcela):
+// dia 10 para a 1ª, dia 25 para a 2ª — bate com os vencimentos reais extraídos
+// da planilha (ex.: "10/08" e "25/08").
+function dataQuinzena(mes, quinzena) {
+  return `${mes}-${quinzena === 2 ? '25' : '10'}`;
+}
+
+// Soma o gasto no cartão já lançado no Detalhamento FC para a fatura de um mês
+// específico (formaPagamento com "CARTÃO — fatura YYYY-MM") — usado para sugerir
+// automaticamente o valor de cartão ao lançar o avanço de uma quinzena.
+function sugestaoCartaoDoMes(s, mes) {
+  let total = 0;
+  for (const cat of s.categorias) {
+    for (const it of cat.itens || []) {
+      const m = /fatura\s+(\d{4}-\d{2})/i.exec(it.formaPagamento || '');
+      if (m && m[1] === mes) total += Number(it.valorRealizado) || 0;
+    }
+  }
+  return Math.round(total * 100) / 100;
 }
 
 function ok(res, state, ajuste) {
@@ -313,18 +338,26 @@ app.delete('/api/parcelas/:id', async (req, res) => {
   ok(res, state);
 });
 
-// ---- Lançamento mensal (aba Fluxo de Caixa): lança o avanço do mês por
-// categoria (usando o peso já estipulado de cada uma) e gera automaticamente
-// a parcela correspondente em Contas a Pagar, já descontando o cartão. ----
-app.post('/api/lancamento-mensal', async (req, res) => {
+// ---- Lançamento de avanço por quinzena (aba "Lançar Avanços"): igual à
+// planilha original — dois lançamentos por mês (1ª e 2ª parcela), cada um
+// define o % acumulado de cada categoria que avançou naquela quinzena. O
+// sistema calcula a diferença de valor (peso já estipulado de cada categoria),
+// desconta o cartão já lançado no Detalhamento FC para aquele mês, e gera
+// automaticamente a parcela correspondente em Contas a Pagar (mês/quinzena
+// exatos), já com PIX empreiteiro + ADM calculados. Cartão nunca é cobrado na
+// 2ª quinzena (sempre pago na 1ª — fechamento dia 05, vencimento dia 15). ----
+app.post('/api/lancamento-quinzena', async (req, res) => {
   let ajuste = null;
   const state = await store.mutate((s) => {
     const b = req.body || {};
     const avancos = Array.isArray(b.avancos) ? b.avancos : [];
     if (!avancos.length) throw Object.assign(new Error('Informe o novo % de ao menos uma categoria.'), { status: 400 });
+    if (!/^\d{4}-\d{2}$/.test(b.mes || '')) throw Object.assign(new Error('Informe o mês (YYYY-MM).'), { status: 400 });
+    const quinzena = Number(b.quinzena) === 2 ? 2 : 1;
+    const mes = b.mes;
+    const vencPlanejado = dataQuinzena(mes, quinzena);
 
-    const dataLancamento = b.data || new Date().toISOString().slice(0, 10);
-    let valorGeradoMes = 0;
+    let valorGeradoPeriodo = 0;
     const detalhes = [];
 
     for (const a of avancos) {
@@ -335,18 +368,18 @@ app.post('/api/lancamento-mensal', async (req, res) => {
       if (Math.abs(novoPerc - percAnteriorEfetivo) < 0.0001) continue;
 
       const valorOrcado = Number(cat.valorOrcado) || 0;
-      valorGeradoMes += valorOrcado * (novoPerc - percAnteriorEfetivo);
+      valorGeradoPeriodo += valorOrcado * (novoPerc - percAnteriorEfetivo);
 
       const percAvancoManualAnterior = cat.percAvancoManual;
       cat.percAvancoManual = novoPerc;
-      cat.dataUltimoAvanco = dataLancamento;
+      cat.dataUltimoAvanco = b.dataGeracaoCusto || vencPlanejado;
       s.historicoAvancos.unshift({
         id: newId('avanco'),
         categoriaId: cat.id,
         categoriaNome: cat.nome,
         percAvancoAnterior: percAvancoManualAnterior,
         percAvancoNovo: novoPerc,
-        data: dataLancamento,
+        data: b.dataGeracaoCusto || vencPlanejado,
         obs: b.obs || '',
         timestamp: new Date().toISOString(),
       });
@@ -355,27 +388,29 @@ app.post('/api/lancamento-mensal', async (req, res) => {
 
     if (!detalhes.length) throw Object.assign(new Error('Nenhuma categoria teve o % alterado.'), { status: 400 });
 
-    valorGeradoMes = Math.round(valorGeradoMes * 100) / 100;
-    const gastoCartao = Math.round((Number(b.gastoCartao) || 0) * 100) / 100;
+    valorGeradoPeriodo = Math.round(valorGeradoPeriodo * 100) / 100;
+    // Cartão sempre pago na 1ª quinzena — na 2ª, o gasto do cartão é sempre zero.
+    const gastoCartao = quinzena === 2 ? 0 : Math.round((Number(b.gastoCartao) || 0) * 100) / 100;
     const taxaAdm = Number(s.parametros.taxaAdministracaoPercent) || 0;
-    const totalEmpreiteiroPix = Math.round(Math.max(0, valorGeradoMes - gastoCartao) * 100) / 100;
+    const totalEmpreiteiroPix = Math.round(Math.max(0, valorGeradoPeriodo - gastoCartao) * 100) / 100;
     // ADM (10%) incide sobre PIX + cartão juntos — o cartão também consome a verba
     // do empreiteiro, só muda o canal de pagamento.
     const totalAdmPix = Math.round((totalEmpreiteiroPix + gastoCartao) * taxaAdm * 100) / 100;
-    const obsAuto = `Avanço do mês (valor gerado: R$ ${valorGeradoMes.toFixed(2)}) — ${detalhes.join('; ')}`;
+    const obsAuto = `Avanço da quinzena (valor gerado: R$ ${valorGeradoPeriodo.toFixed(2)}) — ${detalhes.join('; ')}`;
+    const label = `${monthQuinzenaLabel(mes, quinzena)}`;
 
     s.parcelas.push({
       id: newId('parcela'),
-      label: b.label || `Avanço ${dataLancamento}`,
+      label,
       totalEmpreiteiroPix,
       totalAdmPix,
       gastoCartao,
       totalATransferir: Math.round((totalEmpreiteiroPix + totalAdmPix) * 100) / 100,
       parcelaEvolucaoCaixa: 0,
       custoTotal: Math.round((totalEmpreiteiroPix + totalAdmPix + gastoCartao) * 100) / 100,
-      dataGeracaoCusto: b.dataGeracaoCusto || dataLancamento,
-      vencimento: b.vencimento || null,
-      vencPlanejado: b.vencPlanejado || null,
+      dataGeracaoCusto: b.dataGeracaoCusto || vencPlanejado,
+      vencimento: b.status === 'REALIZADO' ? (b.vencimento || vencPlanejado) : null,
+      vencPlanejado,
       status: b.status || 'PLANEJADO',
       obs: b.obs ? `${b.obs} — ${obsAuto}` : obsAuto,
       overrides: {},
@@ -383,6 +418,14 @@ app.post('/api/lancamento-mensal', async (req, res) => {
     if ((b.status || 'PLANEJADO') === 'REALIZADO') ajuste = reorganizarPlanejamento(s);
   });
   ok(res, state, ajuste);
+});
+
+// Sugestão automática de gasto no cartão para uma quinzena, somando os itens do
+// Detalhamento FC lançados como compra parcelada cuja fatura cai naquele mês
+// (só faz sentido para a 1ª quinzena — cartão nunca cai na 2ª).
+app.get('/api/sugestao-cartao/:mes', (req, res) => {
+  const s = store.load();
+  res.json({ mes: req.params.mes, gastoCartao: sugestaoCartaoDoMes(s, req.params.mes) });
 });
 
 // ---- Ajustes manuais no fluxo de caixa mensal ----
