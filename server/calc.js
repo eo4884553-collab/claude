@@ -337,34 +337,55 @@ function recompute(state) {
         entradaRecursoProprio: 0,
         entradaCaixaPCI: 0,
         entradaAjusteManual: 0,
+        // entradaRealizada/entradaPlanejada e saidaRealizada/saidaPlanejada
+        // dividem os mesmos valores acima pelo status da fonte (liberacoesCaixa
+        // e parcelas, respectivamente) — recurso próprio e ajustes manuais não
+        // têm campo de status próprio, então entram sempre como já realizados
+        // (são valores já assumidos como certos/ocorridos no momento do lançamento).
+        entradaRealizada: 0,
+        entradaPlanejada: 0,
         saidaEmpreiteiroPix: 0,
         saidaAdmPix: 0,
         saidaCartao: 0,
         saidaAjusteManual: 0,
+        saidaRealizada: 0,
+        saidaPlanejada: 0,
       });
     }
     return monthsMap.get(key);
   }
 
   const startMonthKey = monthKeyFromDateStr(state.meta?.dataInicio) || monthKeyFromDateStr(parcelas[0]?.vencimento) || 'sem-data';
-  bucket(startMonthKey, 1).entradaRecursoProprio += recursoProprioPlanejado;
+  const bInicial = bucket(startMonthKey, 1);
+  bInicial.entradaRecursoProprio += recursoProprioPlanejado;
+  bInicial.entradaRealizada += recursoProprioPlanejado;
   for (const lib of liberacoesCaixa) {
     const mk = monthKeyFromDateStr(lib.data) || 'sem-data';
-    bucket(mk, quinzenaFromDateStr(lib.data) || 1).entradaCaixaPCI += Number(lib.valor) || 0;
+    const b = bucket(mk, quinzenaFromDateStr(lib.data) || 1);
+    const valorLib = Number(lib.valor) || 0;
+    b.entradaCaixaPCI += valorLib;
+    if (lib.status === 'PLANEJADO') b.entradaPlanejada += valorLib;
+    else b.entradaRealizada += valorLib;
   }
   for (const p of parcelas) {
     const dataOcorrencia = p.vencimento || p.vencPlanejado || null;
     const mk = monthKeyFromDateStr(dataOcorrencia) || 'sem-data';
     const b = bucket(mk, quinzenaFromDateStr(dataOcorrencia));
-    b.saidaEmpreiteiroPix += Number(p.totalEmpreiteiroPix) || 0;
-    b.saidaAdmPix += Number(p.totalAdmPix) || 0;
-    b.saidaCartao += Number(p.gastoCartao) || 0;
+    const empreiteiro = Number(p.totalEmpreiteiroPix) || 0;
+    const adm = Number(p.totalAdmPix) || 0;
+    const cartao = Number(p.gastoCartao) || 0;
+    b.saidaEmpreiteiroPix += empreiteiro;
+    b.saidaAdmPix += adm;
+    b.saidaCartao += cartao;
+    if (p.status === 'REALIZADO') b.saidaRealizada += empreiteiro + adm + cartao;
+    else b.saidaPlanejada += empreiteiro + adm + cartao;
   }
   for (const ajuste of state.fluxoCaixaAjustes || []) {
     const mk = monthKeyFromDateStr(ajuste.data) || 'sem-data';
     const b = bucket(mk, quinzenaFromDateStr(ajuste.data));
-    if (ajuste.tipo === 'entrada') b.entradaAjusteManual += Number(ajuste.valor) || 0;
-    else b.saidaAjusteManual += Number(ajuste.valor) || 0;
+    const valorAjuste = Number(ajuste.valor) || 0;
+    if (ajuste.tipo === 'entrada') { b.entradaAjusteManual += valorAjuste; b.entradaRealizada += valorAjuste; }
+    else { b.saidaAjusteManual += valorAjuste; b.saidaRealizada += valorAjuste; }
   }
 
   const fluxoCaixaMensal = [...monthsMap.values()]
@@ -382,11 +403,15 @@ function recompute(state) {
         entradaRecursoProprio: round2(b.entradaRecursoProprio),
         entradaCaixaPCI: round2(b.entradaCaixaPCI),
         entradaAjusteManual: round2(b.entradaAjusteManual),
+        entradaRealizada: round2(b.entradaRealizada),
+        entradaPlanejada: round2(b.entradaPlanejada),
         entradaTotal,
         saidaEmpreiteiroPix: round2(b.saidaEmpreiteiroPix),
         saidaAdmPix: round2(b.saidaAdmPix),
         saidaCartao: round2(b.saidaCartao),
         saidaAjusteManual: round2(b.saidaAjusteManual),
+        saidaRealizada: round2(b.saidaRealizada),
+        saidaPlanejada: round2(b.saidaPlanejada),
         saidaTotal,
       };
     });

@@ -1686,15 +1686,17 @@ function renderFluxo() {
     <div class="panel-header">
       <div>
         <h2>Fluxo de caixa por mês e parcela</h2>
-        <div class="muted">Organizado como em Contas a Pagar — cada mês dividido em 1º e 2º Parcela, na ordem cronológica correta. Agregado a partir de todas as parcelas lançadas (planejadas e realizadas) mais ajustes manuais. A liberação de caixa (PCI) aparece no mês originalmente programado de cada etapa. Para o saldo já efetivamente realizado, veja os cards do Dashboard. Filtre por quinzena para ver só aquele período.</div>
+        <div class="muted">Organizado como em Contas a Pagar — cada mês dividido em 1º e 2º Parcela, na ordem cronológica correta. Agregado a partir de todas as parcelas lançadas (planejadas e realizadas) mais ajustes manuais. A liberação de caixa (PCI) aparece no mês originalmente programado de cada etapa. As colunas "Entrada/Saída Realizada" e "Planejada" mostram, dentro do total de cada quinzena, quanto já foi confirmado (status Realizado nas parcelas/liberações) e quanto ainda é planejamento. Para o saldo já efetivamente realizado, veja os cards do Dashboard. Filtre por quinzena para ver só aquele período.</div>
       </div>
       <button class="btn primary" id="btnNovoAjuste">+ Ajuste manual</button>
     </div>
     <div class="quinzenaFilterSlot"></div>
     <div class="table-scroll"><table class="data"><thead><tr>
       <th>Mês / Parcela</th><th class="num">Entrada recurso próprio</th><th class="num">Entrada caixa (PCI)</th><th class="num">Entrada ajuste</th><th class="num">Entrada total</th>
+      <th class="num">Entrada Realizada</th><th class="num">Entrada Planejada</th>
       <th class="num">Saída empreiteiro (PIX)</th><th class="num">Saída ADM (PIX)</th>
-      <th class="num">Saída cartão</th><th class="num">Saída ajuste</th><th class="num">Saída total</th><th class="num">Saldo acumulado</th>
+      <th class="num">Saída cartão</th><th class="num">Saída ajuste</th><th class="num">Saída total</th>
+      <th class="num">Saída Realizada</th><th class="num">Saída Planejada</th><th class="num">Saldo acumulado</th>
     </tr></thead><tbody></tbody></table></div>
   `;
   root.appendChild(panel);
@@ -1716,17 +1718,21 @@ function renderFluxo() {
       <td class="num">${money(m.entradaCaixaPCI)}</td>
       <td class="num">${money(m.entradaAjusteManual)}</td>
       <td class="num" style="font-weight:700">${money(m.entradaTotal)}</td>
+      <td class="num" style="color:var(--green)">${money(m.entradaRealizada)}</td>
+      <td class="num" style="color:var(--amber)">${money(m.entradaPlanejada)}</td>
       <td class="num">${money(m.saidaEmpreiteiroPix)}</td>
       <td class="num">${money(m.saidaAdmPix)}</td>
       <td class="num">${money(m.saidaCartao)}</td>
       <td class="num">${money(m.saidaAjusteManual)}</td>
       <td class="num" style="font-weight:700">${money(m.saidaTotal)}</td>
+      <td class="num" style="color:var(--green)">${money(m.saidaRealizada)}</td>
+      <td class="num" style="color:var(--amber)">${money(m.saidaPlanejada)}</td>
       <td class="num" style="font-weight:700; color:${m.saldoAcumuladoMes < 0 ? 'var(--red)' : 'var(--green)'}">${money(m.saldoAcumuladoMes)}</td>
     `;
     tbody.appendChild(tr);
   }
   if (!mesesFiltrados.length) {
-    tbody.innerHTML = `<tr><td colspan="11" class="muted">${FILTRO_QUINZENA_FLUXO ? 'Nenhum lançamento nessa quinzena.' : 'Nenhuma parcela lançada ainda.'}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="14" class="muted">${FILTRO_QUINZENA_FLUXO ? 'Nenhum lançamento nessa quinzena.' : 'Nenhuma parcela lançada ainda.'}</td></tr>`;
   }
 
   const ajustesPanel = document.createElement('div');

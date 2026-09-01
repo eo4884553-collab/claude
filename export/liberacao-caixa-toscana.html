@@ -609,29 +609,41 @@ function recompute(state) {
     const q = monthKey === 'sem-data' ? null : (quinzena || 1);
     const key = monthKey === 'sem-data' ? 'sem-data' : `${monthKey}-Q${q}`;
     if (!monthsMap.has(key)) {
-      monthsMap.set(key, { mes: monthKey, quinzena: q, label: monthQuinzenaLabel(monthKey, q), entradaRecursoProprio: 0, entradaCaixaPCI: 0, entradaAjusteManual: 0, saidaEmpreiteiroPix: 0, saidaAdmPix: 0, saidaCartao: 0, saidaAjusteManual: 0 });
+      monthsMap.set(key, { mes: monthKey, quinzena: q, label: monthQuinzenaLabel(monthKey, q), entradaRecursoProprio: 0, entradaCaixaPCI: 0, entradaAjusteManual: 0, entradaRealizada: 0, entradaPlanejada: 0, saidaEmpreiteiroPix: 0, saidaAdmPix: 0, saidaCartao: 0, saidaAjusteManual: 0, saidaRealizada: 0, saidaPlanejada: 0 });
     }
     return monthsMap.get(key);
   }
   const startMonthKey = monthKeyFromDateStr(state.meta?.dataInicio) || monthKeyFromDateStr(parcelas[0]?.vencimento) || 'sem-data';
-  bucket(startMonthKey, 1).entradaRecursoProprio += recursoProprioPlanejado;
+  const bInicial = bucket(startMonthKey, 1);
+  bInicial.entradaRecursoProprio += recursoProprioPlanejado;
+  bInicial.entradaRealizada += recursoProprioPlanejado;
   for (const lib of liberacoesCaixa) {
     const mk = monthKeyFromDateStr(lib.data) || 'sem-data';
-    bucket(mk, quinzenaFromDateStr(lib.data) || 1).entradaCaixaPCI += Number(lib.valor) || 0;
+    const b = bucket(mk, quinzenaFromDateStr(lib.data) || 1);
+    const valorLib = Number(lib.valor) || 0;
+    b.entradaCaixaPCI += valorLib;
+    if (lib.status === 'PLANEJADO') b.entradaPlanejada += valorLib;
+    else b.entradaRealizada += valorLib;
   }
   for (const p of parcelas) {
     const dataOcorrencia = p.vencimento || p.vencPlanejado || null;
     const mk = monthKeyFromDateStr(dataOcorrencia) || 'sem-data';
     const b = bucket(mk, quinzenaFromDateStr(dataOcorrencia));
-    b.saidaEmpreiteiroPix += Number(p.totalEmpreiteiroPix) || 0;
-    b.saidaAdmPix += Number(p.totalAdmPix) || 0;
-    b.saidaCartao += Number(p.gastoCartao) || 0;
+    const empreiteiro = Number(p.totalEmpreiteiroPix) || 0;
+    const adm = Number(p.totalAdmPix) || 0;
+    const cartao = Number(p.gastoCartao) || 0;
+    b.saidaEmpreiteiroPix += empreiteiro;
+    b.saidaAdmPix += adm;
+    b.saidaCartao += cartao;
+    if (p.status === 'REALIZADO') b.saidaRealizada += empreiteiro + adm + cartao;
+    else b.saidaPlanejada += empreiteiro + adm + cartao;
   }
   for (const ajuste of state.fluxoCaixaAjustes || []) {
     const mk = monthKeyFromDateStr(ajuste.data) || 'sem-data';
     const b = bucket(mk, quinzenaFromDateStr(ajuste.data));
-    if (ajuste.tipo === 'entrada') b.entradaAjusteManual += Number(ajuste.valor) || 0;
-    else b.saidaAjusteManual += Number(ajuste.valor) || 0;
+    const valorAjuste = Number(ajuste.valor) || 0;
+    if (ajuste.tipo === 'entrada') { b.entradaAjusteManual += valorAjuste; b.entradaRealizada += valorAjuste; }
+    else { b.saidaAjusteManual += valorAjuste; b.saidaRealizada += valorAjuste; }
   }
   const fluxoCaixaMensal = [...monthsMap.values()].sort((a, b) => {
     if (a.mes === 'sem-data') return 1;
@@ -641,7 +653,7 @@ function recompute(state) {
   }).map((b) => {
     const entradaTotal = round2(b.entradaRecursoProprio + b.entradaCaixaPCI + b.entradaAjusteManual);
     const saidaTotal = round2(b.saidaEmpreiteiroPix + b.saidaAdmPix + b.saidaCartao + b.saidaAjusteManual);
-    return { ...b, entradaRecursoProprio: round2(b.entradaRecursoProprio), entradaCaixaPCI: round2(b.entradaCaixaPCI), entradaAjusteManual: round2(b.entradaAjusteManual), entradaTotal, saidaEmpreiteiroPix: round2(b.saidaEmpreiteiroPix), saidaAdmPix: round2(b.saidaAdmPix), saidaCartao: round2(b.saidaCartao), saidaAjusteManual: round2(b.saidaAjusteManual), saidaTotal };
+    return { ...b, entradaRecursoProprio: round2(b.entradaRecursoProprio), entradaCaixaPCI: round2(b.entradaCaixaPCI), entradaAjusteManual: round2(b.entradaAjusteManual), entradaRealizada: round2(b.entradaRealizada), entradaPlanejada: round2(b.entradaPlanejada), entradaTotal, saidaEmpreiteiroPix: round2(b.saidaEmpreiteiroPix), saidaAdmPix: round2(b.saidaAdmPix), saidaCartao: round2(b.saidaCartao), saidaAjusteManual: round2(b.saidaAjusteManual), saidaRealizada: round2(b.saidaRealizada), saidaPlanejada: round2(b.saidaPlanejada), saidaTotal };
   });
   let acumulado = 0;
   for (const m of fluxoCaixaMensal) { acumulado = round2(acumulado + m.entradaTotal - m.saidaTotal); m.saldoAcumuladoMes = acumulado; }
@@ -2828,15 +2840,17 @@ function renderFluxo() {
     <div class="panel-header">
       <div>
         <h2>Fluxo de caixa por mês e parcela</h2>
-        <div class="muted">Organizado como em Contas a Pagar — cada mês dividido em 1º e 2º Parcela, na ordem cronológica correta. Agregado a partir de todas as parcelas lançadas (planejadas e realizadas) mais ajustes manuais. A liberação de caixa (PCI) aparece no mês originalmente programado de cada etapa. Para o saldo já efetivamente realizado, veja os cards do Dashboard. Filtre por quinzena para ver só aquele período.</div>
+        <div class="muted">Organizado como em Contas a Pagar — cada mês dividido em 1º e 2º Parcela, na ordem cronológica correta. Agregado a partir de todas as parcelas lançadas (planejadas e realizadas) mais ajustes manuais. A liberação de caixa (PCI) aparece no mês originalmente programado de cada etapa. As colunas "Entrada/Saída Realizada" e "Planejada" mostram, dentro do total de cada quinzena, quanto já foi confirmado (status Realizado nas parcelas/liberações) e quanto ainda é planejamento. Para o saldo já efetivamente realizado, veja os cards do Dashboard. Filtre por quinzena para ver só aquele período.</div>
       </div>
       <button class="btn primary" id="btnNovoAjuste">+ Ajuste manual</button>
     </div>
     <div class="quinzenaFilterSlot"></div>
     <div class="table-scroll"><table class="data"><thead><tr>
       <th>Mês / Parcela</th><th class="num">Entrada recurso próprio</th><th class="num">Entrada caixa (PCI)</th><th class="num">Entrada ajuste</th><th class="num">Entrada total</th>
+      <th class="num">Entrada Realizada</th><th class="num">Entrada Planejada</th>
       <th class="num">Saída empreiteiro (PIX)</th><th class="num">Saída ADM (PIX)</th>
-      <th class="num">Saída cartão</th><th class="num">Saída ajuste</th><th class="num">Saída total</th><th class="num">Saldo acumulado</th>
+      <th class="num">Saída cartão</th><th class="num">Saída ajuste</th><th class="num">Saída total</th>
+      <th class="num">Saída Realizada</th><th class="num">Saída Planejada</th><th class="num">Saldo acumulado</th>
     </tr></thead><tbody></tbody></table></div>
   `;
   root.appendChild(panel);
@@ -2858,17 +2872,21 @@ function renderFluxo() {
       <td class="num">${money(m.entradaCaixaPCI)}</td>
       <td class="num">${money(m.entradaAjusteManual)}</td>
       <td class="num" style="font-weight:700">${money(m.entradaTotal)}</td>
+      <td class="num" style="color:var(--good)">${money(m.entradaRealizada)}</td>
+      <td class="num" style="color:var(--warn)">${money(m.entradaPlanejada)}</td>
       <td class="num">${money(m.saidaEmpreiteiroPix)}</td>
       <td class="num">${money(m.saidaAdmPix)}</td>
       <td class="num">${money(m.saidaCartao)}</td>
       <td class="num">${money(m.saidaAjusteManual)}</td>
       <td class="num" style="font-weight:700">${money(m.saidaTotal)}</td>
+      <td class="num" style="color:var(--good)">${money(m.saidaRealizada)}</td>
+      <td class="num" style="color:var(--warn)">${money(m.saidaPlanejada)}</td>
       <td class="num" style="font-weight:700; color:${m.saldoAcumuladoMes < 0 ? 'var(--danger)' : 'var(--good)'}">${money(m.saldoAcumuladoMes)}</td>
     `;
     tbody.appendChild(tr);
   }
   if (!mesesFiltrados.length) {
-    tbody.innerHTML = `<tr><td colspan="11" class="muted">${FILTRO_QUINZENA_FLUXO ? 'Nenhum lançamento nessa quinzena.' : 'Nenhuma parcela lançada ainda.'}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="14" class="muted">${FILTRO_QUINZENA_FLUXO ? 'Nenhum lançamento nessa quinzena.' : 'Nenhuma parcela lançada ainda.'}</td></tr>`;
   }
 
   const ajustesPanel = document.createElement('div');
