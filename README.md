@@ -286,6 +286,24 @@ semeado com o **avanço físico real da aba Cronograma de obra** (categorias 1,
 2, 20 = concluídas; 3, 4 = 50%; demais = 0%), que é a fonte confiável até
 que novas medições sejam lançadas. Ajuste livremente em "Lançar Avanços".
 
+**Valor orçado por categoria (verba do empreiteiro).** A planilha original
+tem duas fontes diferentes para "quanto cada categoria vale": a soma dos
+itens do Detalhamento FC (que totaliza R$1.181.104,80) e a **incidência
+percentual de cada categoria sobre o contrato total** (tabela "Item |
+Serviços | Incidência", confirmada pelo usuário e também encontrada nas
+fórmulas da aba Fluxo de Caixa — ex.: `='Fluxo de Caixa '!AS11` = `-AX12` =
+`-($AX$6 × peso da categoria)`, com `$AX$6` = R$1.081.900,00, o contrato
+fechado). O app usa a segunda fonte — `valorOrcado(categoria) = incidência% ×
+R$1.081.900,00` — porque é ela que reconcilia com o contrato realmente
+assinado e com o `AS`/verba de cada categoria já usado em outros cálculos do
+workbook original. A verba CAIXA por categoria (item 14 da lista de regras
+acima) já usava essa mesma incidência sobre o crédito CAIXA (R$1.116.000,00)
+desde o início. A soma das 20 categorias fica em R$1.081.683,62 (não R$
+1.081.900,00 "redondo") pela mesma folga de arredondamento de ~R$216 que já
+existe nas incidências de 2 casas decimais do workbook original — o próprio
+Fluxo de Caixa absorve essa folga numa linha de reconciliação
+("PIX/FORNECEDOR"), então não é um erro a corrigir.
+
 ## Estrutura do projeto
 
 ```

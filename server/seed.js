@@ -95,15 +95,46 @@ const VERBA_CAIXA_POR_CATEGORIA = {
   20: 67183.2,
 };
 
-function buildCategorias() {
+// % de incidência de cada categoria sobre o total (mesma tabela "Item | Serviços |
+// Incidência" fornecida pelo usuário, confirmando exatamente os pesos já extraídos
+// da aba Fluxo de Caixa). Usada para derivar o valorOrcado (verba do CONTRATO do
+// empreiteiro) de cada categoria a partir do contrato total (R$1.081.900,00) — e não
+// mais da soma dos itens do Detalhamento FC, que no workbook original soma um total
+// diferente (R$1.181.104,80) por ser uma fonte de dado separada (ver README). A
+// verba CAIXA acima já usa essa mesma incidência sobre R$1.116.000,00 (confirmado:
+// incidência × 1.116.000 reproduz VERBA_CAIXA_POR_CATEGORIA linha a linha).
+const INCIDENCIA_POR_CATEGORIA = {
+  1: 0.0289, 2: 0.0684, 3: 0.1723, 4: 0.0684, 5: 0.0653,
+  6: 0.0237, 7: 0.0361, 8: 0.0275, 9: 0.0722, 10: 0.0175,
+  11: 0.0413, 12: 0.0426, 13: 0.0928, 14: 0.0124, 15: 0.0385,
+  16: 0.0385, 17: 0.0413, 18: 0.0426, 19: 0.0093, 20: 0.0602,
+};
+
+function round2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+function valorOrcadoEmpreiteiro(numero, contratoTotalEmpreiteiro) {
+  const incidencia = INCIDENCIA_POR_CATEGORIA[numero];
+  return incidencia !== undefined ? round2(incidencia * contratoTotalEmpreiteiro) : 0;
+}
+
+const ITEM_PLUG_REGEX_SEED = /m[ãa]o de obra/i;
+
+function buildCategorias(contratoTotalEmpreiteiro) {
   return categoriasExtraidas.map((c, idx) => {
     const numero = idx + 1;
     const id = `cat-${String(numero).padStart(2, '0')}-${slug(c.nome).slice(0, 24)}`;
+    const valorOrcadoCategoria = valorOrcadoEmpreiteiro(numero, contratoTotalEmpreiteiro);
     const itens = (c.itens || []).map((it, itIdx) => ({
       id: `${id}-item-${itIdx + 1}`,
       descricao: it.descricao,
       unidade: it.unidade || '',
-      valorOrcado: Number(it.valorOrcado) || 0,
+      // O item "Mão de obra Fama+ material" carrega a verba inteira da categoria
+      // (é o "plug" que absorve o que sobra do orçado — ver server/calc.js); os
+      // demais itens mantêm seu valorOrcado original extraído (tipicamente 0,
+      // já que são custos datados sem orçamento prévio, ex.: compras no cartão).
+      valorOrcado: ITEM_PLUG_REGEX_SEED.test(it.descricao || '') ? valorOrcadoCategoria : (Number(it.valorOrcado) || 0),
       valorRealizado: Number(it.valorRealizado) || 0,
       dataPagamento: it.dataPagamento || null,
       formaPagamento: it.formaPagamento || '',
@@ -112,7 +143,7 @@ function buildCategorias() {
       id,
       numero,
       nome: c.nome,
-      valorOrcado: Number(c.valorOrcado) || 0,
+      valorOrcado: valorOrcadoCategoria,
       // % de avanço físico/financeiro informado manualmente na aba "Lançar Avanços".
       // Quando null, o sistema usa o percentual derivado da soma dos itens (Detalhamento FC).
       percAvancoManual: numero in AVANCO_FISICO_INICIAL ? AVANCO_FISICO_INICIAL[numero] : 0,
@@ -165,6 +196,15 @@ function buildLiberacaoPCI() {
 }
 
 function buildSeed() {
+  const parametros = {
+    recursoProprioPlanejado: 571143.99,
+    financiamentoObraCaixa: 1200000,
+    financiamentoLoteCaixa: 384000,
+    creditoCaixaTotalPCI: 1499000,
+    contratoTotalEmpreiteiro: 1081900,
+    taxaAdministracaoPercent: 0.10,
+    taxaJurosAnualCEF: 0.134,
+  };
   return {
     meta: {
       obra: 'Casa Newton — Gran Park Toscana',
@@ -175,16 +215,8 @@ function buildSeed() {
       dataInicio: '2026-05-11',
       previsaoTermino: '2027-08-14',
     },
-    parametros: {
-      recursoProprioPlanejado: 571143.99,
-      financiamentoObraCaixa: 1200000,
-      financiamentoLoteCaixa: 384000,
-      creditoCaixaTotalPCI: 1499000,
-      contratoTotalEmpreiteiro: 1081900,
-      taxaAdministracaoPercent: 0.10,
-      taxaJurosAnualCEF: 0.134,
-    },
-    categorias: buildCategorias(),
+    parametros,
+    categorias: buildCategorias(parametros.contratoTotalEmpreiteiro),
     liberacaoPCI: buildLiberacaoPCI(),
     parcelas: buildParcelas(),
     historicoAvancos: [],
