@@ -290,7 +290,16 @@ function recompute(state) {
   const saldoAPagarEmpreiteiro = round2(totalMedido - totalConsumidoContrato);
   const saldoContratoRestante = round2(contratoTotalEmpreiteiro - totalMedido);
   const totalInvestidoDisponivel = round2(recursoProprioPlanejado + caixaLiberadaAcumulada);
-  const saldoRecursoDisponivel = round2(totalInvestidoDisponivel - totalGastoAcumulado);
+  const saldoRecursoDisponivelAuto = round2(totalInvestidoDisponivel - totalGastoAcumulado);
+  // "Saldo de Recurso Disponível" (F6 da planilha original) não é uma fórmula viva:
+  // na planilha ela soma só o "Total a Transferir" das primeiras parcelas em que o
+  // recurso próprio foi de fato usado (antes de a liberação do CAIXA começar a fluir)
+  // — depois disso o valor é ajustado manualmente pelo proprietário conforme o saldo
+  // real em conta, podendo o recurso próprio voltar a ser usado no futuro se o fluxo
+  // de caixa exigir. Por isso aqui é sempre editável, com o cálculo automático (mais
+  // simples: investido − gasto acumulado) como valor de partida.
+  const temOverrideSaldoRecurso = parametros.saldoRecursoDisponivelManual !== null && parametros.saldoRecursoDisponivelManual !== undefined;
+  const saldoRecursoDisponivel = temOverrideSaldoRecurso ? round2(Number(parametros.saldoRecursoDisponivelManual)) : saldoRecursoDisponivelAuto;
 
   // Sugestão para a próxima parcela: o que já foi medido (avanço lançado) e ainda
   // não foi pago via nenhum canal (PIX ou cartão) em nenhuma parcela realizada.
@@ -423,6 +432,8 @@ function recompute(state) {
     saldoAPagarEmpreiteiro,
     saldoContratoRestante,
     saldoRecursoDisponivel,
+    saldoRecursoDisponivelAuto,
+    origemSaldoRecurso: temOverrideSaldoRecurso ? 'manual' : 'auto',
     // "Saldo Caixa": quanto do crédito CAIXA (PCI) ainda falta ser liberado pelo banco.
     saldoCaixaDisponivel,
     // "Saldo Empreiteiro": quanto do contrato total ainda falta ser efetivamente pago

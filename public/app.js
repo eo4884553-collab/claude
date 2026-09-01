@@ -520,7 +520,7 @@ function renderPainel() {
     <div class="card ${r.saldoRecursoDisponivel < 0 ? 'warn' : 'good'}">
       <div class="card-label">Saldo (conforme o gasto)</div>
       <div class="card-value">${money(r.saldoRecursoDisponivel)}</div>
-      <div class="card-sub">Execução financeira − gasto acumulado (${money(r.totalGastoAcumulado)})</div>
+      <div class="card-sub">${r.origemSaldoRecurso === 'manual' ? 'Ajustado manualmente (ver Parâmetros)' : `Execução financeira − gasto acumulado (${money(r.totalGastoAcumulado)})`}</div>
     </div>
     <div class="card ${r.saldoParaFuturos < 0 ? 'warn' : 'good'}">
       <div class="card-label">Margem p/ itens futuros</div>
@@ -647,7 +647,7 @@ function renderDashboard() {
     <div class="card ${r.saldoRecursoDisponivel < 0 ? 'warn' : 'good'}">
       <div class="card-label">Saldo de recurso disponível</div>
       <div class="card-value">${money(r.saldoRecursoDisponivel)}</div>
-      <div class="card-sub">Recurso próprio + caixa liberado − gasto acumulado</div>
+      <div class="card-sub">${r.origemSaldoRecurso === 'manual' ? 'Ajustado manualmente (ver Parâmetros)' : 'Recurso próprio + caixa liberado − gasto acumulado'}</div>
     </div>
     <div class="card">
       <div class="card-label">Total administração (RS Engenharia)</div>
@@ -1760,6 +1760,40 @@ function renderParametros() {
   }
   paramPanel.appendChild(paramForm);
   root.appendChild(paramPanel);
+
+  const r = STATE.resumo;
+  const saldoPanel = document.createElement('div');
+  saldoPanel.className = 'panel';
+  saldoPanel.innerHTML = `<div class="panel-header"><div><h2>Saldo de recurso disponível</h2>
+    <div class="muted">Na planilha original esse valor não é uma fórmula que soma tudo automaticamente — o recurso próprio só foi usado nos meses antes da liberação do CAIXA começar a fluir, e pode ser usado de novo se o fluxo de caixa exigir. Por isso é ajustado manualmente conforme o saldo real em conta. Ajuste aqui quando necessário; use "usar automático" para voltar ao cálculo simples do app (investido − gasto acumulado).</div></div></div>`;
+  const saldoBody = document.createElement('div');
+  saldoBody.className = 'form-grid';
+  const saldoWrap = document.createElement('label');
+  saldoWrap.textContent = `Saldo de recurso disponível (R$) — automático seria: ${money(r.saldoRecursoDisponivelAuto)}`;
+  const saldoInputWrap = document.createElement('div');
+  saldoInputWrap.style.display = 'flex';
+  saldoInputWrap.style.gap = '6px';
+  saldoInputWrap.style.alignItems = 'center';
+  const saldoManual = STATE.parametros.saldoRecursoDisponivelManual;
+  const saldoInput = numberInput({
+    value: saldoManual == null ? '' : saldoManual,
+    manual: saldoManual != null,
+    wide: true,
+    onSave: (v) => api('PUT', '/api/parametros', { saldoRecursoDisponivelManual: v }),
+  });
+  saldoInput.placeholder = 'automático';
+  saldoInputWrap.appendChild(saldoInput);
+  if (saldoManual != null) {
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'btn small';
+    clearBtn.textContent = 'usar automático';
+    clearBtn.onclick = () => api('PUT', '/api/parametros', { saldoRecursoDisponivelManual: null });
+    saldoInputWrap.appendChild(clearBtn);
+  }
+  saldoWrap.appendChild(saldoInputWrap);
+  saldoBody.appendChild(saldoWrap);
+  saldoPanel.appendChild(saldoBody);
+  root.appendChild(saldoPanel);
 
   const dangerPanel = document.createElement('div');
   dangerPanel.className = 'panel';

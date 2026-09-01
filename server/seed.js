@@ -236,6 +236,12 @@ function buildSeed() {
     // bater com a aba Contas a Pagar da planilha (célula C6: 356168 + custo total
     // das parcelas já realizadas).
     custoLoteExecutado: 356168,
+    // "Saldo de Recurso Disponível" (F6 da planilha original) não é uma fórmula viva
+    // — o proprietário ajusta manualmente conforme o saldo real em conta (o recurso
+    // próprio só foi usado nos meses iniciais, antes da liberação do CAIXA começar a
+    // fluir, mas pode voltar a ser usado se o fluxo de caixa exigir). null = calcula
+    // automaticamente (investido − gasto acumulado).
+    saldoRecursoDisponivelManual: null,
   };
   return {
     meta: {
