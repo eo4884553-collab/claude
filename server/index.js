@@ -618,30 +618,49 @@ app.post('/api/lancamento-quinzena', async (req, res) => {
     // Cartão sempre pago na 1ª quinzena — na 2ª, o gasto do cartão é sempre zero.
     const gastoCartao = quinzena === 2 ? 0 : Math.round((Number(b.gastoCartao) || 0) * 100) / 100;
     const taxaAdm = Number(s.parametros.taxaAdministracaoPercent) || 0;
-    const totalEmpreiteiroPix = Math.round(Math.max(0, valorGeradoPeriodo - gastoCartao) * 100) / 100;
-    // ADM (10%) incide sobre PIX + cartão juntos — o cartão também consome a verba
-    // do empreiteiro, só muda o canal de pagamento.
-    const totalAdmPix = Math.round((totalEmpreiteiroPix + gastoCartao) * taxaAdm * 100) / 100;
+    const totalEmpreiteiroPixGerado = Math.round(Math.max(0, valorGeradoPeriodo - gastoCartao) * 100) / 100;
     const obsAuto = `Avanço da quinzena (valor gerado: R$ ${valorGeradoPeriodo.toFixed(2)}) — ${detalhes.join('; ')}`;
     const label = `${monthQuinzenaLabel(mes, quinzena)}`;
+    const novoStatus = b.status || 'PLANEJADO';
+    const novaObs = b.obs ? `${b.obs} — ${obsAuto}` : obsAuto;
 
-    s.parcelas.push({
-      id: newId('parcela'),
-      label,
-      totalEmpreiteiroPix,
-      totalAdmPix,
-      gastoCartao,
-      totalATransferir: Math.round((totalEmpreiteiroPix + totalAdmPix) * 100) / 100,
-      parcelaEvolucaoCaixa: 0,
-      custoTotal: Math.round((totalEmpreiteiroPix + totalAdmPix + gastoCartao) * 100) / 100,
-      dataGeracaoCusto: b.dataGeracaoCusto || vencPlanejado,
-      vencimento: b.status === 'REALIZADO' ? (b.vencimento || vencPlanejado) : null,
-      vencPlanejado,
-      status: b.status || 'PLANEJADO',
-      obs: b.obs ? `${b.obs} — ${obsAuto}` : obsAuto,
-      overrides: {},
-    });
-    if ((b.status || 'PLANEJADO') === 'REALIZADO') ajuste = reorganizarPlanejamento(s);
+    // Um segundo lançamento para o mesmo mês/quinzena (ex.: mais categorias
+    // avançaram depois) atualiza a parcela já existente em vez de criar uma
+    // duplicada: soma o PIX gerado por este lote de categorias e substitui o
+    // cartão pelo valor atual (a sugestão automática já é o total da fatura
+    // da quinzena, não um incremento). ADM/total a transferir/custo total são
+    // recalculados ao vivo em recompute() a partir desses campos — exceto
+    // quando há override manual, que é sempre preservado. Nunca funde numa
+    // parcela já REALIZADO — nesse caso cria uma nova, como antes.
+    let parcela = s.parcelas.find((p) => p.vencPlanejado === vencPlanejado && p.status !== 'REALIZADO');
+    if (parcela) {
+      parcela.totalEmpreiteiroPix = Math.round(((Number(parcela.totalEmpreiteiroPix) || 0) + totalEmpreiteiroPixGerado) * 100) / 100;
+      parcela.gastoCartao = gastoCartao;
+      parcela.totalAdmPix = Math.round((parcela.totalEmpreiteiroPix + parcela.gastoCartao) * taxaAdm * 100) / 100;
+      parcela.status = novoStatus === 'REALIZADO' ? 'REALIZADO' : parcela.status;
+      parcela.vencimento = parcela.status === 'REALIZADO' ? (b.vencimento || parcela.vencimento || vencPlanejado) : parcela.vencimento;
+      parcela.obs = parcela.obs ? `${parcela.obs}\n${novaObs}` : novaObs;
+    } else {
+      const totalAdmPixGerado = Math.round((totalEmpreiteiroPixGerado + gastoCartao) * taxaAdm * 100) / 100;
+      parcela = {
+        id: newId('parcela'),
+        label,
+        totalEmpreiteiroPix: totalEmpreiteiroPixGerado,
+        totalAdmPix: totalAdmPixGerado,
+        gastoCartao,
+        totalATransferir: Math.round((totalEmpreiteiroPixGerado + totalAdmPixGerado) * 100) / 100,
+        parcelaEvolucaoCaixa: 0,
+        custoTotal: Math.round((totalEmpreiteiroPixGerado + totalAdmPixGerado + gastoCartao) * 100) / 100,
+        dataGeracaoCusto: b.dataGeracaoCusto || vencPlanejado,
+        vencimento: novoStatus === 'REALIZADO' ? (b.vencimento || vencPlanejado) : null,
+        vencPlanejado,
+        status: novoStatus,
+        obs: novaObs,
+        overrides: {},
+      };
+      s.parcelas.push(parcela);
+    }
+    if (parcela.status === 'REALIZADO') ajuste = reorganizarPlanejamento(s);
   });
   ok(res, state, ajuste);
 });
