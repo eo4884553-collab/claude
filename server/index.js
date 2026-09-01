@@ -4,7 +4,7 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const store = require('./store');
-const { recompute, computeCategoria, reorganizarPlanejamento } = require('./calc');
+const { recompute, computeCategoria, reorganizarPlanejamento, monthKeyFromDateStr, quinzenaFromDateStr, monthQuinzenaLabel } = require('./calc');
 
 const app = express();
 app.use(express.json());
@@ -12,6 +12,47 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 
 function newId(prefix) {
   return `${prefix}-${crypto.randomBytes(5).toString('hex')}`;
+}
+
+// Soma N meses a uma data 'YYYY-MM-DD', preservando o dia (usado para gerar as
+// datas de fatura de uma compra parcelada no cartão).
+function addMonthsToDate(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setMonth(d.getMonth() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+// Encontra a parcela existente (Contas a Pagar) cujo mês/quinzena bate com a
+// data informada, ou cria uma nova só com o essencial (label automático,
+// vencPlanejado, tudo mais zerado) — usada para "abastecer" automaticamente o
+// gasto de cartão lançado no Detalhamento FC, sem duplicar parcelas.
+function findOrCreateParcelaPorData(s, dataStr, labelSufixo) {
+  const mesReferencia = monthKeyFromDateStr(dataStr);
+  const quinzena = quinzenaFromDateStr(dataStr);
+  let parcela = s.parcelas.find((p) => {
+    const dataOcorrencia = p.vencimento || p.vencPlanejado || null;
+    return monthKeyFromDateStr(dataOcorrencia) === mesReferencia && quinzenaFromDateStr(dataOcorrencia) === quinzena;
+  });
+  if (!parcela) {
+    parcela = {
+      id: newId('parcela'),
+      label: `${monthQuinzenaLabel(mesReferencia, quinzena || 1)}${labelSufixo || ''}`,
+      totalEmpreiteiroPix: 0,
+      totalAdmPix: 0,
+      gastoCartao: 0,
+      totalATransferir: 0,
+      parcelaEvolucaoCaixa: 0,
+      custoTotal: 0,
+      dataGeracaoCusto: dataStr,
+      vencimento: null,
+      vencPlanejado: dataStr,
+      status: 'PLANEJADO',
+      obs: '',
+      overrides: {},
+    };
+    s.parcelas.push(parcela);
+  }
+  return parcela;
 }
 
 function ok(res, state, ajuste) {
@@ -51,10 +92,12 @@ app.put('/api/categorias/:id', async (req, res) => {
   const state = await store.mutate((s) => {
     const cat = s.categorias.find((c) => c.id === req.params.id);
     if (!cat) throw Object.assign(new Error('categoria não encontrada'), { status: 404 });
-    const { nome, valorOrcado, percAvancoManual, observacao } = req.body || {};
+    const { nome, valorOrcado, percAvancoManual, observacao, verbaCaixa, liberadoCaixaManual } = req.body || {};
     if (nome !== undefined) cat.nome = nome;
     if (valorOrcado !== undefined) cat.valorOrcado = Number(valorOrcado);
     if (observacao !== undefined) cat.observacao = observacao;
+    if (verbaCaixa !== undefined) cat.verbaCaixa = Number(verbaCaixa);
+    if (liberadoCaixaManual !== undefined) cat.liberadoCaixaManual = liberadoCaixaManual === null ? null : Number(liberadoCaixaManual);
     if (percAvancoManual !== undefined) {
       cat.percAvancoManual = percAvancoManual === null ? null : Number(percAvancoManual);
       cat.dataUltimoAvanco = new Date().toISOString().slice(0, 10);
@@ -141,6 +184,57 @@ app.delete('/api/categorias/:catId/itens/:itemId', async (req, res) => {
     cat.itens = cat.itens.filter((i) => i.id !== req.params.itemId);
   });
   ok(res, state);
+});
+
+// Lança uma compra parcelada no cartão: cria N itens (um por parcela) no
+// Detalhamento FC da categoria e soma automaticamente cada parcela na
+// respectiva parcela de Contas a Pagar (mês/quinzena da fatura) — sem precisar
+// editar o cartão manualmente em Contas a Pagar depois.
+app.post('/api/categorias/:id/compra-parcelada', async (req, res) => {
+  let compraParcelada = null;
+  const state = await store.mutate((s) => {
+    const cat = s.categorias.find((c) => c.id === req.params.id);
+    if (!cat) throw Object.assign(new Error('categoria não encontrada'), { status: 404 });
+    const b = req.body || {};
+    const descricao = (b.descricao || 'Compra no cartão').trim();
+    const valorTotal = Math.round((Number(b.valorTotal) || 0) * 100) / 100;
+    const qtdParcelas = Math.max(1, Math.min(48, Math.round(Number(b.qtdParcelas) || 1)));
+    const dataCompra = b.dataCompra || new Date().toISOString().slice(0, 10);
+    const primeiraFatura = b.primeiraFatura || dataCompra;
+    if (!valorTotal || valorTotal <= 0) throw Object.assign(new Error('Informe o valor total da compra.'), { status: 400 });
+
+    const valorParcelaBase = Math.round((valorTotal / qtdParcelas) * 100) / 100;
+    const itensCriados = [];
+    const parcelasAfetadas = [];
+    for (let i = 0; i < qtdParcelas; i++) {
+      const valorParcela = i === qtdParcelas - 1
+        ? Math.round((valorTotal - valorParcelaBase * (qtdParcelas - 1)) * 100) / 100
+        : valorParcelaBase;
+      const dataFatura = addMonthsToDate(primeiraFatura, i);
+      const item = {
+        id: newId('item'),
+        descricao: qtdParcelas > 1 ? `${descricao} (parcela ${i + 1}/${qtdParcelas})` : descricao,
+        unidade: b.unidade || 'UNID',
+        valorOrcado: 0,
+        valorRealizado: valorParcela,
+        dataPagamento: dataCompra,
+        formaPagamento: `CARTÃO — fatura ${dataFatura.slice(0, 7)}`,
+      };
+      cat.itens.push(item);
+      itensCriados.push(item.id);
+
+      const parcela = findOrCreateParcelaPorData(s, dataFatura, ' (cartão)');
+      parcela.gastoCartao = Math.round(((Number(parcela.gastoCartao) || 0) + valorParcela) * 100) / 100;
+      if (!parcela.overrides?.custoTotal) {
+        parcela.custoTotal = Math.round(((Number(parcela.totalEmpreiteiroPix) || 0) + (Number(parcela.totalAdmPix) || 0) + (Number(parcela.gastoCartao) || 0) + (Number(parcela.parcelaEvolucaoCaixa) || 0)) * 100) / 100;
+      }
+      parcelasAfetadas.push({ id: parcela.id, label: parcela.label, valor: valorParcela });
+    }
+    compraParcelada = { qtdParcelas, valorTotal, itensCriados, parcelasAfetadas };
+  });
+  const body = recompute(state);
+  body.compraParcelada = compraParcelada;
+  res.json(body);
 });
 
 // ---- Liberação PCI ----

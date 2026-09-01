@@ -472,10 +472,20 @@ function renderPainel() {
       <div class="card-value">${money(r.creditoCaixaTotalPCI)}</div>
       <div class="card-sub">Liberado: ${money(r.caixaLiberadaAcumulada)} · ${pct(r.percCaixaLiberada)}</div>
     </div>
+    <div class="card">
+      <div class="card-label">Recurso próprio planejado</div>
+      <div class="card-value">${money(r.recursoProprioPlanejado)}</div>
+      <div class="card-sub">Execução financeira (caixa liberado + recurso próprio): ${money(r.totalInvestidoDisponivel)}</div>
+    </div>
     <div class="card ${r.percObraGeral + 0.0001 >= r.percPrevistoGeral ? 'good' : 'warn'}">
       <div class="card-label">% Obra: real x previsto</div>
       <div class="card-value">${pct(r.percObraGeral)} <span class="muted" style="font-size:13px">/ ${pct(r.percPrevistoGeral)}</span></div>
       <div class="card-sub">${r.percObraGeral + 0.0001 >= r.percPrevistoGeral ? 'No prazo ou adiantada' : 'Atrasada vs. cronograma'}</div>
+    </div>
+    <div class="card ${r.saldoRecursoDisponivel < 0 ? 'warn' : 'good'}">
+      <div class="card-label">Saldo (conforme o gasto)</div>
+      <div class="card-value">${money(r.saldoRecursoDisponivel)}</div>
+      <div class="card-sub">Execução financeira − gasto acumulado (${money(r.totalGastoAcumulado)})</div>
     </div>
     <div class="card ${r.saldoParaFuturos < 0 ? 'warn' : 'good'}">
       <div class="card-label">Margem p/ itens futuros</div>
@@ -584,10 +594,10 @@ function renderDashboard() {
       <div class="card-sub">Contrato total − já consumido (PIX + cartão)</div>
     </div>
     <div class="card accent">
-      <div class="card-label">Avanço caixa (% liberado)</div>
-      <div class="card-value">${pct(r.percCaixaLiberada)}</div>
+      <div class="card-label">Execução financeira</div>
+      <div class="card-value">${money(r.totalInvestidoDisponivel)}</div>
       <div class="progress-bar" style="margin-top:6px"><span style="width:${Math.min(100, r.percCaixaLiberada * 100)}%"></span></div>
-      <div class="card-sub">Liberado: ${money(r.caixaLiberadaAcumulada)} de ${money(r.creditoCaixaTotalPCI)}</div>
+      <div class="card-sub">Crédito CAIXA liberado (${money(r.caixaLiberadaAcumulada)} de ${money(r.creditoCaixaTotalPCI)}, ${pct(r.percCaixaLiberada)}) + recurso próprio planejado (${money(r.recursoProprioPlanejado)}) — soma conforme o avanço</div>
     </div>
     <div class="card">
       <div class="card-label">Saldo caixa (a liberar)</div>
@@ -1034,7 +1044,19 @@ function renderDetalhamento() {
       tr.appendChild(td(textInput({ value: it.descricao, wide: true, onSave: (v) => api('PUT', `/api/categorias/${c.id}/itens/${it.id}`, { descricao: v }) })));
       tr.appendChild(td(textInput({ value: it.unidade, onSave: (v) => api('PUT', `/api/categorias/${c.id}/itens/${it.id}`, { unidade: v }) })));
       tr.appendChild(td(numberInput({ value: it.valorOrcado, onSave: (v) => api('PUT', `/api/categorias/${c.id}/itens/${it.id}`, { valorOrcado: v }) })));
-      tr.appendChild(td(numberInput({ value: it.valorRealizado, manual: true, onSave: (v) => api('PUT', `/api/categorias/${c.id}/itens/${it.id}`, { valorRealizado: v }) })));
+      const realizadoCell = document.createElement('td');
+      realizadoCell.appendChild(numberInput({ value: it.valorRealizado, manual: true, onSave: (v) => api('PUT', `/api/categorias/${c.id}/itens/${it.id}`, { valorRealizado: v }) }));
+      if (it.valorRealizadoOriginal !== undefined) {
+        const warn = document.createElement('span');
+        warn.className = 'badge amber';
+        warn.style.display = 'block';
+        warn.style.marginTop = '4px';
+        warn.style.width = 'max-content';
+        warn.textContent = 'ajustado p/ caber no orçado';
+        warn.title = `Valor lançado: ${money(it.valorRealizadoOriginal)}. Reduzido automaticamente para ${money(it.valorRealizado)} porque os demais itens desta categoria já somam o restante do orçado — o total da categoria nunca ultrapassa o valor orçado.`;
+        realizadoCell.appendChild(warn);
+      }
+      tr.appendChild(realizadoCell);
       tr.appendChild(td(dateInput({ value: it.dataPagamento, onSave: (v) => api('PUT', `/api/categorias/${c.id}/itens/${it.id}`, { dataPagamento: v }) })));
       tr.appendChild(td(selectInput({ value: it.formaPagamento || 'PIX', options: ['PIX', 'CARTÃO', 'DINHEIRO', 'TRANSFERÊNCIA', 'OUTRO'], onSave: (v) => api('PUT', `/api/categorias/${c.id}/itens/${it.id}`, { formaPagamento: v }) })));
       const delTd = document.createElement('td');
@@ -1055,9 +1077,69 @@ function renderDetalhamento() {
       .then(() => OPEN_CATEGORIES.add(c.id));
     body.appendChild(addBtn);
 
+    const parceladaBtn = document.createElement('button');
+    parceladaBtn.className = 'btn small';
+    parceladaBtn.style.marginTop = '10px';
+    parceladaBtn.style.marginLeft = '8px';
+    parceladaBtn.textContent = '💳 Lançar compra parcelada no cartão';
+    parceladaBtn.onclick = () => openCompraParceladaModal(c);
+    body.appendChild(parceladaBtn);
+
     block.appendChild(body);
     root.appendChild(block);
   }
+}
+
+// Lança uma compra no cartão (parcelada ou à vista): cria os itens no
+// Detalhamento FC da categoria e soma automaticamente cada parcela na
+// parcela de Contas a Pagar do mês da fatura correspondente (cria a parcela se
+// ainda não existir) — sem precisar editar o cartão manualmente depois.
+function openCompraParceladaModal(categoria) {
+  openModal(`Compra parcelada no cartão — ${categoria.nome}`, (body, close) => {
+    const form = document.createElement('form');
+    form.className = 'form-grid';
+    form.innerHTML = `
+      <label style="grid-column: 1 / -1">Descrição da compra
+        <input name="descricao" placeholder="Ex.: Madeira para formas" required />
+      </label>
+      <label>Valor total (R$)
+        <input name="valorTotal" type="number" step="0.01" min="0.01" required />
+      </label>
+      <label>Quantidade de parcelas
+        <input name="qtdParcelas" type="number" step="1" min="1" value="1" />
+      </label>
+      <label>Data da compra
+        <input name="dataCompra" type="date" value="${new Date().toISOString().slice(0, 10)}" />
+      </label>
+      <label>Mês da 1ª fatura (as demais seguem mês a mês)
+        <input name="primeiraFatura" type="date" value="${new Date().toISOString().slice(0, 10)}" />
+      </label>
+      <div style="grid-column: 1 / -1; display:flex; gap:8px; justify-content:flex-end;">
+        <button type="button" class="btn" id="cancelBtn">Cancelar</button>
+        <button type="submit" class="btn primary">Lançar</button>
+      </div>
+    `;
+    form.querySelector('#cancelBtn').onclick = close;
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const payload = Object.fromEntries(fd.entries());
+      const data = await api('POST', `/api/categorias/${categoria.id}/compra-parcelada`, payload);
+      close();
+      OPEN_CATEGORIES.add(categoria.id);
+      renderAll();
+      const cp = data.compraParcelada;
+      if (cp) {
+        toast(`Lançado: ${money(cp.valorTotal)} em ${cp.qtdParcelas}x, somado ao cartão de ${cp.parcelasAfetadas.map((p) => p.label).join(', ')}.`);
+      }
+    });
+    const hint = document.createElement('div');
+    hint.className = 'muted';
+    hint.style.marginBottom = '8px';
+    hint.textContent = 'O valor total é dividido igualmente entre as parcelas (a última absorve o arredondamento). Cada parcela vira um item no Detalhamento FC e soma automaticamente no cartão da parcela de Contas a Pagar do respectivo mês/quinzena (criando a parcela se ainda não existir).';
+    body.appendChild(hint);
+    body.appendChild(form);
+  });
 }
 
 /* ==========================================================================
@@ -1386,6 +1468,67 @@ function renderPCI() {
     <td class="num">${money(STATE.resumo.caixaLiberadaAcumulada)}</td>
     <td></td>
   </tr>`;
+
+  root.appendChild(renderLiberacaoPorCategoria());
+}
+
+// Mesmas 20 categorias do Detalhamento FC, mas com a verba CAIXA (crédito PCI
+// destinado a cada serviço) em vez da verba do contrato do empreiteiro — as
+// duas etapas de liberação (6 marcos macro acima + esta, por categoria) somam
+// o mesmo crédito CAIXA total, só vistas por duas lentes diferentes.
+function renderLiberacaoPorCategoria() {
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <h2>Liberação por categoria (verba CAIXA)</h2>
+        <div class="muted">Mesmas 20 categorias do Detalhamento FC — aqui com a verba do crédito CAIXA (não a do contrato do empreiteiro). Libera automaticamente na mesma proporção do % de avanço efetivo da categoria. Use "liberado manual" quando o banco liberar valor diferente do calculado.</div>
+      </div>
+    </div>
+    <div class="table-scroll"><table class="data"><thead><tr>
+      <th>Nº</th><th class="wrap">Categoria</th><th class="num">Verba CAIXA</th>
+      <th class="num">% avanço</th><th class="num">Liberado (auto)</th><th class="num">Liberado manual (opcional)</th><th class="num">Saldo</th>
+    </tr></thead><tbody></tbody>
+    <tfoot></tfoot></table></div>
+  `;
+  const tbody = panel.querySelector('tbody');
+  for (const c of STATE.categorias) {
+    const tr = document.createElement('tr');
+    tr.appendChild(td(`${c.numero}`));
+    tr.appendChild(td(`<span class="wrap">${esc(c.nome)}</span>`));
+    tr.appendChild(td(numberInput({ value: c.verbaCaixa, onSave: (v) => api('PUT', `/api/categorias/${c.id}`, { verbaCaixa: v }) })));
+    tr.appendChild(td(`<span class="num">${pct(c.percAvancoEfetivo)}</span>`));
+    tr.appendChild(td(`<span class="num" style="font-weight:700">${money(c.caixaLiberadoCategoria)}</span> <span class="badge ${c.origemCaixaCategoria === 'manual' ? 'blue' : 'gray'}">${c.origemCaixaCategoria}</span>`));
+    const manualTd = document.createElement('td');
+    const manualInput = numberInput({
+      value: c.liberadoCaixaManual == null ? '' : c.liberadoCaixaManual,
+      manual: c.liberadoCaixaManual != null,
+      onSave: (v) => api('PUT', `/api/categorias/${c.id}`, { liberadoCaixaManual: v }),
+    });
+    manualInput.placeholder = 'automático';
+    manualTd.appendChild(manualInput);
+    if (c.liberadoCaixaManual != null) {
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'btn small'; clearBtn.style.marginLeft = '6px'; clearBtn.textContent = 'auto';
+      clearBtn.onclick = () => api('PUT', `/api/categorias/${c.id}`, { liberadoCaixaManual: null });
+      manualTd.appendChild(clearBtn);
+    }
+    tr.appendChild(manualTd);
+    tr.appendChild(td(`<span class="num">${money(c.saldoCaixaCategoria)}</span>`));
+    tbody.appendChild(tr);
+  }
+  const tfoot = panel.querySelector('tfoot');
+  const r = STATE.resumo;
+  tfoot.innerHTML = `<tr>
+    <td colspan="2">TOTAL</td>
+    <td class="num">${money(r.totalVerbaCaixaCategorias)}</td>
+    <td></td>
+    <td class="num">${money(r.totalCaixaLiberadoCategorias)}</td>
+    <td></td>
+    <td class="num">${money(r.totalVerbaCaixaCategorias - r.totalCaixaLiberadoCategorias)}</td>
+  </tr>`;
+  return panel;
 }
 
 /* ==========================================================================

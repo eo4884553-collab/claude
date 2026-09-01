@@ -50,13 +50,13 @@ botão **"Restaurar dados originais da planilha"** na aba **Parâmetros**
 
 | Aba | Papel |
 |---|---|
-| **Dashboard Executivo** | Visão gerencial da obra (primeira aba, aberta por padrão): cards com os KPIs mais importantes (contrato total x executado, crédito CAIXA x liberado, % obra real x previsto, margem para itens futuros), duas **curvas S** (planejado x executado) — uma para o valor pago ao empreiteiro (PIX + cartão) e outra para a liberação de caixa (PCI) — com legenda, crosshair/tooltip ao passar o mouse, marca de "hoje" e tabela de apoio com os valores mês a mês. Abaixo, uma lista de categorias: clique numa linha para ver claramente o valor orçado, medido e o **saldo do contrato** daquela categoria específica (o que falta pagar por ela). |
+| **Dashboard Executivo** | Visão gerencial da obra (primeira aba, aberta por padrão): cards com os KPIs mais importantes (contrato total x executado, crédito CAIXA x liberado, recurso próprio planejado, % obra real x previsto, saldo conforme o gasto, margem para itens futuros), duas **curvas S** (planejado x executado) — uma para o valor pago ao empreiteiro (PIX + cartão) e outra para a liberação de caixa (PCI) — com legenda, crosshair/tooltip ao passar o mouse, marca de "hoje" e tabela de apoio com os valores mês a mês. Abaixo, uma lista de categorias: clique numa linha para ver claramente o valor orçado, medido e o **saldo do contrato** daquela categoria específica (o que falta pagar por ela). |
 | **Contas a Pagar (Cliente)** | Dashboard que vai para o cliente: cards-resumo (contrato, % avanço empreiteiro pago, saldo empreiteiro, % avanço caixa liberado, saldo caixa, saldo de recurso) + tabela de parcelas quinzenais (PIX empreiteiro, ADM, cartão, evolução caixa, data do custo, vencimentos, status). Cada parcela mostra a etiqueta **Mês/Parcela** (ex.: "Agosto/2026 — 1ª Parcela"), calculada automaticamente a partir do vencimento. Editável linha a linha. |
 | **Lançar Avanços** | Onde você informa o % de avanço físico/financeiro de cada uma das 20 categorias da obra. É o principal ponto de entrada de dados do dia a dia. |
 | **Cronograma de Obra** | Cronograma físico previsto x realizado (equivalente à aba "Cronograma de obra" da planilha): datas de início/término previstas por categoria (extraídas da planilha original), % previsto (calculado a partir das datas) comparado ao % realizado, status (No prazo / Atrasado / Concluído) e uma linha do tempo (mini-gantt) por categoria. O % de avanço é editável direto aqui — é a mesma aba/campo de *Lançar Avanços*, só que com o cronograma ao lado para decidir quando cobrar do empreiteiro conforme a etapa PCI correspondente. |
-| **Detalhamento FC** | Itens orçado x realizado de cada categoria (equivalente à aba "Detalhamento F.C" da planilha). Cada categoria soma seus itens automaticamente. |
+| **Detalhamento FC** | Itens orçado x realizado de cada categoria (equivalente à aba "Detalhamento F.C" da planilha). Cada categoria soma seus itens automaticamente — a linha "Mão de obra Fama+ material" se ajusta sozinha para nunca deixar o total da categoria passar do orçado (item 12 abaixo). O botão "Lançar compra parcelada no cartão" lança uma compra em N parcelas de uma vez, já somando o cartão na Contas a Pagar de cada mês correspondente (item 13). |
 | **Fluxo de Caixa** | Cards de acompanhamento (% avanço empreiteiro pago, saldo empreiteiro, % avanço caixa liberado, saldo caixa) + tabela mensal já organizada por **Mês/1º e 2º Parcela** (mesma divisão quinzenal de Contas a Pagar, na ordem cronológica correta), com entradas (recurso próprio + liberação PCI) e saídas (parcelas + ajustes manuais), saldo acumulado. Tem o botão **"Lançar avanço do mês"**: informe o novo % de cada categoria que avançou, a data em que o custo foi gerado e para qual mês/parcela ele vai vencer — o app rateia pelo peso já estipulado (valor orçado), desconta o cartão informado e já cria a parcela correspondente em Contas a Pagar. |
-| **Liberação PCI** | Cronograma de liberação do financiamento CAIXA em 6 etapas (aquisição do lote + 5 etapas de 20%), com liberação automática proporcional ao % de obra. |
+| **Liberação PCI** | Cronograma de liberação do financiamento CAIXA em 6 etapas (aquisição do lote + 5 etapas de 20%), com liberação automática proporcional ao % de obra — e, logo abaixo, a mesma liberação vista por categoria (as 20 linhas do Detalhamento FC, com a verba CAIXA de cada uma). |
 | **Parâmetros** | Dados da obra e parâmetros financeiros globais (recurso próprio planejado, taxa de administração, contrato total do empreiteiro etc.). |
 
 ## Como funciona o cálculo (regra de negócio)
@@ -215,6 +215,60 @@ botão **"Restaurar dados originais da planilha"** na aba **Parâmetros**
     planejado e executado, em R$ e %, na data apontada), uma marca vertical
     de "hoje" e uma tabela de apoio (`<details>` recolhível) com o valor
     mês a mês — para nenhum número ficar disponível só visualmente.
+
+12. **"Mão de obra Fama+ material" — a linha nunca deixa a categoria estourar
+    o orçado.** Em cada categoria do Detalhamento FC, o último item (a mão de
+    obra + material do empreiteiro) funciona como uma "sobra": o app calcula
+    quanto resta do orçado da categoria depois de somar os demais itens
+    (cartão, etc.) e, se o valor lançado nessa linha for maior que essa
+    sobra, ele é reduzido automaticamente até caber — nunca para cima
+    sozinho (isso exigiria uma medição real), só para baixo, o suficiente
+    para o total da categoria nunca ultrapassar o orçado. Quando isso
+    acontece, a célula ganha um aviso "ajustado p/ caber no orçado" com o
+    valor original lançado no tooltip. (Não reproduz a fórmula original da
+    planilha para essa linha — que cruza referências históricas com a aba
+    Fluxo de Caixa não replicáveis 1:1 no modelo de dados do app — mas
+    aplica a mesma regra de negócio descrita: o realizado da categoria nunca
+    passa do orçado.)
+
+13. **Compra parcelada no cartão (Detalhamento FC).** Uma compra no cartão
+    muitas vezes gera faturas em meses seguintes (parcelamento). O botão
+    "💳 Lançar compra parcelada no cartão" (dentro de cada categoria) pede
+    descrição, valor total, quantidade de parcelas, data da compra e o mês
+    da 1ª fatura — e faz tudo de uma vez: cria um item por parcela no
+    Detalhamento FC (valor dividido igualmente, a última parcela absorve o
+    arredondamento) **e** soma automaticamente cada parcela no campo
+    "Cartão" da parcela de Contas a Pagar do mês/quinzena correspondente
+    (criando a parcela se ainda não existir) — sem precisar editar o cartão
+    manualmente depois em Contas a Pagar ou no Fluxo de Caixa.
+
+14. **Liberação por categoria (verba CAIXA) — aba Liberação PCI.** Além das 6
+    etapas macro (aquisição do lote + 5 faixas de 20% de obra), a aba mostra
+    as mesmas 20 categorias do Detalhamento FC, só que com a **verba CAIXA**
+    de cada uma (o crédito do financiamento destinado àquele serviço) em vez
+    da verba do contrato do empreiteiro — são a mesma obra vista por duas
+    fontes de dinheiro diferentes, extraídas de colunas distintas da
+    planilha original (a verba CAIXA por categoria vem das linhas "CAIXA" da
+    aba Fluxo de Caixa; ver comentário em `server/seed.js`). Cada categoria
+    libera automaticamente na mesma proporção do seu % de avanço efetivo
+    (igual à lógica de `valorMedido`), com campo de liberado manual para
+    quando o banco liberar valor diferente do calculado.
+
+15. **Execução financeira (Contas a Pagar).** O card antes chamado "Avanço
+    caixa (% liberado)" agora chama **Execução financeira** e mostra o valor
+    em R$ (não só o %): crédito CAIXA já liberado + recurso próprio
+    planejado — a soma de tudo que já está disponível para pagar a obra,
+    crescendo conforme o avanço físico libera mais crédito CAIXA.
+
+16. **Dashboard Executivo — visão consolidada de caixa.** Os KPIs incluem o
+    crédito CAIXA total (R$1,5 milhão) e liberado, o recurso próprio
+    planejado, a mesma execução financeira do item 15 e um card de **saldo**
+    (execução financeira − gasto acumulado) — para acompanhar de uma vez só
+    quanto dinheiro está disponível e quanto já foi de fato gasto. O
+    lançamento "avanço do mês" (aba Fluxo de Caixa) sempre mexe nas duas
+    pontas ao mesmo tempo — a liberação de caixa (via % de obra geral) e o
+    pagamento sugerido ao empreiteiro — e ambas continuam totalmente
+    editáveis linha a linha.
 
 Todo campo calculado pode ser sobrescrito manualmente (ex.: "Total a
 transferir" e "Custo total" de uma parcela, ou o valor liberado de uma etapa

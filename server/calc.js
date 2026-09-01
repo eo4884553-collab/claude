@@ -80,10 +80,33 @@ function calcPercPrevisto(cronogramaPrevisto, dataRef) {
   return clamp((ref.getTime() - inicio.getTime()) / totalMs, 0, 1);
 }
 
+// Item "plug" de cada categoria (mão de obra + material do empreiteiro): não é um
+// custo datado como os demais itens (cartão etc.), é a verba que sobra do orçado
+// da categoria depois de descontar os outros itens já lançados. Nunca é ajustado
+// para cima automaticamente (isso exigiria uma medição real) — só é reduzido
+// (nunca abaixo de zero) quando os outros itens crescem, para o total da
+// categoria nunca ultrapassar o orçado. Mesma lógica de "nunca infla sozinho,
+// só encolhe para caber" já usada em reorganizarPlanejamento().
+const ITEM_PLUG_REGEX = /m[ãa]o de obra/i;
+
 /** Calcula os campos derivados de uma categoria (Detalhamento FC). */
 function computeCategoria(cat, dataRef) {
   const valorOrcado = Number(cat.valorOrcado) || 0;
-  const valorRealizadoItens = round2(sum(cat.itens || [], (it) => it.valorRealizado));
+  const itensBrutos = cat.itens || [];
+  const itemPlug = itensBrutos.find((it) => ITEM_PLUG_REGEX.test(it.descricao || ''));
+  const somaOutrosItens = round2(sum(itensBrutos.filter((it) => it !== itemPlug), (it) => it.valorRealizado));
+  const itens = itemPlug
+    ? itensBrutos.map((it) => {
+        if (it !== itemPlug) return it;
+        const tetoPlug = Math.max(0, round2(valorOrcado - somaOutrosItens));
+        const valorRealizadoOriginal = Number(it.valorRealizado) || 0;
+        const valorRealizadoAjustado = Math.min(valorRealizadoOriginal, tetoPlug);
+        return valorRealizadoAjustado === valorRealizadoOriginal
+          ? it
+          : { ...it, valorRealizado: valorRealizadoAjustado, valorRealizadoOriginal };
+      })
+    : itensBrutos;
+  const valorRealizadoItens = round2(sum(itens, (it) => it.valorRealizado));
   const percAvancoItens = valorOrcado > 0 ? valorRealizadoItens / valorOrcado : 0;
 
   const temOverride = cat.percAvancoManual !== null && cat.percAvancoManual !== undefined;
@@ -100,8 +123,18 @@ function computeCategoria(cat, dataRef) {
         ? 'no-prazo'
         : 'atrasado';
 
+  // Verba CAIXA da categoria (crédito PCI destinado a esse serviço — diferente
+  // do valorOrcado, que é a verba do contrato do empreiteiro). Libera na mesma
+  // proporção do avanço físico efetivo da categoria, igual à lógica de
+  // valorMedido — só que sobre o pool de crédito CAIXA em vez do contrato.
+  const verbaCaixa = Number(cat.verbaCaixa) || 0;
+  const caixaLiberadoAutoCategoria = round2(verbaCaixa * percAvancoEfetivo);
+  const temOverrideCaixa = cat.liberadoCaixaManual !== null && cat.liberadoCaixaManual !== undefined;
+  const caixaLiberadoCategoria = temOverrideCaixa ? round2(Number(cat.liberadoCaixaManual)) : caixaLiberadoAutoCategoria;
+
   return {
     ...cat,
+    itens,
     valorRealizadoItens,
     percAvancoItens: round2(percAvancoItens * 10000) / 10000,
     percAvancoEfetivo: round2(percAvancoEfetivo * 10000) / 10000,
@@ -111,6 +144,11 @@ function computeCategoria(cat, dataRef) {
     percPrevisto: round2(percPrevisto * 10000) / 10000,
     valorPrevisto,
     statusCronograma,
+    verbaCaixa,
+    caixaLiberadoAutoCategoria,
+    caixaLiberadoCategoria,
+    origemCaixaCategoria: temOverrideCaixa ? 'manual' : 'auto',
+    saldoCaixaCategoria: round2(verbaCaixa - caixaLiberadoCategoria),
   };
 }
 
@@ -180,6 +218,8 @@ function recompute(state) {
   const totalPrevistoCronograma = round2(sum(categoriasBase, (c) => c.valorPrevisto));
   const percObraGeral = totalOrcadoCategorias > 0 ? totalMedido / totalOrcadoCategorias : 0;
   const percPrevistoGeral = totalOrcadoCategorias > 0 ? totalPrevistoCronograma / totalOrcadoCategorias : 0;
+  const totalVerbaCaixaCategorias = round2(sum(categoriasBase, (c) => c.verbaCaixa));
+  const totalCaixaLiberadoCategorias = round2(sum(categoriasBase, (c) => c.caixaLiberadoCategoria));
 
   // Peso de cada categoria sobre o orçado total — é o "peso já estipulado" usado
   // para ratear o avanço lançado na aba Fluxo de Caixa em valor financeiro.
@@ -326,6 +366,8 @@ function recompute(state) {
     totalPrevistoCronograma,
     percPrevistoGeral: round2(percPrevistoGeral * 10000) / 10000,
     dataReferenciaCronograma: dataRef,
+    totalVerbaCaixaCategorias,
+    totalCaixaLiberadoCategorias,
     creditoCaixaTotalPCI,
     caixaLiberadaAcumulada,
     percCaixaLiberada: creditoCaixaTotalPCI > 0 ? round2((caixaLiberadaAcumulada / creditoCaixaTotalPCI) * 10000) / 10000 : 0,
@@ -421,4 +463,7 @@ function reorganizarPlanejamento(state, dataAjuste) {
   return { fator: round2(fator * 10000) / 10000, tetoPlanejado: tetoParaPix, somaPlanejadoAnterior: somaPixPlanejado, qtd: planejadas.length };
 }
 
-module.exports = { recompute, computeCategoria, reorganizarPlanejamento, round2, clamp };
+module.exports = {
+  recompute, computeCategoria, reorganizarPlanejamento, round2, clamp,
+  monthKeyFromDateStr, quinzenaFromDateStr, monthQuinzenaLabel, addMonthsToKey, monthLabel,
+};

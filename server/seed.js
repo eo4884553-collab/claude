@@ -61,6 +61,40 @@ const CRONOGRAMA_PREVISTO = {
   20: { inicio: '2027-07-21', termino: '2027-08-14', duracaoDias: 25 },
 };
 
+// Verba CAIXA por categoria — extraída da aba "Fluxo de Caixa" original (as
+// linhas "CAIXA" logo abaixo de cada categoria, colunas AV "peso %" e AY
+// "$AY$6 × peso", onde $AY$6 = 1.500.000 − 384.000 = 1.116.000, a fatia do
+// crédito CAIXA destinada à obra em si, sem contar o lote). É um valor de
+// verba DIFERENTE do valorOrcado (que é a verba do CONTRATO do empreiteiro,
+// vinda do Detalhamento FC) — as duas coisas são, no fundo, o mesmo serviço
+// visto por duas fontes de dinheiro diferentes, e no workbook original elas
+// não batem exatamente entre si (ver README). A categoria 1 (Serviços
+// Preliminares) não tem verba CAIXA aqui porque é paga direto pelo
+// proprietário (fora do PCI) — a etapa 1 do PCI (aquisição do lote,
+// R$384.000) cobre isso separadamente.
+const VERBA_CAIXA_POR_CATEGORIA = {
+  1: 32252.4,
+  2: 76334.4,
+  3: 192286.8,
+  4: 76334.4,
+  5: 72874.8,
+  6: 26449.2,
+  7: 40287.6,
+  8: 30690,
+  9: 80575.2,
+  10: 19530,
+  11: 46090.8,
+  12: 47541.6,
+  13: 103564.8,
+  14: 13838.4,
+  15: 42966,
+  16: 42966,
+  17: 46090.8,
+  18: 47541.6,
+  19: 10378.8,
+  20: 67183.2,
+};
+
 function buildCategorias() {
   return categoriasExtraidas.map((c, idx) => {
     const numero = idx + 1;
@@ -92,6 +126,8 @@ function buildCategorias() {
       // acompanhamento financeiro.
       pagoDiretoProprietario: numero === 1,
       cronogramaPrevisto: CRONOGRAMA_PREVISTO[numero] || null,
+      verbaCaixa: VERBA_CAIXA_POR_CATEGORIA[numero] || 0,
+      liberadoCaixaManual: null,
       itens,
     };
   });
