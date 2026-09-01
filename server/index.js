@@ -304,6 +304,40 @@ app.delete('/api/liberacoes-caixa/:id', async (req, res) => {
   ok(res, state);
 });
 
+// ---- Itens que consumiram o recurso próprio (aba Parâmetros — cada um
+// editável/adicionável; o saldo de recurso próprio disponível é recalculado
+// automaticamente como planejado − soma da lista) ----
+app.post('/api/consumos-recurso-proprio', async (req, res) => {
+  const state = await store.mutate((s) => {
+    const b = req.body || {};
+    s.consumosRecursoProprio = s.consumosRecursoProprio || [];
+    s.consumosRecursoProprio.push({
+      id: newId('consumo'),
+      descricao: b.descricao || 'Novo item',
+      valor: Number(b.valor) || 0,
+    });
+  });
+  ok(res, state);
+});
+
+app.put('/api/consumos-recurso-proprio/:id', async (req, res) => {
+  const state = await store.mutate((s) => {
+    const item = (s.consumosRecursoProprio || []).find((c) => c.id === req.params.id);
+    if (!item) return;
+    const { descricao, valor } = req.body || {};
+    if (descricao !== undefined) item.descricao = descricao;
+    if (valor !== undefined) item.valor = Number(valor);
+  });
+  ok(res, state);
+});
+
+app.delete('/api/consumos-recurso-proprio/:id', async (req, res) => {
+  const state = await store.mutate((s) => {
+    s.consumosRecursoProprio = (s.consumosRecursoProprio || []).filter((c) => c.id !== req.params.id);
+  });
+  ok(res, state);
+});
+
 // ---- Parcelas (aba Contas a Pagar — o que vai para o cliente) ----
 app.post('/api/parcelas', async (req, res) => {
   let ajuste = null;

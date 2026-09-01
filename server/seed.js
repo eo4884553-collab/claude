@@ -236,6 +236,23 @@ function buildLiberacoesCaixa() {
   ];
 }
 
+// Itens que já consumiram o recurso próprio (planejado 571.143,99), lançados
+// pelo proprietário antes de a liberação do CAIXA começar a fluir: as 3
+// primeiras parcelas de Contas a Pagar pagas com recurso próprio (Total a
+// Transferir de Maio/1º, Maio/2º, Junho/1º), a entrada do lote, e os serviços
+// preliminares pagos direto. Soma = 290.832,08; saldo = 571.143,99 −
+// 290.832,08 = 280.311,91 (confirmado pelo proprietário). Editável/adicionável
+// em Parâmetros — o saldo é recalculado automaticamente pela soma da lista.
+function buildConsumosRecursoProprio() {
+  return [
+    { id: 'consumo-1', descricao: 'Maio/1º parcela (Total a Transferir)', valor: 31000 },
+    { id: 'consumo-2', descricao: 'Maio/2º parcela (Total a Transferir)', valor: 33500 },
+    { id: 'consumo-3', descricao: 'Junho/1º parcela (Total a Transferir)', valor: 22271.21 },
+    { id: 'consumo-4', descricao: 'Entrada do lote', valor: 144000 },
+    { id: 'consumo-5', descricao: 'Serviços preliminares (pago direto)', valor: 60060.87 },
+  ];
+}
+
 function buildSeed() {
   const parametros = {
     recursoProprioPlanejado: 571143.99,
@@ -253,14 +270,11 @@ function buildSeed() {
     // das parcelas já realizadas).
     custoLoteExecutado: 356168,
     // "Saldo de Recurso Próprio Disponível" (F6 da planilha original) não é uma
-    // fórmula viva — o proprietário ajusta manualmente conforme o saldo real em
-    // conta. Valor confirmado pelo proprietário: recurso próprio planejado
-    // (571.143,99) − Total a Transferir de Maio/1º (31.000) − Maio/2º (33.500,00)
-    // − Junho/1º (22.271,21) − entrada do lote (144.000) − Serviços Preliminares
-    // pagos direto (60.060,87) = 280.311,91. Editável em Parâmetros; deixe em
-    // branco para voltar ao cálculo automático simples (investido − gasto
-    // acumulado).
-    saldoRecursoDisponivelManual: 280311.91,
+    // fórmula viva — por padrão o app agora deriva o saldo da lista itemizada
+    // consumosRecursoProprio (abaixo): recurso próprio planejado − soma da lista.
+    // Deixe um valor aqui (em vez de null) só para forçar um número que nem a
+    // lista itemizada reflete (ex.: divergência pontual do extrato real).
+    saldoRecursoDisponivelManual: null,
   };
   return {
     meta: {
@@ -276,6 +290,7 @@ function buildSeed() {
     categorias: buildCategorias(parametros.contratoTotalEmpreiteiro),
     liberacaoPCI: buildLiberacaoPCI(),
     liberacoesCaixa: buildLiberacoesCaixa(),
+    consumosRecursoProprio: buildConsumosRecursoProprio(),
     parcelas: buildParcelas(),
     historicoAvancos: [],
     fluxoCaixaAjustes: [], // lançamentos manuais extras na aba Fluxo de Caixa (ex.: ajustes, estornos)

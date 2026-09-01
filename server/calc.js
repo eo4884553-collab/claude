@@ -284,12 +284,29 @@ function recompute(state) {
   // "Saldo de Recurso Disponível" (F6 da planilha original) não é uma fórmula viva:
   // na planilha ela soma só o "Total a Transferir" das primeiras parcelas em que o
   // recurso próprio foi de fato usado (antes de a liberação do CAIXA começar a fluir)
-  // — depois disso o valor é ajustado manualmente pelo proprietário conforme o saldo
-  // real em conta, podendo o recurso próprio voltar a ser usado no futuro se o fluxo
-  // de caixa exigir. Por isso aqui é sempre editável, com o cálculo automático (mais
-  // simples: investido − gasto acumulado) como valor de partida.
+  // — Maio/1ª, Maio/2ª, Junho/1ª — mais a entrada do lote e os serviços preliminares
+  // pagos direto. Em vez de travar essa lista, o app deixa o proprietário lançar e
+  // editar cada item que consumiu o recurso próprio (consumosRecursoProprio) —
+  // o saldo é recalculado automaticamente como planejado menos a soma da lista.
+  // Um valor manual único (saldoRecursoDisponivelManual) ainda tem prioridade sobre
+  // tudo, para os casos em que nem a lista reflete o saldo real em conta.
+  const consumosRecursoProprio = [...(state.consumosRecursoProprio || [])];
+  const totalConsumoRecursoProprio = round2(sum(consumosRecursoProprio, (c) => c.valor));
+  const saldoRecursoProprioPorItens = round2(recursoProprioPlanejado - totalConsumoRecursoProprio);
   const temOverrideSaldoRecurso = parametros.saldoRecursoDisponivelManual !== null && parametros.saldoRecursoDisponivelManual !== undefined;
-  const saldoRecursoDisponivel = temOverrideSaldoRecurso ? round2(Number(parametros.saldoRecursoDisponivelManual)) : saldoRecursoDisponivelAuto;
+  const temItensConsumoRecursoProprio = consumosRecursoProprio.length > 0;
+  let saldoRecursoDisponivel;
+  let origemSaldoRecurso;
+  if (temOverrideSaldoRecurso) {
+    saldoRecursoDisponivel = round2(Number(parametros.saldoRecursoDisponivelManual));
+    origemSaldoRecurso = 'manual';
+  } else if (temItensConsumoRecursoProprio) {
+    saldoRecursoDisponivel = saldoRecursoProprioPorItens;
+    origemSaldoRecurso = 'itens';
+  } else {
+    saldoRecursoDisponivel = saldoRecursoDisponivelAuto;
+    origemSaldoRecurso = 'auto';
+  }
 
   // Sugestão para a próxima parcela: o que já foi medido (avanço lançado) e ainda
   // não foi pago via nenhum canal (PIX ou cartão) em nenhuma parcela realizada.
@@ -422,7 +439,9 @@ function recompute(state) {
     saldoContratoRestante,
     saldoRecursoDisponivel,
     saldoRecursoDisponivelAuto,
-    origemSaldoRecurso: temOverrideSaldoRecurso ? 'manual' : 'auto',
+    totalConsumoRecursoProprio,
+    saldoRecursoProprioPorItens,
+    origemSaldoRecurso,
     // "Saldo Caixa": quanto do crédito CAIXA (PCI) ainda falta ser liberado pelo banco.
     saldoCaixaDisponivel,
     // "Saldo Empreiteiro": quanto do contrato total ainda falta ser efetivamente pago
@@ -446,6 +465,7 @@ function recompute(state) {
     categorias,
     liberacaoPCI,
     liberacoesCaixa,
+    consumosRecursoProprio,
     parcelas,
     fluxoCaixaMensal,
     fluxoCaixaAjustes: state.fluxoCaixaAjustes || [],

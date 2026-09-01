@@ -8,6 +8,14 @@ let ACTIVE_TAB = 'painel';
 let PAINEL_CATEGORIA_SELECIONADA = null;
 const OPEN_CATEGORIES = new Set();
 
+// Filtro de quinzena selecionado em cada aba (persiste entre re-renders,
+// {mes, quinzena} ou null = "Todas"). Cada aba tem sua própria seleção porque
+// filtram tabelas diferentes.
+let FILTRO_QUINZENA_AVANCOS = null;
+let FILTRO_QUINZENA_CRONOGRAMA = null;
+let FILTRO_QUINZENA_FLUXO = null;
+let FILTRO_QUINZENA_PCI = null;
+
 const fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtNum = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 });
 
@@ -69,6 +77,47 @@ function buildQuinzenaPeriods(dataInicio, previsaoTermino) {
 }
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Descrição curta da origem do "Saldo de recurso próprio disponível" — usada
+// nos cards do Dashboard/Painel; 'itens' = calculado pela lista itemizada em
+// Parâmetros, 'manual' = valor único forçado (avançado), 'auto' = cálculo
+// simples de fallback (nenhuma lista lançada e nenhum manual).
+function origemSaldoRecursoLabel(origem, r) {
+  if (origem === 'manual') return 'Ajustado manualmente (ver Parâmetros → Avançado)';
+  if (origem === 'itens') return `Recurso próprio − itens consumidos (ver Parâmetros): ${money(r.totalConsumoRecursoProprio)}`;
+  return `Execução financeira − gasto acumulado (${money(r.totalGastoAcumulado)})`;
+}
+
+// true se a data (YYYY-MM-DD) cair dentro da quinzena selecionada ({mes, quinzena}).
+function dataNaQuinzena(dateStr, filtro) {
+  if (!filtro) return true;
+  const p = periodoFromDateStr(dateStr);
+  return !!p && p.mes === filtro.mes && p.quinzena === filtro.quinzena;
+}
+
+// Seletor "Filtrar por quinzena" reutilizável nas abas Lançar Avanços,
+// Cronograma de Obra, Fluxo de Caixa e Liberação PCI — filtra a tabela
+// correspondente para mostrar só os lançamentos daquela quinzena exata.
+function renderQuinzenaFilter({ periods, selected, onChange }) {
+  const wrap = document.createElement('div');
+  wrap.className = 'form-grid';
+  wrap.style.maxWidth = '280px';
+  wrap.style.marginBottom = '4px';
+  wrap.innerHTML = `<label>Filtrar por quinzena
+    <select class="cell-input">
+      <option value="">Todas as quinzenas</option>
+      ${periods.map((p) => `<option value="${p.mes}|${p.quinzena}">${esc(p.label)}</option>`).join('')}
+    </select>
+  </label>`;
+  const select = wrap.querySelector('select');
+  if (selected) select.value = `${selected.mes}|${selected.quinzena}`;
+  select.addEventListener('change', () => {
+    if (!select.value) { onChange(null); return; }
+    const [mes, quinzena] = select.value.split('|');
+    onChange({ mes, quinzena: Number(quinzena) });
+  });
+  return wrap;
 }
 
 function toast(msg, isError = false) {
@@ -152,6 +201,37 @@ function numberInput({ value, onSave, manual = false, step = '0.01', wide = fals
   input.className = `cell-input${manual ? ' manual' : ''}${wide ? ' wide' : ''}`;
   const commit = () => {
     const v = input.value === '' ? 0 : Number(input.value);
+    if (v !== value) onSave(v);
+  };
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
+  return input;
+}
+
+// input de valor monetário: exibe formatado ("R$ 31.000,00") em repouso; ao
+// focar, troca para edição em número simples com vírgula decimal (mais fácil
+// de digitar), reformatando ao sair do campo.
+function moneyInput({ value, onSave, manual = false, wide = false }) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.inputMode = 'decimal';
+  input.className = `cell-input${manual ? ' manual' : ''}${wide ? ' wide' : ''}`;
+  input.value = money(value);
+  function parseMoneyText(s) {
+    let cleaned = String(s).trim().replace(/^R\$\s*/i, '');
+    if (!cleaned) return 0;
+    if (/,\d{1,2}$/.test(cleaned)) cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+    else cleaned = cleaned.replace(/,/g, '');
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : 0;
+  }
+  input.addEventListener('focus', () => {
+    input.value = (Number(value) || 0) === 0 ? '' : String(Number(value)).replace('.', ',');
+    input.select();
+  });
+  const commit = () => {
+    const v = parseMoneyText(input.value);
+    input.value = money(v);
     if (v !== value) onSave(v);
   };
   input.addEventListener('blur', commit);
@@ -533,7 +613,7 @@ function renderPainel() {
     <div class="card ${r.saldoRecursoDisponivel < 0 ? 'warn' : 'good'}">
       <div class="card-label">Saldo de recurso próprio disponível</div>
       <div class="card-value">${money(r.saldoRecursoDisponivel)}</div>
-      <div class="card-sub">${r.origemSaldoRecurso === 'manual' ? 'Ajustado manualmente (ver Parâmetros)' : `Execução financeira − gasto acumulado (${money(r.totalGastoAcumulado)})`}</div>
+      <div class="card-sub">${origemSaldoRecursoLabel(r.origemSaldoRecurso, r)}</div>
     </div>
     <div class="card ${r.saldoParaFuturos < 0 ? 'warn' : 'good'}">
       <div class="card-label">Margem p/ itens futuros</div>
@@ -660,7 +740,7 @@ function renderDashboard() {
     <div class="card ${r.saldoRecursoDisponivel < 0 ? 'warn' : 'good'}">
       <div class="card-label">Saldo de recurso próprio disponível</div>
       <div class="card-value">${money(r.saldoRecursoDisponivel)}</div>
-      <div class="card-sub">${r.origemSaldoRecurso === 'manual' ? 'Ajustado manualmente (ver Parâmetros)' : 'Recurso próprio + caixa liberado − gasto acumulado'}</div>
+      <div class="card-sub">${origemSaldoRecursoLabel(r.origemSaldoRecurso, r)}</div>
     </div>
     <div class="card">
       <div class="card-label">Total administração (RS Engenharia)</div>
@@ -708,12 +788,12 @@ function renderDashboard() {
     const tr = document.createElement('tr');
     tr.appendChild(td(textInput({ value: p.label, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { label: v }) })));
     tr.appendChild(td(`<span class="badge gray">${esc(p.mesReferenciaLabel || 'Sem data')}</span>`));
-    tr.appendChild(td(numberInput({ value: p.totalEmpreiteiroPix, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { totalEmpreiteiroPix: v }) })));
-    tr.appendChild(td(numberInput({ value: p.totalAdmPix, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { totalAdmPix: v }) })));
-    tr.appendChild(td(numberInput({ value: p.gastoCartao, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { gastoCartao: v }) })));
-    tr.appendChild(td(numberInput({ value: p.totalATransferir, manual: !!p.overrides?.totalATransferir, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { totalATransferir: v }) })));
-    tr.appendChild(td(numberInput({ value: p.parcelaEvolucaoCaixa, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { parcelaEvolucaoCaixa: v }) })));
-    tr.appendChild(td(numberInput({ value: p.custoTotal, manual: !!p.overrides?.custoTotal, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { custoTotal: v }) })));
+    tr.appendChild(td(moneyInput({ value: p.totalEmpreiteiroPix, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { totalEmpreiteiroPix: v }) })));
+    tr.appendChild(td(moneyInput({ value: p.totalAdmPix, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { totalAdmPix: v }) })));
+    tr.appendChild(td(moneyInput({ value: p.gastoCartao, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { gastoCartao: v }) })));
+    tr.appendChild(td(moneyInput({ value: p.totalATransferir, manual: !!p.overrides?.totalATransferir, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { totalATransferir: v }) })));
+    tr.appendChild(td(moneyInput({ value: p.parcelaEvolucaoCaixa, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { parcelaEvolucaoCaixa: v }) })));
+    tr.appendChild(td(moneyInput({ value: p.custoTotal, manual: !!p.overrides?.custoTotal, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { custoTotal: v }) })));
     tr.appendChild(td(dateInput({ value: p.dataGeracaoCusto, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { dataGeracaoCusto: v }) })));
     tr.appendChild(td(dateInput({ value: p.vencPlanejado, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { vencPlanejado: v }) })));
     tr.appendChild(td(dateInput({ value: p.vencimento, onSave: (v) => api('PUT', `/api/parcelas/${p.id}`, { vencimento: v }) })));
@@ -911,15 +991,23 @@ function renderAvancos() {
 
   const hist = document.createElement('div');
   hist.className = 'panel';
-  hist.innerHTML = `<div class="panel-header"><h2>Histórico de avanços lançados</h2></div>`;
+  hist.innerHTML = `<div class="panel-header"><div><h2>Histórico de avanços lançados</h2>
+    <div class="muted">Filtre por quinzena para ver só o avanço realizado naquele período específico.</div></div></div>`;
+  const periods = buildQuinzenaPeriods(STATE.meta?.dataInicio, STATE.meta?.previsaoTermino);
+  hist.appendChild(renderQuinzenaFilter({
+    periods,
+    selected: FILTRO_QUINZENA_AVANCOS,
+    onChange: (v) => { FILTRO_QUINZENA_AVANCOS = v; renderAvancos(); },
+  }));
+  const histEntries = STATE.historicoAvancos.filter((h) => dataNaQuinzena(h.data, FILTRO_QUINZENA_AVANCOS));
   const histTable = document.createElement('div');
   histTable.className = 'table-scroll';
-  if (!STATE.historicoAvancos.length) {
-    histTable.innerHTML = '<div class="muted">Nenhum avanço lançado ainda.</div>';
+  if (!histEntries.length) {
+    histTable.innerHTML = `<div class="muted">${FILTRO_QUINZENA_AVANCOS ? 'Nenhum avanço lançado nessa quinzena.' : 'Nenhum avanço lançado ainda.'}</div>`;
   } else {
     histTable.innerHTML = `<table class="data"><thead><tr>
       <th>Data</th><th class="wrap">Categoria</th><th class="num">% anterior</th><th class="num">% novo</th><th class="wrap">Observação</th>
-    </tr></thead><tbody>${STATE.historicoAvancos.map((h) => `
+    </tr></thead><tbody>${histEntries.map((h) => `
       <tr>
         <td>${dateBR(h.data)}</td>
         <td class="wrap">${esc(h.categoriaNome)}</td>
@@ -997,7 +1085,7 @@ function renderCronograma() {
     <div class="panel-header">
       <div>
         <h2>Cronograma físico — previsto × realizado</h2>
-        <div class="muted">Datas previstas extraídas da planilha original (aba Cronograma de obra). O % realizado é o mesmo lançado na aba "Lançar Avanços" — edite aqui também. A barra clara mostra a janela planejada; a barra colorida mostra o quanto já foi executado; a linha âmbar marca a data de hoje (${dateBR(r.dataReferenciaCronograma)}).</div>
+        <div class="muted">Datas previstas extraídas da planilha original (aba Cronograma de obra). O % realizado é o mesmo lançado na aba "Lançar Avanços" — edite aqui também. A barra clara mostra a janela planejada; a barra colorida mostra o quanto já foi executado; a linha âmbar marca a data de hoje (${dateBR(r.dataReferenciaCronograma)}). Filtre por quinzena para ver só as categorias cujo último avanço foi lançado naquele período.</div>
       </div>
       <div class="gantt-legend">
         <span><span class="dot" style="background:#d7deec"></span>Janela planejada</span>
@@ -1007,6 +1095,7 @@ function renderCronograma() {
         <span><span class="dot" style="background:var(--amber)"></span>Hoje</span>
       </div>
     </div>
+    <div class="quinzenaFilterSlot"></div>
     <div class="table-scroll"><table class="data">
       <thead><tr>
         <th>Nº</th><th class="wrap">Categoria</th><th>Início prev.</th><th>Término prev.</th>
@@ -1018,8 +1107,19 @@ function renderCronograma() {
   `;
   root.appendChild(panel);
 
+  const periods = buildQuinzenaPeriods(STATE.meta?.dataInicio, STATE.meta?.previsaoTermino);
+  panel.querySelector('.quinzenaFilterSlot').appendChild(renderQuinzenaFilter({
+    periods,
+    selected: FILTRO_QUINZENA_CRONOGRAMA,
+    onChange: (v) => { FILTRO_QUINZENA_CRONOGRAMA = v; renderCronograma(); },
+  }));
+
   const tbody = panel.querySelector('tbody');
-  for (const c of STATE.categorias) {
+  const categoriasFiltradas = STATE.categorias.filter((c) => dataNaQuinzena(c.dataUltimoAvanco, FILTRO_QUINZENA_CRONOGRAMA));
+  if (!categoriasFiltradas.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="muted">Nenhuma categoria com avanço lançado nessa quinzena.</td></tr>';
+  }
+  for (const c of categoriasFiltradas) {
     const tr = document.createElement('tr');
     tr.appendChild(td(`${c.numero}`));
     tr.appendChild(td(`<span class="wrap">${esc(c.nome)}</span>`));
@@ -1063,45 +1163,30 @@ function clampPerc(v) {
 /* ==========================================================================
    TAB 3 — Detalhamento FC (itens por categoria)
    ========================================================================== */
-// Extrai o mês da fatura de um item de cartão: usa a tag "fatura YYYY-MM"
-// (gravada pela compra parcelada) quando existe; senão cai para o mês da data
-// de pagamento do item.
-function itemFaturaMes(it) {
-  const m = /fatura\s+(\d{4}-\d{2})/i.exec(it.formaPagamento || '');
-  if (m) return m[1];
-  return it.dataPagamento ? String(it.dataPagamento).slice(0, 7) : null;
-}
-
+// Gasto no cartão por mês/quinzena — mesma fonte e agrupamento do campo
+// "Cartão" em Contas a Pagar (parcela.gastoCartao + mesReferenciaLabel), não
+// recalculado a partir dos itens: garante que bate exatamente com o extrato
+// do cartão (fechamento dia 05, sempre lançado na 1ª quinzena do mês — por
+// isso toda linha "2º PARCELA" aparece com R$ 0,00, igual à fatura real).
 function renderGastoCartaoMensal() {
-  const totals = new Map();
-  for (const c of STATE.categorias) {
-    for (const it of c.itens) {
-      if (!/cart/i.test(it.formaPagamento || '')) continue;
-      const mes = itemFaturaMes(it) || 'sem-data';
-      totals.set(mes, (totals.get(mes) || 0) + (Number(it.valorRealizado) || 0));
-    }
-  }
-  const meses = [...totals.keys()].sort();
+  const rows = [...STATE.parcelas]
+    .filter((p) => p.mesReferenciaLabel)
+    .sort((a, b) => (a.vencimento || a.vencPlanejado || '').localeCompare(b.vencimento || b.vencPlanejado || ''));
+  const totalGeral = rows.reduce((a, p) => a + (Number(p.gastoCartao) || 0), 0);
   const details = document.createElement('details');
   details.className = 'scurve-table-details';
-  const totalGeral = [...totals.values()].reduce((a, v) => a + v, 0);
-  details.innerHTML = `<summary>Ver gasto no cartão por mês (${money(totalGeral)} no total)</summary>`;
+  details.innerHTML = `<summary>Ver gasto no cartão por quinzena (${money(totalGeral)} no total)</summary>`;
   const wrap = document.createElement('div');
   wrap.className = 'table-scroll';
-  if (!meses.length) {
-    wrap.innerHTML = '<div class="muted" style="padding:8px 0">Nenhum lançamento no cartão ainda.</div>';
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="muted" style="padding:8px 0">Nenhuma parcela lançada ainda.</div>';
   } else {
-    wrap.innerHTML = `<table class="data"><thead><tr><th>Mês (fatura)</th><th class="num">Total no cartão</th></tr></thead><tbody>${meses.map((mes) => `
-      <tr><td>${mes === 'sem-data' ? 'Sem data' : monthLabelPt(mes)}</td><td class="num">${money(totals.get(mes))}</td></tr>
+    wrap.innerHTML = `<table class="data"><thead><tr><th>Mês</th><th class="num">Gasto do cartão</th></tr></thead><tbody>${rows.map((p) => `
+      <tr><td>${esc(p.mesReferenciaLabel)}</td><td class="num">${money(p.gastoCartao)}</td></tr>
     `).join('')}</tbody></table>`;
   }
   details.appendChild(wrap);
   return details;
-}
-
-function monthLabelPt(mes) {
-  const [y, m] = mes.split('-');
-  return `${MONTH_NAMES_PT[Number(m) - 1]}/${y}`;
 }
 
 function renderDetalhamento() {
@@ -1507,10 +1592,11 @@ function renderFluxo() {
     <div class="panel-header">
       <div>
         <h2>Fluxo de caixa por mês e parcela</h2>
-        <div class="muted">Organizado como em Contas a Pagar — cada mês dividido em 1º e 2º Parcela, na ordem cronológica correta. Agregado a partir de todas as parcelas lançadas (planejadas e realizadas) mais ajustes manuais. A liberação de caixa (PCI) aparece no mês originalmente programado de cada etapa. Para o saldo já efetivamente realizado, veja os cards do Dashboard.</div>
+        <div class="muted">Organizado como em Contas a Pagar — cada mês dividido em 1º e 2º Parcela, na ordem cronológica correta. Agregado a partir de todas as parcelas lançadas (planejadas e realizadas) mais ajustes manuais. A liberação de caixa (PCI) aparece no mês originalmente programado de cada etapa. Para o saldo já efetivamente realizado, veja os cards do Dashboard. Filtre por quinzena para ver só aquele período.</div>
       </div>
       <button class="btn primary" id="btnNovoAjuste">+ Ajuste manual</button>
     </div>
+    <div class="quinzenaFilterSlot"></div>
     <div class="table-scroll"><table class="data"><thead><tr>
       <th>Mês / Parcela</th><th class="num">Entrada recurso próprio</th><th class="num">Entrada caixa (PCI)</th><th class="num">Entrada ajuste</th><th class="num">Entrada total</th>
       <th class="num">Saída empreiteiro (PIX)</th><th class="num">Saída ADM (PIX)</th>
@@ -1518,8 +1604,17 @@ function renderFluxo() {
     </tr></thead><tbody></tbody></table></div>
   `;
   root.appendChild(panel);
+
+  const periodsFluxo = buildQuinzenaPeriods(STATE.meta?.dataInicio, STATE.meta?.previsaoTermino);
+  panel.querySelector('.quinzenaFilterSlot').appendChild(renderQuinzenaFilter({
+    periods: periodsFluxo,
+    selected: FILTRO_QUINZENA_FLUXO,
+    onChange: (v) => { FILTRO_QUINZENA_FLUXO = v; renderFluxo(); },
+  }));
+
   const tbody = panel.querySelector('tbody');
-  for (const m of STATE.fluxoCaixaMensal) {
+  const mesesFiltrados = STATE.fluxoCaixaMensal.filter((m) => !FILTRO_QUINZENA_FLUXO || (m.mes === FILTRO_QUINZENA_FLUXO.mes && m.quinzena === FILTRO_QUINZENA_FLUXO.quinzena));
+  for (const m of mesesFiltrados) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${esc(m.label)}</td>
@@ -1536,8 +1631,8 @@ function renderFluxo() {
     `;
     tbody.appendChild(tr);
   }
-  if (!STATE.fluxoCaixaMensal.length) {
-    tbody.innerHTML = '<tr><td colspan="11" class="muted">Nenhuma parcela lançada ainda.</td></tr>';
+  if (!mesesFiltrados.length) {
+    tbody.innerHTML = `<tr><td colspan="11" class="muted">${FILTRO_QUINZENA_FLUXO ? 'Nenhum lançamento nessa quinzena.' : 'Nenhuma parcela lançada ainda.'}</td></tr>`;
   }
 
   const ajustesPanel = document.createElement('div');
@@ -1652,15 +1747,23 @@ function renderLiberacoesCaixaPanel() {
     <div class="panel-header">
       <div>
         <h2>Liberações reais do CAIXA</h2>
-        <div class="muted">Lance aqui cada medição que o banco efetivamente liberou (data e valor), conforme o extrato. A soma dessa lista com o valor que o CAIXA já passou do lote (${money(custoLoteExecutado)}, ajustável em Parâmetros) é o card "Valor caixa liberado".</div>
+        <div class="muted">Lance aqui cada medição que o banco efetivamente liberou (data e valor), conforme o extrato. A soma dessa lista com o valor que o CAIXA já passou do lote (${money(custoLoteExecutado)}, ajustável em Parâmetros) é o card "Valor caixa liberado". Filtre por quinzena para ver só as liberações daquele período (o valor do lote, sem data específica, some do filtro).</div>
       </div>
       <button class="btn primary" id="btnNovaLiberacao">+ Nova liberação</button>
     </div>
+    <div class="quinzenaFilterSlot"></div>
     <div class="table-scroll"></div>
   `;
+  const periodsPci = buildQuinzenaPeriods(STATE.meta?.dataInicio, STATE.meta?.previsaoTermino);
+  panel.querySelector('.quinzenaFilterSlot').appendChild(renderQuinzenaFilter({
+    periods: periodsPci,
+    selected: FILTRO_QUINZENA_PCI,
+    onChange: (v) => { FILTRO_QUINZENA_PCI = v; renderPCI(); },
+  }));
   const wrap = panel.querySelector('.table-scroll');
-  const liberacoes = STATE.liberacoesCaixa || [];
-  const loteRow = custoLoteExecutado
+  const liberacoes = (STATE.liberacoesCaixa || []).filter((l) => dataNaQuinzena(l.data, FILTRO_QUINZENA_PCI));
+  const mostrarLote = !FILTRO_QUINZENA_PCI && custoLoteExecutado > 0;
+  const loteRow = mostrarLote
     ? `<tr>
         <td>—</td>
         <td class="num">${money(custoLoteExecutado)}</td>
@@ -1668,8 +1771,9 @@ function renderLiberacoesCaixaPanel() {
         <td></td>
       </tr>`
     : '';
-  if (!liberacoes.length && !custoLoteExecutado) {
-    wrap.innerHTML = '<div class="muted">Nenhuma liberação lançada ainda.</div>';
+  const totalFiltrado = (mostrarLote ? custoLoteExecutado : 0) + liberacoes.reduce((a, l) => a + (Number(l.valor) || 0), 0);
+  if (!liberacoes.length && !mostrarLote) {
+    wrap.innerHTML = `<div class="muted">${FILTRO_QUINZENA_PCI ? 'Nenhuma liberação lançada nessa quinzena.' : 'Nenhuma liberação lançada ainda.'}</div>`;
   } else {
     wrap.innerHTML = `<table class="data"><thead><tr><th>Data</th><th class="num">Valor</th><th class="wrap">Observação</th><th></th></tr></thead>
       <tbody>${loteRow}${liberacoes.map((l) => `
@@ -1679,7 +1783,7 @@ function renderLiberacoesCaixaPanel() {
           <td class="wrap">${esc(l.obs)}</td>
           <td><button class="icon-btn" data-del="${l.id}">🗑</button></td>
         </tr>`).join('')}</tbody>
-      <tfoot><tr><td>TOTAL</td><td class="num">${money(STATE.resumo.caixaLiberadaAcumulada)}</td><td colspan="2"></td></tr></tfoot></table>`;
+      <tfoot><tr><td>${FILTRO_QUINZENA_PCI ? 'TOTAL (quinzena filtrada)' : 'TOTAL'}</td><td class="num">${money(FILTRO_QUINZENA_PCI ? totalFiltrado : STATE.resumo.caixaLiberadaAcumulada)}</td><td colspan="2"></td></tr></tfoot></table>`;
   }
   panel.querySelectorAll('[data-del]').forEach((btn) => {
     btn.onclick = () => { if (confirm('Remover esta liberação?')) api('DELETE', `/api/liberacoes-caixa/${btn.dataset.del}`); };
@@ -1771,6 +1875,110 @@ function renderLiberacaoPorCategoria() {
   return panel;
 }
 
+// Itens que já consumiram o recurso próprio (Maio/1ª, Maio/2ª, Junho/1ª,
+// entrada do lote, serviços preliminares...), editáveis/adicionáveis — o
+// saldo de recurso próprio disponível é recalculado automaticamente como
+// planejado − soma da lista (mesma lógica que "Liberações reais do CAIXA").
+// Um valor manual único ainda pode sobrescrever tudo, para o caso raro em
+// que nem a lista reflete o saldo real em conta.
+function renderConsumosRecursoProprioPanel() {
+  const r = STATE.resumo;
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <h2>Saldo de recurso próprio disponível</h2>
+        <div class="muted">Recurso próprio planejado (${money(STATE.parametros.recursoProprioPlanejado)}) menos cada item que já consumiu esse saldo. O recurso próprio só foi usado nos meses antes da liberação do CAIXA começar a fluir, mas pode ser usado de novo se o fluxo de caixa exigir — lance/edite os itens conforme o extrato real.</div>
+      </div>
+      <button class="btn primary" id="btnNovoConsumo">+ Novo item</button>
+    </div>
+    <div class="table-scroll"></div>
+  `;
+  const wrap = panel.querySelector('.table-scroll');
+  const itens = STATE.consumosRecursoProprio || [];
+  if (!itens.length) {
+    wrap.innerHTML = '<div class="muted">Nenhum item lançado ainda — o saldo usa o cálculo automático simples (investido − gasto acumulado).</div>';
+  } else {
+    const tbl = document.createElement('table');
+    tbl.className = 'data';
+    tbl.innerHTML = `<thead><tr><th class="wrap">Descrição</th><th class="num">Valor</th><th></th></tr></thead><tbody></tbody>
+      <tfoot><tr><td>TOTAL CONSUMIDO</td><td class="num">${money(r.totalConsumoRecursoProprio)}</td><td></td></tr>
+      <tr><td>SALDO RESULTANTE (planejado − consumido)</td><td class="num" style="font-weight:700">${money(r.saldoRecursoProprioPorItens)}</td><td></td></tr></tfoot>`;
+    const tbody = tbl.querySelector('tbody');
+    for (const item of itens) {
+      const tr = document.createElement('tr');
+      tr.appendChild(td(textInput({ value: item.descricao, wide: true, onSave: (v) => api('PUT', `/api/consumos-recurso-proprio/${item.id}`, { descricao: v }) })));
+      tr.appendChild(td(moneyInput({ value: item.valor, onSave: (v) => api('PUT', `/api/consumos-recurso-proprio/${item.id}`, { valor: v }) })));
+      const delTd = document.createElement('td');
+      const delBtn = document.createElement('button');
+      delBtn.className = 'icon-btn'; delBtn.textContent = '🗑';
+      delBtn.onclick = () => { if (confirm(`Remover "${item.descricao}"?`)) api('DELETE', `/api/consumos-recurso-proprio/${item.id}`); };
+      delTd.appendChild(delBtn);
+      tr.appendChild(delTd);
+      tbody.appendChild(tr);
+    }
+    wrap.appendChild(tbl);
+  }
+  panel.querySelector('#btnNovoConsumo').onclick = () => {
+    openModal('Novo item — consumo de recurso próprio', (body, close) => {
+      const form = document.createElement('form');
+      form.className = 'form-grid';
+      form.innerHTML = `
+        <label style="grid-column: 1 / -1">Descrição<input name="descricao" placeholder="Ex.: Julho/1º parcela" required /></label>
+        <label>Valor (R$)<input name="valor" type="number" step="0.01" required /></label>
+        <div style="grid-column: 1 / -1; display:flex; gap:8px; justify-content:flex-end;">
+          <button type="button" class="btn" id="cancelBtn">Cancelar</button>
+          <button type="submit" class="btn primary">Adicionar</button>
+        </div>
+      `;
+      form.querySelector('#cancelBtn').onclick = close;
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const payload = Object.fromEntries(new FormData(form).entries());
+        await api('POST', '/api/consumos-recurso-proprio', payload);
+        close();
+      });
+      body.appendChild(form);
+    });
+  };
+
+  const advDetails = document.createElement('details');
+  advDetails.className = 'scurve-table-details';
+  advDetails.innerHTML = '<summary>Avançado: forçar um valor manual único (ignora a lista acima)</summary>';
+  const advBody = document.createElement('div');
+  advBody.className = 'form-grid';
+  advBody.style.marginTop = '8px';
+  const advWrap = document.createElement('label');
+  advWrap.textContent = `Saldo de recurso próprio disponível (R$) — pela lista seria: ${money(r.saldoRecursoProprioPorItens)}; automático simples seria: ${money(r.saldoRecursoDisponivelAuto)}`;
+  const advInputWrap = document.createElement('div');
+  advInputWrap.style.display = 'flex';
+  advInputWrap.style.gap = '6px';
+  advInputWrap.style.alignItems = 'center';
+  const saldoManual = STATE.parametros.saldoRecursoDisponivelManual;
+  const advInput = numberInput({
+    value: saldoManual == null ? '' : saldoManual,
+    manual: saldoManual != null,
+    wide: true,
+    onSave: (v) => api('PUT', '/api/parametros', { saldoRecursoDisponivelManual: v }),
+  });
+  advInput.placeholder = 'nenhum — usa a lista acima';
+  advInputWrap.appendChild(advInput);
+  if (saldoManual != null) {
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'btn small';
+    clearBtn.textContent = 'usar a lista acima';
+    clearBtn.onclick = () => api('PUT', '/api/parametros', { saldoRecursoDisponivelManual: null });
+    advInputWrap.appendChild(clearBtn);
+  }
+  advWrap.appendChild(advInputWrap);
+  advBody.appendChild(advWrap);
+  advDetails.appendChild(advBody);
+  panel.appendChild(advDetails);
+
+  return panel;
+}
+
 /* ==========================================================================
    TAB 6 — Parâmetros
    ========================================================================== */
@@ -1831,39 +2039,7 @@ function renderParametros() {
   paramPanel.appendChild(paramForm);
   root.appendChild(paramPanel);
 
-  const r = STATE.resumo;
-  const saldoPanel = document.createElement('div');
-  saldoPanel.className = 'panel';
-  saldoPanel.innerHTML = `<div class="panel-header"><div><h2>Saldo de recurso próprio disponível</h2>
-    <div class="muted">Na planilha original esse valor não é uma fórmula que soma tudo automaticamente — o recurso próprio só foi usado nos meses antes da liberação do CAIXA começar a fluir, e pode ser usado de novo se o fluxo de caixa exigir. Por isso é ajustado manualmente conforme o saldo real em conta. Ajuste aqui quando necessário; use "usar automático" para voltar ao cálculo simples do app (investido − gasto acumulado).</div></div></div>`;
-  const saldoBody = document.createElement('div');
-  saldoBody.className = 'form-grid';
-  const saldoWrap = document.createElement('label');
-  saldoWrap.textContent = `Saldo de recurso próprio disponível (R$) — automático seria: ${money(r.saldoRecursoDisponivelAuto)}`;
-  const saldoInputWrap = document.createElement('div');
-  saldoInputWrap.style.display = 'flex';
-  saldoInputWrap.style.gap = '6px';
-  saldoInputWrap.style.alignItems = 'center';
-  const saldoManual = STATE.parametros.saldoRecursoDisponivelManual;
-  const saldoInput = numberInput({
-    value: saldoManual == null ? '' : saldoManual,
-    manual: saldoManual != null,
-    wide: true,
-    onSave: (v) => api('PUT', '/api/parametros', { saldoRecursoDisponivelManual: v }),
-  });
-  saldoInput.placeholder = 'automático';
-  saldoInputWrap.appendChild(saldoInput);
-  if (saldoManual != null) {
-    const clearBtn = document.createElement('button');
-    clearBtn.className = 'btn small';
-    clearBtn.textContent = 'usar automático';
-    clearBtn.onclick = () => api('PUT', '/api/parametros', { saldoRecursoDisponivelManual: null });
-    saldoInputWrap.appendChild(clearBtn);
-  }
-  saldoWrap.appendChild(saldoInputWrap);
-  saldoBody.appendChild(saldoWrap);
-  saldoPanel.appendChild(saldoBody);
-  root.appendChild(saldoPanel);
+  root.appendChild(renderConsumosRecursoProprioPanel());
 
   const dangerPanel = document.createElement('div');
   dangerPanel.className = 'panel';
