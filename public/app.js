@@ -1100,7 +1100,7 @@ function renderDetalhamento() {
   header.innerHTML = `<div class="panel-header">
     <div>
       <h2>Detalhamento FC — orçado x realizado por item</h2>
-      <div class="muted">Cada categoria soma seus itens automaticamente. Edite valores realizados, orçados, datas e forma de pagamento; adicione ou remova itens conforme o lançamento real. O teto de medição de cada item é sempre 100% do seu valor orçado.</div>
+      <div class="muted">Cada categoria soma seus itens automaticamente. Edite valores realizados, orçados, datas e forma de pagamento; adicione ou remova itens conforme o lançamento real. Itens individuais podem custar mais que o orçado inicial (estouros reais); o teto de 100% vale só para a categoria como um todo.</div>
     </div>
   </div>`;
   header.appendChild(renderGastoCartaoMensal());
