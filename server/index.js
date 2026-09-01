@@ -355,8 +355,22 @@ app.post('/api/liberacoes-caixa', async (req, res) => {
       id: newId('liberacao'),
       data: b.data || new Date().toISOString().slice(0, 10),
       valor: Number(b.valor) || 0,
+      status: b.status === 'PLANEJADO' ? 'PLANEJADO' : 'REALIZADO',
       obs: b.obs || '',
     });
+  });
+  ok(res, state);
+});
+
+app.put('/api/liberacoes-caixa/:id', async (req, res) => {
+  const state = await store.mutate((s) => {
+    const l = (s.liberacoesCaixa || []).find((x) => x.id === req.params.id);
+    if (!l) throw Object.assign(new Error('liberação não encontrada'), { status: 404 });
+    const { data, valor, status, obs } = req.body || {};
+    if (data !== undefined) l.data = data;
+    if (valor !== undefined) l.valor = Number(valor);
+    if (status !== undefined) l.status = status === 'PLANEJADO' ? 'PLANEJADO' : 'REALIZADO';
+    if (obs !== undefined) l.obs = obs;
   });
   ok(res, state);
 });
@@ -496,14 +510,18 @@ app.post('/api/lancamento-quinzena', async (req, res) => {
 
       const percAvancoManualAnterior = cat.percAvancoManual;
       const statusAvanco = b.status === 'REALIZADO' ? 'REALIZADO' : 'PLANEJADO';
-      const dataAvanco = b.dataGeracaoCusto || vencPlanejado;
+      // O avanço pertence à quinzena selecionada (vencPlanejado) — não à "data em
+      // que o custo foi gerado" (dataGeracaoCusto), que é só um detalhe da parcela
+      // de Contas a Pagar e por padrão vem preenchida com a data de hoje. Usar
+      // dataGeracaoCusto aqui fazia o avanço "sumir" do filtro por quinzena sempre
+      // que o usuário lançava um período retroativo sem trocar essa data.
       s.historicoAvancos.unshift({
         id: newId('avanco'),
         categoriaId: cat.id,
         categoriaNome: cat.nome,
         percAvancoAnterior: percAvancoManualAnterior,
         percAvancoNovo: novoPerc,
-        data: dataAvanco,
+        data: vencPlanejado,
         status: statusAvanco,
         obs: b.obs || '',
         timestamp: new Date().toISOString(),
@@ -511,7 +529,7 @@ app.post('/api/lancamento-quinzena', async (req, res) => {
       // Um avanço lançado como PLANEJADO fica registrado, mas só passa a
       // contar no % efetivo da categoria (e em tudo que depende dele) quando
       // confirmado como REALIZADO — ver recomputeCategoriaPercManual.
-      if (statusAvanco === 'REALIZADO') cat.dataUltimoAvanco = dataAvanco;
+      if (statusAvanco === 'REALIZADO') cat.dataUltimoAvanco = vencPlanejado;
       recomputeCategoriaPercManual(cat, s.historicoAvancos);
       detalhes.push(`${cat.nome}: ${(percAnteriorEfetivo * 100).toFixed(1)}% → ${(novoPerc * 100).toFixed(1)}%`);
     }

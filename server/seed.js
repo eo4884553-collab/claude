@@ -229,10 +229,10 @@ function buildLiberacaoPCI() {
 // obra geral estimaria.
 function buildLiberacoesCaixa() {
   return [
-    { id: 'liberacao-1', data: '2026-06-01', valor: 177000.6, obs: 'Medição 01' },
-    { id: 'liberacao-2', data: '2026-07-01', valor: 132580.8, obs: 'Medição 02' },
-    { id: 'liberacao-3', data: '2026-08-01', valor: 35823.6, obs: 'Medição 03' },
-    { id: 'liberacao-4', data: '2026-09-01', valor: 91071.18, obs: 'Medição 04' },
+    { id: 'liberacao-1', data: '2026-06-01', valor: 177000.6, status: 'REALIZADO', obs: 'Medição 01' },
+    { id: 'liberacao-2', data: '2026-07-01', valor: 132580.8, status: 'REALIZADO', obs: 'Medição 02' },
+    { id: 'liberacao-3', data: '2026-08-01', valor: 35823.6, status: 'REALIZADO', obs: 'Medição 03' },
+    { id: 'liberacao-4', data: '2026-09-01', valor: 91071.18, status: 'REALIZADO', obs: 'Medição 04' },
   ];
 }
 

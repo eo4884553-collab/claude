@@ -230,7 +230,12 @@ function recompute(state) {
   // valor que o CAIXA já passou para o lote (R$356.168,00, mesmo valor de
   // custoLoteExecutado) — "Valor caixa liberado" = medições + lote = R$792.644,18.
   const liberacoesCaixa = [...(state.liberacoesCaixa || [])].sort((a, b) => (a.data || '').localeCompare(b.data || ''));
-  const caixaLiberadaAcumulada = round2(custoLoteExecutado + sum(liberacoesCaixa, (l) => l.valor));
+  // Só medições REALIZADO contam no valor efetivamente liberado (e em tudo que
+  // depende dele — % caixa liberada, saldo caixa disponível, saldo de recurso
+  // próprio auto) — mesma lógica de "parcela REALIZADO"/"avanço REALIZADO".
+  // Entradas sem status (dados antigos) são tratadas como REALIZADO.
+  const liberacoesCaixaRealizadas = liberacoesCaixa.filter((l) => l.status !== 'PLANEJADO');
+  const caixaLiberadaAcumulada = round2(custoLoteExecutado + sum(liberacoesCaixaRealizadas, (l) => l.valor));
 
   const parcelas = (state.parcelas || [])
     .map(computeParcela)

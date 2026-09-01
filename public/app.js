@@ -1841,7 +1841,7 @@ function renderLiberacoesCaixaPanel() {
     <div class="panel-header">
       <div>
         <h2>Liberações reais do CAIXA</h2>
-        <div class="muted">Lance aqui cada medição que o banco efetivamente liberou (data e valor), conforme o extrato. A soma dessa lista com o valor que o CAIXA já passou do lote (${money(custoLoteExecutado)}, ajustável em Parâmetros) é o card "Valor caixa liberado". Filtre por quinzena para ver só as liberações daquele período (o valor do lote, sem data específica, some do filtro).</div>
+        <div class="muted">Lance aqui cada medição do banco (data, valor e status). Marque como Planejado uma medição ainda não confirmada e mude para Realizado quando o banco liberar de fato — só Realizado entra no total liberado e no card "Valor caixa liberado". A soma das medições Realizado com o valor que o CAIXA já passou do lote (${money(custoLoteExecutado)}, ajustável em Parâmetros) é o card "Valor caixa liberado". Filtre por quinzena para ver só as liberações daquele período (o valor do lote, sem data específica, some do filtro).</div>
       </div>
       <button class="btn primary" id="btnNovaLiberacao">+ Nova liberação</button>
     </div>
@@ -1861,27 +1861,45 @@ function renderLiberacoesCaixaPanel() {
     ? `<tr>
         <td>—</td>
         <td class="num">${money(custoLoteExecutado)}</td>
+        <td><span class="badge green">REALIZADO</span></td>
         <td class="wrap">Valor que o CAIXA já passou do lote (taxas e projetos)</td>
         <td></td>
       </tr>`
     : '';
-  const totalFiltrado = (mostrarLote ? custoLoteExecutado : 0) + liberacoes.reduce((a, l) => a + (Number(l.valor) || 0), 0);
+  // Só REALIZADO conta no total efetivamente liberado (mesmo valor de
+  // resumo.caixaLiberadaAcumulada) — uma liberação PLANEJADO fica registrada
+  // mas ainda não aconteceu de fato, igual às parcelas e avanços PLANEJADO.
+  const totalFiltrado = (mostrarLote ? custoLoteExecutado : 0)
+    + liberacoes.filter((l) => l.status !== 'PLANEJADO').reduce((a, l) => a + (Number(l.valor) || 0), 0);
   if (!liberacoes.length && !mostrarLote) {
     wrap.innerHTML = `<div class="muted">${FILTRO_QUINZENA_PCI ? 'Nenhuma liberação lançada nessa quinzena.' : 'Nenhuma liberação lançada ainda.'}</div>`;
   } else {
-    wrap.innerHTML = `<table class="data"><thead><tr><th>Data</th><th class="num">Valor</th><th class="wrap">Observação</th><th></th></tr></thead>
-      <tbody>${loteRow}${liberacoes.map((l) => `
-        <tr>
-          <td>${dateBR(l.data)}</td>
-          <td class="num">${money(l.valor)}</td>
-          <td class="wrap">${esc(l.obs)}</td>
-          <td><button class="icon-btn" data-del="${l.id}">🗑</button></td>
-        </tr>`).join('')}</tbody>
-      <tfoot><tr><td>${FILTRO_QUINZENA_PCI ? 'TOTAL (quinzena filtrada)' : 'TOTAL'}</td><td class="num">${money(FILTRO_QUINZENA_PCI ? totalFiltrado : STATE.resumo.caixaLiberadaAcumulada)}</td><td colspan="2"></td></tr></tfoot></table>`;
+    const tbl = document.createElement('table');
+    tbl.className = 'data';
+    tbl.innerHTML = `<thead><tr><th>Data</th><th class="num">Valor</th><th>Status</th><th class="wrap">Observação</th><th></th></tr></thead>
+      <tbody>${loteRow}</tbody>
+      <tfoot><tr><td>${FILTRO_QUINZENA_PCI ? 'TOTAL REALIZADO (quinzena filtrada)' : 'TOTAL REALIZADO'}</td><td class="num">${money(FILTRO_QUINZENA_PCI ? totalFiltrado : STATE.resumo.caixaLiberadaAcumulada)}</td><td colspan="3"></td></tr></tfoot>`;
+    const tbody = tbl.querySelector('tbody');
+    for (const l of liberacoes) {
+      const tr = document.createElement('tr');
+      tr.appendChild(td(dateInput({ value: l.data, onSave: (v) => api('PUT', `/api/liberacoes-caixa/${l.id}`, { data: v }) })));
+      tr.appendChild(td(moneyInput({ value: l.valor, onSave: (v) => api('PUT', `/api/liberacoes-caixa/${l.id}`, { valor: v }) })));
+      tr.appendChild(td(selectInput({
+        value: l.status || 'REALIZADO',
+        options: ['PLANEJADO', 'REALIZADO'],
+        onSave: (v) => api('PUT', `/api/liberacoes-caixa/${l.id}`, { status: v }),
+      })));
+      tr.appendChild(td(textInput({ value: l.obs, wide: true, onSave: (v) => api('PUT', `/api/liberacoes-caixa/${l.id}`, { obs: v }) })));
+      const delTd = document.createElement('td');
+      const delBtn = document.createElement('button');
+      delBtn.className = 'icon-btn'; delBtn.textContent = '🗑';
+      delBtn.onclick = () => { if (confirm('Remover esta liberação?')) api('DELETE', `/api/liberacoes-caixa/${l.id}`); };
+      delTd.appendChild(delBtn);
+      tr.appendChild(delTd);
+      tbody.appendChild(tr);
+    }
+    wrap.appendChild(tbl);
   }
-  panel.querySelectorAll('[data-del]').forEach((btn) => {
-    btn.onclick = () => { if (confirm('Remover esta liberação?')) api('DELETE', `/api/liberacoes-caixa/${btn.dataset.del}`); };
-  });
   panel.querySelector('#btnNovaLiberacao').onclick = () => openNovaLiberacaoCaixaModal();
   return panel;
 }
@@ -1893,6 +1911,9 @@ function openNovaLiberacaoCaixaModal() {
     form.innerHTML = `
       <label>Data<input name="data" type="date" required /></label>
       <label>Valor (R$)<input name="valor" type="number" step="0.01" required /></label>
+      <label>Status
+        <select name="status"><option value="REALIZADO" selected>Realizado</option><option value="PLANEJADO">Planejado</option></select>
+      </label>
       <label style="grid-column: 1 / -1">Observação (ex.: "Medição 05")<input name="obs" /></label>
       <div style="grid-column: 1 / -1; display:flex; gap:8px; justify-content:flex-end;">
         <button type="button" class="btn" id="cancelBtn">Cancelar</button>
