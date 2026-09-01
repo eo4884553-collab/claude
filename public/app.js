@@ -18,6 +18,9 @@ let FILTRO_QUINZENA_PCI = null;
 // Filtro por mês (não quinzena) da tabela de Contas a Pagar — mesReferencia
 // (ex.: "2026-09") ou null = "Todos os meses".
 let FILTRO_MES_PARCELAS = null;
+// Até qual quinzena projetar o "Saldo em conta" (janela com planejado) no
+// Dashboard Executivo — {mes, quinzena} ou null = até o fim do contrato.
+let FILTRO_SALDO_CONTA_ATE = null;
 
 const fmtBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtNum = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 });
@@ -121,6 +124,88 @@ function renderQuinzenaFilter({ periods, selected, onChange }) {
     onChange({ mes, quinzena: Number(quinzena) });
   });
   return wrap;
+}
+
+// "Saldo em conta": liberações do CAIXA menos custo total das parcelas, só a
+// partir de `marco` (Junho/2ª — ver resumo.marcoSaldoConta) até `ateData`
+// (inclusive; null = sem limite superior). `incluirPlanejado` decide se conta
+// só REALIZADO ou também PLANEJADO — mesma lógica de saldoContaNoPeriodo em
+// calc.js, duplicada aqui porque o filtro (janela 2) é só do cliente, sem
+// round-trip ao servidor a cada mudança de data.
+function saldoContaAte(liberacoesCaixa, parcelas, marco, ateData, incluirPlanejado) {
+  const entradas = (liberacoesCaixa || [])
+    .filter((l) => (incluirPlanejado || l.status !== 'PLANEJADO') && (l.data || '') >= marco && (!ateData || (l.data || '') <= ateData))
+    .reduce((a, l) => a + (Number(l.valor) || 0), 0);
+  const saidas = (parcelas || [])
+    .filter((p) => {
+      if (!incluirPlanejado && p.status !== 'REALIZADO') return false;
+      const dataOcorrencia = p.vencimento || p.vencPlanejado || '';
+      return dataOcorrencia >= marco && (!ateData || dataOcorrencia <= ateData);
+    })
+    .reduce((a, p) => a + (Number(p.custoTotal) || 0), 0);
+  return Math.round((entradas - saidas) * 100) / 100;
+}
+
+// As duas "janelas" de saldo em conta do Dashboard Executivo: uma fixa (só
+// realizado, desde o marco) e outra interativa (realizado + planejado, com
+// filtro "projetar até" indo do marco até o fim do contrato).
+function renderSaldoContaGrid() {
+  const r = STATE.resumo;
+  const marco = r.marcoSaldoConta;
+  const grid = document.createElement('div');
+  grid.className = 'scurve-grid';
+
+  const painelRealizado = document.createElement('div');
+  painelRealizado.className = 'panel';
+  painelRealizado.innerHTML = `
+    <div class="panel-header"><div>
+      <h2>Saldo em conta (realizado)</h2>
+      <div class="muted">Liberações do CAIXA já realizadas menos o custo total já realizado (coluna "Custo total" de Contas a Pagar), contando a partir de ${dateBR(marco)} — quando a liberação do CAIXA passou a alimentar esta conta (antes disso, Maio e Junho/1ª foram cobertos por recurso próprio).</div>
+    </div></div>
+    <div class="card-value" style="font-size:32px; font-weight:700; margin-top:4px; color:${r.saldoContaRealizado < 0 ? 'var(--red)' : 'var(--green)'}">${money(r.saldoContaRealizado)}</div>
+  `;
+  grid.appendChild(painelRealizado);
+
+  const painelProjetado = document.createElement('div');
+  painelProjetado.className = 'panel';
+  painelProjetado.innerHTML = `
+    <div class="panel-header"><div>
+      <h2>Saldo em conta projetado (com planejado)</h2>
+      <div class="muted">Mesmo cálculo, mas incluindo também os lançamentos planejados — escolha até qual quinzena projetar (do marco acima até o fim do contrato).</div>
+    </div></div>
+    <div class="saldoContaFiltroSlot" style="margin-bottom:8px"></div>
+    <div class="card-value" style="font-size:32px; font-weight:700; margin-top:4px" id="saldoContaProjetadoValor"></div>
+  `;
+  grid.appendChild(painelProjetado);
+
+  const periodos = buildQuinzenaPeriods(STATE.meta?.dataInicio, STATE.meta?.previsaoTermino).filter((p) => p.vencPlanejado >= marco);
+  const ultimoPeriodo = periodos[periodos.length - 1] || null;
+  const selecionado = FILTRO_SALDO_CONTA_ATE || ultimoPeriodo;
+
+  const filtroWrap = document.createElement('div');
+  filtroWrap.className = 'form-grid';
+  filtroWrap.style.maxWidth = '320px';
+  filtroWrap.innerHTML = `<label>Projetar até
+    <select class="cell-input">
+      ${periodos.map((p) => `<option value="${p.mes}|${p.quinzena}">${esc(p.label)}</option>`).join('')}
+    </select>
+  </label>`;
+  const select = filtroWrap.querySelector('select');
+  if (selecionado) select.value = `${selecionado.mes}|${selecionado.quinzena}`;
+  select.addEventListener('change', () => {
+    const [mes, quinzena] = select.value.split('|');
+    FILTRO_SALDO_CONTA_ATE = periodos.find((p) => p.mes === mes && p.quinzena === Number(quinzena)) || null;
+    renderPainel();
+  });
+  painelProjetado.querySelector('.saldoContaFiltroSlot').appendChild(filtroWrap);
+
+  const ateData = selecionado ? selecionado.vencPlanejado : null;
+  const valorProjetado = saldoContaAte(STATE.liberacoesCaixa, STATE.parcelas, marco, ateData, true);
+  const valorEl = painelProjetado.querySelector('#saldoContaProjetadoValor');
+  valorEl.textContent = money(valorProjetado);
+  valorEl.style.color = valorProjetado < 0 ? 'var(--red)' : 'var(--green)';
+
+  return grid;
 }
 
 // Rótulo "Mês/Ano" (sem quinzena) a partir de um mês (YYYY-MM).
@@ -685,6 +770,7 @@ function renderPainel() {
     </div>
   `;
   root.appendChild(kpis);
+  root.appendChild(renderSaldoContaGrid());
 
   const hoje = r.dataReferenciaCronograma;
   const checkpointsEmp = buildMonthlyCheckpoints(STATE.meta.dataInicio, STATE.meta.previsaoTermino);

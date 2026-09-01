@@ -424,6 +424,36 @@ function recompute(state) {
   const saldoCaixaDisponivel = round2(creditoCaixaTotalPCI - caixaLiberadaAcumulada);
   const verbaDisponivelFutura = round2(saldoCaixaDisponivel + saldoRecursoDisponivel);
 
+  // "Saldo em conta": quanto sobra na conta corrente alimentada pelas
+  // liberações do CAIXA (liberações menos custo total pago), contando só a
+  // partir de Junho/2ª quinzena (25/06) — antes disso, Maio/1ª, Maio/2ª e
+  // Junho/1ª foram cobertas por recurso próprio (ver saldoRecursoProprioPorItens
+  // acima); a liberação do CAIXA só passou a alimentar essa conta a partir
+  // daqui. Usa o "Custo total" de cada parcela tal como armazenado (respeitando
+  // overrides), igual à coluna exibida em Contas a Pagar — não o
+  // empreiteiro+adm+cartão recalculado, que pode divergir quando há override.
+  const MARCO_SALDO_CONTA = '2026-06-25';
+  function saldoContaNoPeriodo(ateData, incluirPlanejado) {
+    const entradas = sum(
+      liberacoesCaixa.filter((l) => (
+        (incluirPlanejado || l.status !== 'PLANEJADO')
+        && (l.data || '') >= MARCO_SALDO_CONTA
+        && (!ateData || (l.data || '') <= ateData)
+      )),
+      (l) => l.valor,
+    );
+    const saidas = sum(
+      parcelas.filter((p) => {
+        if (!incluirPlanejado && p.status !== 'REALIZADO') return false;
+        const dataOcorrencia = p.vencimento || p.vencPlanejado || '';
+        return dataOcorrencia >= MARCO_SALDO_CONTA && (!ateData || dataOcorrencia <= ateData);
+      }),
+      (p) => p.custoTotal,
+    );
+    return round2(entradas - saidas);
+  }
+  const saldoContaRealizado = saldoContaNoPeriodo(null, false);
+
   const resumo = {
     totalOrcadoCategorias,
     contratoTotalEmpreiteiro,
@@ -487,6 +517,8 @@ function recompute(state) {
     // nada aqui é ajustado automaticamente, é só um alerta de acompanhamento.
     verbaDisponivelFutura,
     saldoParaFuturos: round2(verbaDisponivelFutura - totalPlanejadoFuturo),
+    marcoSaldoConta: MARCO_SALDO_CONTA,
+    saldoContaRealizado,
   };
 
   return {
