@@ -262,18 +262,44 @@ app.post('/api/categorias/:id/compra-parcelada', async (req, res) => {
   res.json(body);
 });
 
-// ---- Liberação PCI ----
+// ---- Liberação PCI (cronograma macro planejado — 6 etapas, sem "liberado"
+// próprio: o valor realmente liberado pelo banco é rastreado à parte, em
+// liberacoesCaixa, porque na planilha original o banco libera por medição
+// mensal, sem seguir o % de obra das etapas) ----
 app.put('/api/liberacao-pci/:etapa', async (req, res) => {
   const state = await store.mutate((s) => {
     const etapaNum = Number(req.params.etapa);
     const etapa = s.liberacaoPCI.find((e) => e.etapa === etapaNum);
     if (!etapa) throw Object.assign(new Error('etapa não encontrada'), { status: 404 });
-    const { descricao, valor, percLimiteAcumulado, mesProgramado, liberadoManual } = req.body || {};
+    const { descricao, valor, percLimiteAcumulado, mesProgramado } = req.body || {};
     if (descricao !== undefined) etapa.descricao = descricao;
     if (valor !== undefined) etapa.valor = Number(valor);
     if (percLimiteAcumulado !== undefined) etapa.percLimiteAcumulado = Number(percLimiteAcumulado);
     if (mesProgramado !== undefined) etapa.mesProgramado = Number(mesProgramado);
-    if (liberadoManual !== undefined) etapa.liberadoManual = liberadoManual === null ? null : Number(liberadoManual);
+  });
+  ok(res, state);
+});
+
+// ---- Liberações reais do CAIXA (medições mensais efetivamente pagas pelo
+// banco — cada uma lançada manualmente pelo proprietário conforme o extrato,
+// igual à planilha original) ----
+app.post('/api/liberacoes-caixa', async (req, res) => {
+  const state = await store.mutate((s) => {
+    const b = req.body || {};
+    s.liberacoesCaixa = s.liberacoesCaixa || [];
+    s.liberacoesCaixa.push({
+      id: newId('liberacao'),
+      data: b.data || new Date().toISOString().slice(0, 10),
+      valor: Number(b.valor) || 0,
+      obs: b.obs || '',
+    });
+  });
+  ok(res, state);
+});
+
+app.delete('/api/liberacoes-caixa/:id', async (req, res) => {
+  const state = await store.mutate((s) => {
+    s.liberacoesCaixa = (s.liberacoesCaixa || []).filter((l) => l.id !== req.params.id);
   });
   ok(res, state);
 });

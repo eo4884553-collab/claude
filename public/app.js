@@ -329,10 +329,18 @@ function buildCurvaCaixa(checkpoints, dataInicio) {
     return Math.round(total * 100) / 100;
   });
 
-  const hoje = STATE.resumo.dataReferenciaCronograma;
-  const liberadoHoje = STATE.resumo.caixaLiberadaAcumulada;
-  const executedRaw = [{ data: hoje, valor: liberadoHoje }];
-  const executed = checkpoints.map((cp) => (cp >= hoje ? liberadoHoje : 0));
+  // Executado: acumulado real das liberações do CAIXA (medições mensais
+  // lançadas pelo proprietário), na data real de cada uma — igual à curva do
+  // empreiteiro, agora que temos data por liberação (antes só existia o total
+  // acumulado até "hoje", sem histórico por data).
+  const liberacoes = [...(STATE.liberacoesCaixa || [])].sort((a, b) => (a.data || '').localeCompare(b.data || ''));
+  let acc = 0;
+  const executedRaw = liberacoes.map((l) => { acc += Number(l.valor) || 0; return { data: l.data, valor: Math.round(acc * 100) / 100 }; });
+  const executed = checkpoints.map((cp) => {
+    let last = 0;
+    for (const e of executedRaw) { if (e.data <= cp) last = e.valor; else break; }
+    return last;
+  });
 
   return { checkpoints, planned, executed, executedRaw, totalValue };
 }
@@ -544,7 +552,7 @@ function renderPainel() {
   }));
   chartsGrid.appendChild(renderSCurveCard({
     title: 'Curva S — Caixa (liberação PCI)',
-    subtitle: 'Crédito CAIXA liberado acumulado — planejado (etapas PCI) x executado (posição atual; o banco não fornece histórico de datas de cada liberação)',
+    subtitle: 'Crédito CAIXA liberado acumulado — planejado (etapas PCI, cronograma macro) x executado (liberações reais lançadas em Liberação PCI, por data)',
     curve: curvaCaixa, hojeStr: hoje,
   }));
   root.appendChild(chartsGrid);
@@ -1592,13 +1600,13 @@ function renderPCI() {
   panel.innerHTML = `
     <div class="panel-header">
       <div>
-        <h2>Liberação PCI — cronograma de liberação do financiamento CAIXA</h2>
-        <div class="muted">Liberação automática segue o % geral de obra (aba Lançar Avanços) dentro da faixa de cada etapa. Use "liberado manual" quando o banco liberar valor diferente do calculado.</div>
+        <h2>Liberação PCI — cronograma macro planejado do financiamento CAIXA</h2>
+        <div class="muted">Planejamento das 6 grandes etapas (soma o crédito CAIXA total de R$ 1.500.000,00) — não é a fonte do "quanto já foi liberado" (o banco libera por medição mensal própria, sem seguir esse cronograma por % de obra; veja "Liberações reais do CAIXA" abaixo).</div>
       </div>
     </div>
     <div class="table-scroll"><table class="data"><thead><tr>
       <th>Etapa</th><th class="wrap">Descrição</th><th class="num">% limite acumulado</th><th class="num">Valor da etapa</th>
-      <th class="num">Mês programado</th><th class="num">% liberado</th><th class="num">Valor liberado</th><th class="num">Liberado manual (opcional)</th>
+      <th class="num">Mês programado</th>
     </tr></thead><tbody></tbody>
     <tfoot></tfoot></table></div>
   `;
@@ -1611,35 +1619,81 @@ function renderPCI() {
     tr.appendChild(td(numberInput({ value: Math.round(e.percLimiteAcumulado * 1000) / 10, step: '0.1', onSave: (v) => api('PUT', `/api/liberacao-pci/${e.etapa}`, { percLimiteAcumulado: v / 100 }) })));
     tr.appendChild(td(numberInput({ value: e.valor, onSave: (v) => api('PUT', `/api/liberacao-pci/${e.etapa}`, { valor: v }) })));
     tr.appendChild(td(numberInput({ value: e.mesProgramado, step: '1', onSave: (v) => api('PUT', `/api/liberacao-pci/${e.etapa}`, { mesProgramado: v }) })));
-    tr.appendChild(td(`<span class="num">${pct(e.percLiberado)}</span>`));
-    tr.appendChild(td(`<span class="num" style="font-weight:700">${money(e.valorLiberado)}</span> <span class="badge ${e.origemLiberado === 'manual' ? 'blue' : 'gray'}">${e.origemLiberado}</span>`));
-    const manualTd = document.createElement('td');
-    const manualInput = numberInput({
-      value: e.liberadoManual == null ? '' : e.liberadoManual,
-      manual: e.liberadoManual != null,
-      onSave: (v) => api('PUT', `/api/liberacao-pci/${e.etapa}`, { liberadoManual: v }),
-    });
-    manualInput.placeholder = 'automático';
-    manualTd.appendChild(manualInput);
-    if (e.liberadoManual != null) {
-      const clearBtn = document.createElement('button');
-      clearBtn.className = 'btn small'; clearBtn.style.marginLeft = '6px'; clearBtn.textContent = 'auto';
-      clearBtn.onclick = () => api('PUT', `/api/liberacao-pci/${e.etapa}`, { liberadoManual: null });
-      manualTd.appendChild(clearBtn);
-    }
-    tr.appendChild(manualTd);
     tbody.appendChild(tr);
   }
   const tfoot = panel.querySelector('tfoot');
   tfoot.innerHTML = `<tr>
     <td colspan="3">TOTAL</td>
     <td class="num">${money(STATE.resumo.creditoCaixaTotalPCI)}</td>
-    <td></td><td></td>
-    <td class="num">${money(STATE.resumo.caixaLiberadaAcumulada)}</td>
     <td></td>
   </tr>`;
 
+  root.appendChild(renderLiberacoesCaixaPanel());
   root.appendChild(renderLiberacaoPorCategoria());
+}
+
+// Liberações reais do CAIXA: cada medição efetivamente paga pelo banco,
+// lançada manualmente pelo proprietário conforme o extrato (mesmo padrão da
+// aba "Contas a pagar" da planilha original, que registra "MEDIÇÃO 01, 02,
+// 03..." por mês). É essa lista — não o cronograma de etapas acima — que
+// define resumo.caixaLiberadaAcumulada e "Saldo caixa (a liberar)".
+function renderLiberacoesCaixaPanel() {
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <h2>Liberações reais do CAIXA</h2>
+        <div class="muted">Lance aqui cada medição que o banco efetivamente liberou (data e valor), conforme o extrato. O total dessa lista é o que o app usa como "já liberado" — o Saldo caixa (a liberar) é sempre R$ 1.500.000,00 menos esse total.</div>
+      </div>
+      <button class="btn primary" id="btnNovaLiberacao">+ Nova liberação</button>
+    </div>
+    <div class="table-scroll"></div>
+  `;
+  const wrap = panel.querySelector('.table-scroll');
+  const liberacoes = STATE.liberacoesCaixa || [];
+  if (!liberacoes.length) {
+    wrap.innerHTML = '<div class="muted">Nenhuma liberação lançada ainda.</div>';
+  } else {
+    wrap.innerHTML = `<table class="data"><thead><tr><th>Data</th><th class="num">Valor</th><th class="wrap">Observação</th><th></th></tr></thead>
+      <tbody>${liberacoes.map((l) => `
+        <tr>
+          <td>${dateBR(l.data)}</td>
+          <td class="num">${money(l.valor)}</td>
+          <td class="wrap">${esc(l.obs)}</td>
+          <td><button class="icon-btn" data-del="${l.id}">🗑</button></td>
+        </tr>`).join('')}</tbody>
+      <tfoot><tr><td>TOTAL</td><td class="num">${money(STATE.resumo.caixaLiberadaAcumulada)}</td><td colspan="2"></td></tr></tfoot></table>`;
+  }
+  panel.querySelectorAll('[data-del]').forEach((btn) => {
+    btn.onclick = () => { if (confirm('Remover esta liberação?')) api('DELETE', `/api/liberacoes-caixa/${btn.dataset.del}`); };
+  });
+  panel.querySelector('#btnNovaLiberacao').onclick = () => openNovaLiberacaoCaixaModal();
+  return panel;
+}
+
+function openNovaLiberacaoCaixaModal() {
+  openModal('Nova liberação real do CAIXA', (body, close) => {
+    const form = document.createElement('form');
+    form.className = 'form-grid';
+    form.innerHTML = `
+      <label>Data<input name="data" type="date" required /></label>
+      <label>Valor (R$)<input name="valor" type="number" step="0.01" required /></label>
+      <label style="grid-column: 1 / -1">Observação (ex.: "Medição 05")<input name="obs" /></label>
+      <div style="grid-column: 1 / -1; display:flex; gap:8px; justify-content:flex-end;">
+        <button type="button" class="btn" id="cancelBtn">Cancelar</button>
+        <button type="submit" class="btn primary">Adicionar</button>
+      </div>
+    `;
+    form.querySelector('#cancelBtn').onclick = close;
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const payload = Object.fromEntries(new FormData(form).entries());
+      await api('POST', '/api/liberacoes-caixa', payload);
+      close();
+    });
+    body.appendChild(form);
+  });
 }
 
 // Mesmas 20 categorias do Detalhamento FC, mas com a verba CAIXA (crédito PCI

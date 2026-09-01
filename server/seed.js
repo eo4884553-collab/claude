@@ -220,6 +220,22 @@ function buildLiberacaoPCI() {
   ];
 }
 
+// Liberações reais do CAIXA (medições mensais efetivamente pagas pelo banco,
+// extraídas da aba "Contas a pagar" da planilha original — linhas E12:E15,
+// rotuladas "MEDIÇÃO 01/02/03..."). Confirmado que essas datas/valores NÃO
+// seguem o cronograma de 6 etapas da Liberação PCI (que é só o planejamento
+// macro): o banco libera por medição própria, e o total até aqui
+// (R$436.476,18) é bem menor do que os R$642.099,62 que o cálculo por % de
+// obra geral estimaria.
+function buildLiberacoesCaixa() {
+  return [
+    { id: 'liberacao-1', data: '2026-06-01', valor: 177000.6, obs: 'Medição 01' },
+    { id: 'liberacao-2', data: '2026-07-01', valor: 132580.8, obs: 'Medição 02' },
+    { id: 'liberacao-3', data: '2026-08-01', valor: 35823.6, obs: 'Medição 03' },
+    { id: 'liberacao-4', data: '2026-09-01', valor: 91071.18, obs: 'Medição 04' },
+  ];
+}
+
 function buildSeed() {
   const parametros = {
     recursoProprioPlanejado: 571143.99,
@@ -256,6 +272,7 @@ function buildSeed() {
     parametros,
     categorias: buildCategorias(parametros.contratoTotalEmpreiteiro),
     liberacaoPCI: buildLiberacaoPCI(),
+    liberacoesCaixa: buildLiberacoesCaixa(),
     parcelas: buildParcelas(),
     historicoAvancos: [],
     fluxoCaixaAjustes: [], // lançamentos manuais extras na aba Fluxo de Caixa (ex.: ajustes, estornos)

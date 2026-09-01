@@ -161,38 +161,14 @@ function computeCategoria(cat, dataRef) {
   };
 }
 
-/** Calcula a liberação de caixa (PCI) etapa a etapa, com base no % de obra geral. */
-function computeLiberacaoPCI(liberacaoPCI, percObraGeral) {
-  const etapas = [...liberacaoPCI].sort((a, b) => a.etapa - b.etapa);
-  let liberadoAcumuladoAnterior = 0;
-  return etapas.map((etapa, idx) => {
-    const valor = Number(etapa.valor) || 0;
-    const limiteSuperior = Number(etapa.percLimiteAcumulado) || 0;
-    const limiteInferior = idx === 0 ? 0 : Number(etapas[idx - 1].percLimiteAcumulado) || 0;
-
-    let fracaoAuto;
-    if (etapa.etapa === 1) {
-      // Aquisição do lote: liberação integral assim que a obra é iniciada.
-      fracaoAuto = percObraGeral > 0 ? 1 : 0;
-    } else {
-      const faixa = limiteSuperior - limiteInferior;
-      fracaoAuto = faixa > 0 ? clamp((percObraGeral - limiteInferior) / faixa, 0, 1) : 0;
-    }
-    const valorLiberadoAuto = round2(valor * fracaoAuto);
-
-    const temOverride = etapa.liberadoManual !== null && etapa.liberadoManual !== undefined;
-    const valorLiberado = temOverride ? round2(Number(etapa.liberadoManual)) : valorLiberadoAuto;
-
-    liberadoAcumuladoAnterior += valorLiberado;
-    return {
-      ...etapa,
-      limiteInferior,
-      valorLiberadoAuto,
-      valorLiberado,
-      origemLiberado: temOverride ? 'manual' : 'auto',
-      percLiberado: valor > 0 ? round2((valorLiberado / valor) * 10000) / 10000 : 0,
-    };
-  });
+// Etapas do cronograma macro planejado de liberação do CAIXA (Liberação PCI) —
+// puramente informativo/planejamento (define o total de 1.5M e a curva
+// "planejada"). O valor REALMENTE liberado pelo banco não segue esse
+// cronograma por % de obra (confirmado contra a planilha original: o banco
+// libera por medição mensal, em valores e datas que não batem com as 6
+// etapas) — é rastreado à parte em liberacoesCaixa (ver recompute()).
+function computeLiberacaoPCI(liberacaoPCI) {
+  return [...liberacaoPCI].sort((a, b) => a.etapa - b.etapa);
 }
 
 function computeParcela(parcela) {
@@ -237,9 +213,17 @@ function recompute(state) {
     peso: totalOrcadoCategorias > 0 ? round2((c.valorOrcado / totalOrcadoCategorias) * 10000) / 10000 : 0,
   }));
 
-  const liberacaoPCI = computeLiberacaoPCI(state.liberacaoPCI || [], percObraGeral);
-  const caixaLiberadaAcumulada = round2(sum(liberacaoPCI, (e) => e.valorLiberado));
+  const liberacaoPCI = computeLiberacaoPCI(state.liberacaoPCI || []);
   const creditoCaixaTotalPCI = round2(sum(liberacaoPCI, (e) => e.valor));
+
+  // Liberações reais do CAIXA (medições mensais efetivamente pagas pelo banco,
+  // lançadas manualmente pelo proprietário conforme o extrato) — substitui o
+  // cronograma de etapas como fonte de "quanto já foi liberado": confirmado
+  // contra a planilha original que o banco não libera seguindo o % de obra
+  // das 6 etapas, mas em medições mensais próprias (ex.: Junho R$177.000,60,
+  // Julho R$132.580,80, Agosto R$35.823,60, Setembro R$91.071,18).
+  const liberacoesCaixa = [...(state.liberacoesCaixa || [])].sort((a, b) => (a.data || '').localeCompare(b.data || ''));
+  const caixaLiberadaAcumulada = round2(sum(liberacoesCaixa, (l) => l.valor));
 
   const parcelas = (state.parcelas || [])
     .map(computeParcela)
@@ -336,10 +320,9 @@ function recompute(state) {
 
   const startMonthKey = monthKeyFromDateStr(state.meta?.dataInicio) || monthKeyFromDateStr(parcelas[0]?.vencimento) || 'sem-data';
   bucket(startMonthKey, 1).entradaRecursoProprio += recursoProprioPlanejado;
-  for (const etapa of liberacaoPCI) {
-    if (!etapa.valorLiberado) continue;
-    const mk = startMonthKey === 'sem-data' ? 'sem-data' : addMonthsToKey(startMonthKey, (Number(etapa.mesProgramado) || 1) - 1);
-    bucket(mk, 1).entradaCaixaPCI += etapa.valorLiberado;
+  for (const lib of liberacoesCaixa) {
+    const mk = monthKeyFromDateStr(lib.data) || 'sem-data';
+    bucket(mk, quinzenaFromDateStr(lib.data) || 1).entradaCaixaPCI += Number(lib.valor) || 0;
   }
   for (const p of parcelas) {
     const dataOcorrencia = p.vencimento || p.vencPlanejado || null;
@@ -456,6 +439,7 @@ function recompute(state) {
     parametros: state.parametros,
     categorias,
     liberacaoPCI,
+    liberacoesCaixa,
     parcelas,
     fluxoCaixaMensal,
     fluxoCaixaAjustes: state.fluxoCaixaAjustes || [],
