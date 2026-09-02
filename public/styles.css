@@ -114,6 +114,26 @@ main#app { padding: 20px 22px 60px 22px; max-width: 1400px; margin: 0 auto; }
 }
 .panel-header h2 { margin: 0; font-size: 15px; }
 .panel-header .muted { font-size: 12px; }
+.panel-title-row { display: flex; align-items: center; gap: 4px; }
+
+/* ---------- Ícone "i" — informação complementar sob demanda ---------- */
+.info-icon-wrap { position: relative; display: inline-flex; }
+.info-icon {
+  width: 16px; height: 16px; border-radius: 50%; padding: 0;
+  border: 1px solid var(--border); background: var(--bg); color: var(--muted);
+  font: italic 700 10px Georgia, 'Times New Roman', serif;
+  line-height: 1; display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.info-icon:hover { background: var(--primary-soft); color: var(--primary); border-color: var(--primary); }
+.info-tooltip {
+  display: none; position: absolute; top: 22px; left: 0; z-index: 30;
+  width: 280px; max-width: min(320px, 80vw);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; box-shadow: 0 4px 16px rgba(0,0,0,.14);
+  font-size: 12px; font-weight: 400; color: var(--ink, #1b2430); line-height: 1.45;
+}
+.info-tooltip.open { display: block; }
 
 /* ---------- Glossário de rastreabilidade ---------- */
 .glossary-grid { display: flex; flex-direction: column; gap: 10px; }
@@ -129,10 +149,21 @@ main#app { padding: 20px 22px 60px 22px; max-width: 1400px; margin: 0 auto; }
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
 }
+.glossary-item .glossary-title-group { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .glossary-item .glossary-label { font-weight: 700; font-size: 13.5px; }
 .glossary-item .glossary-value { font-weight: 700; font-size: 15px; color: var(--primary); }
-.glossary-item .glossary-formula { font-size: 12.5px; margin-top: 4px; }
+.glossary-item .glossary-toggle { font-size: 11px; color: var(--primary); white-space: nowrap; }
+.glossary-item .glossary-detail { display: none; }
+.glossary-item.open .glossary-detail { display: block; }
+.glossary-item .glossary-formula { font-size: 12.5px; margin-top: 6px; }
 .glossary-item .glossary-fonte { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 
 /* ---------- Tables ---------- */

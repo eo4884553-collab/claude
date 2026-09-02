@@ -92,6 +92,26 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// Ícone "i" — mostra informação complementar (o que a janela calcula, de onde
+// vem, etc.) só quando clicado, mantendo o cabeçalho do painel limpo.
+function infoIconHtml(text) {
+  return `<span class="info-icon-wrap"><button type="button" class="info-icon" aria-label="Mais informações">i</button><div class="info-tooltip">${esc(text)}</div></span>`;
+}
+function setupInfoIcons() {
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.info-icon');
+    if (btn) {
+      const tip = btn.nextElementSibling;
+      const wasOpen = tip.classList.contains('open');
+      document.querySelectorAll('.info-tooltip.open').forEach((t) => t.classList.remove('open'));
+      if (!wasOpen) tip.classList.add('open');
+      e.stopPropagation();
+      return;
+    }
+    document.querySelectorAll('.info-tooltip.open').forEach((t) => t.classList.remove('open'));
+  });
+}
+
 // Descrição curta da origem do "Saldo de recurso próprio disponível" — usada
 // nos cards do Dashboard/Painel; 'itens' = calculado pela lista itemizada em
 // Parâmetros, 'manual' = valor único forçado (avançado), 'auto' = cálculo
@@ -163,9 +183,9 @@ function renderSaldoContaPanel({ title, subtitle, filtroLabel, getFiltro, setFil
   const panel = document.createElement('div');
   panel.className = 'panel';
   panel.innerHTML = `
-    <div class="panel-header"><div>
+    <div class="panel-header"><div class="panel-title-row">
       <h2>${esc(title)}</h2>
-      <div class="muted">${subtitle}</div>
+      ${infoIconHtml(subtitle)}
     </div></div>
     <div class="saldoContaFiltroSlot" style="margin-bottom:8px"></div>
     <div class="card-value" style="font-size:32px; font-weight:700; margin-top:4px"></div>
@@ -263,9 +283,9 @@ function renderCustoTotalPeriodoPanel() {
   panel.className = 'panel';
   panel.innerHTML = `
     <div class="panel-header">
-      <div>
+      <div class="panel-title-row">
         <h2>Custo total do período</h2>
-        <div class="muted">Soma o "Custo total" das quinzenas marcadas abaixo (mesma coluna de Contas a Pagar) — marque uma ou várias quinzenas para ver o total só daquele período.</div>
+        ${infoIconHtml('Soma o "Custo total" das quinzenas marcadas abaixo (mesma coluna de Contas a Pagar) — marque uma ou várias quinzenas para ver o total só daquele período.')}
       </div>
       <div style="display:flex; gap:8px;">
         <button type="button" class="btn small" id="btnCustoTodas">Marcar todas</button>
@@ -801,9 +821,9 @@ function renderSCurveCard({ title, subtitle, curve, hojeStr }) {
 
   card.innerHTML = `
     <div class="panel-header">
-      <div>
+      <div class="panel-title-row">
         <h2>${esc(title)}</h2>
-        <div class="muted">${esc(subtitle)}</div>
+        ${infoIconHtml(subtitle)}
       </div>
       <div class="scurve-legend">
         <span><span class="scurve-key executed"></span>Executado</span>
@@ -904,8 +924,8 @@ function renderPainel() {
   // Seleção de categoria: mostra claramente o que falta pagar para o item clicado.
   const selPanel = document.createElement('div');
   selPanel.className = 'panel';
-  selPanel.innerHTML = `<div class="panel-header"><div><h2>O que pagar — selecione uma categoria</h2>
-    <div class="muted">Clique numa linha para ver claramente o valor orçado, já medido/pago e o saldo restante do contrato dessa categoria.</div></div></div>`;
+  selPanel.innerHTML = `<div class="panel-header"><div class="panel-title-row"><h2>O que pagar — selecione uma categoria</h2>
+    ${infoIconHtml('Clique numa linha para ver claramente o valor orçado, já medido/pago e o saldo restante do contrato dessa categoria.')}</div></div>`;
   const selBody = document.createElement('div');
   selBody.className = 'painel-select-body';
 
@@ -1024,9 +1044,9 @@ function renderDashboard() {
   panel.className = 'panel';
   panel.innerHTML = `
     <div class="panel-header">
-      <div>
+      <div class="panel-title-row">
         <h2>Contas a Pagar — parcelas quinzenais (documento enviado ao cliente)</h2>
-        <div class="muted">Editável em qualquer campo. "Total a transferir" e "Custo total" são calculados automaticamente, mas podem ser sobrescritos quando o valor real vier diferente do planejado.</div>
+        ${infoIconHtml('Editável em qualquer campo. "Total a transferir" e "Custo total" são calculados automaticamente, mas podem ser sobrescritos quando o valor real vier diferente do planejado.')}
       </div>
       <button class="btn primary" id="btnNovaParcela">+ Nova parcela</button>
     </div>
@@ -1194,9 +1214,9 @@ function renderAvancos() {
   info.className = 'panel';
   info.innerHTML = `
     <div class="panel-header">
-      <div>
+      <div class="panel-title-row">
         <h2>Avanço acumulado por categoria</h2>
-        <div class="muted">Somatório de todas as quinzenas já lançadas para cada categoria — o teto de medição é sempre 100% (nunca mais que o valor orçado do item ou da categoria). Para lançar um novo avanço, use o formulário acima.</div>
+        ${infoIconHtml('Somatório de todas as quinzenas já lançadas para cada categoria — o teto de medição é sempre 100% (nunca mais que o valor orçado do item ou da categoria). Para lançar um novo avanço, use o formulário acima.')}
       </div>
       <div class="legend">
         <span><span class="dot manual"></span>% lançado (quinzena)</span>
@@ -1288,9 +1308,9 @@ function renderHistoricoAvancosPanel() {
   panel.className = 'panel';
   panel.innerHTML = `
     <div class="panel-header">
-      <div>
+      <div class="panel-title-row">
         <h2>Histórico de avanços — planejados e realizados</h2>
-        <div class="muted">Edite o % ou a data de qualquer avanço já lançado, ou confirme o status (Planejado → Realizado) quando o avanço acontecer de fato. Um avanço Planejado fica visível aqui, mas só entra no % efetivo da categoria depois de confirmado como Realizado. Filtre por quinzena para ver só aquele período.</div>
+        ${infoIconHtml('Edite o % ou a data de qualquer avanço já lançado, ou confirme o status (Planejado → Realizado) quando o avanço acontecer de fato. Um avanço Planejado fica visível aqui, mas só entra no % efetivo da categoria depois de confirmado como Realizado. Filtre por quinzena para ver só aquele período.')}
       </div>
       <button class="btn primary" id="btnNovoAvanco">+ Novo avanço</button>
     </div>
@@ -1437,9 +1457,9 @@ function renderCronograma() {
   panel.className = 'panel';
   panel.innerHTML = `
     <div class="panel-header">
-      <div>
+      <div class="panel-title-row">
         <h2>Cronograma físico — previsto × realizado</h2>
-        <div class="muted">Datas previstas extraídas da planilha original (aba Cronograma de obra). O % realizado é o mesmo lançado na aba "Lançar Avanços" — edite aqui também. A barra clara mostra a janela planejada; a barra colorida mostra o quanto já foi executado; a linha âmbar marca a data de hoje (${dateBR(r.dataReferenciaCronograma)}). Filtre por quinzena para ver só as categorias cujo último avanço foi lançado naquele período.</div>
+        ${infoIconHtml(`Datas previstas extraídas da planilha original (aba Cronograma de obra). O % realizado é o mesmo lançado na aba "Lançar Avanços" — edite aqui também. A barra clara mostra a janela planejada; a barra colorida mostra o quanto já foi executado; a linha âmbar marca a data de hoje (${dateBR(r.dataReferenciaCronograma)}). Filtre por quinzena para ver só as categorias cujo último avanço foi lançado naquele período.`)}
       </div>
       <div class="gantt-legend">
         <span><span class="dot" style="background:#d7deec"></span>Janela planejada</span>
@@ -1550,9 +1570,9 @@ function renderDetalhamento() {
   const header = document.createElement('div');
   header.className = 'panel';
   header.innerHTML = `<div class="panel-header">
-    <div>
+    <div class="panel-title-row">
       <h2>Detalhamento FC — orçado x realizado por item</h2>
-      <div class="muted">Cada categoria soma seus itens automaticamente. Edite valores realizados, orçados, datas e forma de pagamento; adicione ou remova itens conforme o lançamento real. Itens individuais podem custar mais que o orçado inicial (estouros reais); o teto de 100% vale só para a categoria como um todo.</div>
+      ${infoIconHtml('Cada categoria soma seus itens automaticamente. Edite valores realizados, orçados, datas e forma de pagamento; adicione ou remova itens conforme o lançamento real. Itens individuais podem custar mais que o orçado inicial (estouros reais); o teto de 100% vale só para a categoria como um todo.')}
     </div>
   </div>`;
   header.appendChild(renderGastoCartaoMensal());
@@ -1702,9 +1722,9 @@ function renderLancamentoQuinzenaPanel() {
   panel.className = 'panel';
   panel.innerHTML = `
     <div class="panel-header">
-      <div>
+      <div class="panel-title-row">
         <h2>Lançar avanço da quinzena</h2>
-        <div class="muted">Escolha a quinzena (mês/1ª ou 2ª parcela) e informe o novo % acumulado de cada categoria que avançou — o valor orçado de cada categoria rateia o valor gerado. O sistema desconta o cartão (já lançado no Detalhamento FC), sugere o PIX ao empreiteiro e à administração, e gera automaticamente a parcela em Contas a Pagar para essa quinzena exata.</div>
+        ${infoIconHtml('Escolha a quinzena (mês/1ª ou 2ª parcela) e informe o novo % acumulado de cada categoria que avançou — o valor orçado de cada categoria rateia o valor gerado. O sistema desconta o cartão (já lançado no Detalhamento FC), sugere o PIX ao empreiteiro e à administração, e gera automaticamente a parcela em Contas a Pagar para essa quinzena exata.')}
       </div>
     </div>
   `;
@@ -1873,9 +1893,9 @@ function renderLiberacaoPorCategoriaResumo() {
   panel.className = 'panel';
   panel.innerHTML = `
     <div class="panel-header">
-      <div>
+      <div class="panel-title-row">
         <h2>O que pagar x o que liberar, por categoria</h2>
-        <div class="muted">Empreiteiro (PIX, contrato) é pago por quinzena; CAIXA (crédito PCI) é liberado mensalmente. Cada categoria tem sua própria verba nas duas fontes. Para ajustar liberação manual, use a aba Liberação PCI.</div>
+        ${infoIconHtml('Empreiteiro (PIX, contrato) é pago por quinzena; CAIXA (crédito PCI) é liberado mensalmente. Cada categoria tem sua própria verba nas duas fontes. Para ajustar liberação manual, use a aba Liberação PCI.')}
       </div>
     </div>
     <div class="table-scroll"><table class="data"><thead><tr>
@@ -1944,9 +1964,9 @@ function renderFluxo() {
   panel.className = 'panel';
   panel.innerHTML = `
     <div class="panel-header">
-      <div>
+      <div class="panel-title-row">
         <h2>Fluxo de caixa por mês e parcela</h2>
-        <div class="muted">Organizado como em Contas a Pagar — cada mês dividido em 1º e 2º Parcela, na ordem cronológica correta. Agregado a partir de todas as parcelas lançadas (planejadas e realizadas) mais ajustes manuais. A liberação de caixa (PCI) aparece no mês originalmente programado de cada etapa. As colunas "Entrada/Saída Realizada" e "Planejada" mostram, dentro do total de cada quinzena, quanto já foi confirmado (status Realizado nas parcelas/liberações) e quanto ainda é planejamento. Para o saldo já efetivamente realizado, veja os cards do Dashboard. Filtre por quinzena para ver só aquele período.</div>
+        ${infoIconHtml('Organizado como em Contas a Pagar — cada mês dividido em 1º e 2º Parcela, na ordem cronológica correta. Agregado a partir de todas as parcelas lançadas (planejadas e realizadas) mais ajustes manuais. A liberação de caixa (PCI) aparece no mês originalmente programado de cada etapa. As colunas "Entrada/Saída Realizada" e "Planejada" mostram, dentro do total de cada quinzena, quanto já foi confirmado (status Realizado nas parcelas/liberações) e quanto ainda é planejamento. Para o saldo já efetivamente realizado, veja os cards do Dashboard. Filtre por quinzena para ver só aquele período.')}
       </div>
       <button class="btn primary" id="btnNovoAjuste">+ Ajuste manual</button>
     </div>
@@ -2059,9 +2079,9 @@ function renderPCI() {
   panel.className = 'panel';
   panel.innerHTML = `
     <div class="panel-header">
-      <div>
+      <div class="panel-title-row">
         <h2>Liberação PCI — cronograma macro planejado do financiamento CAIXA</h2>
-        <div class="muted">Planejamento das 6 grandes etapas (soma o crédito CAIXA total de R$ 1.500.000,00) — não é a fonte do "quanto já foi liberado" (o banco libera por medição mensal própria, sem seguir esse cronograma por % de obra; veja "Liberações reais do CAIXA" abaixo).</div>
+        ${infoIconHtml('Planejamento das 6 grandes etapas (soma o crédito CAIXA total de R$ 1.500.000,00) — não é a fonte do "quanto já foi liberado" (o banco libera por medição mensal própria, sem seguir esse cronograma por % de obra; veja "Liberações reais do CAIXA" abaixo).')}
       </div>
     </div>
     <div class="table-scroll"><table class="data"><thead><tr>
@@ -2105,9 +2125,9 @@ function renderLiberacoesCaixaPanel() {
   const custoLoteExecutado = Number((STATE.parametros || {}).custoLoteExecutado) || 0;
   panel.innerHTML = `
     <div class="panel-header">
-      <div>
+      <div class="panel-title-row">
         <h2>Liberações reais do CAIXA</h2>
-        <div class="muted">Lance aqui cada medição do banco (data, valor e status). Marque como Planejado uma medição ainda não confirmada e mude para Realizado quando o banco liberar de fato — só Realizado entra no total liberado e no card "Valor caixa liberado". A soma das medições Realizado com o valor que o CAIXA já passou do lote (${money(custoLoteExecutado)}, ajustável em Parâmetros) é o card "Valor caixa liberado". Filtre por quinzena para ver só as liberações daquele período (o valor do lote, sem data específica, some do filtro).</div>
+        ${infoIconHtml(`Lance aqui cada medição do banco (data, valor e status). Marque como Planejado uma medição ainda não confirmada e mude para Realizado quando o banco liberar de fato — só Realizado entra no total liberado e no card "Valor caixa liberado". A soma das medições Realizado com o valor que o CAIXA já passou do lote (${money(custoLoteExecutado)}, ajustável em Parâmetros) é o card "Valor caixa liberado". Filtre por quinzena para ver só as liberações daquele período (o valor do lote, sem data específica, some do filtro).`)}
       </div>
       <button class="btn primary" id="btnNovaLiberacao">+ Nova liberação</button>
     </div>
@@ -2206,9 +2226,9 @@ function renderLiberacaoPorCategoria() {
   panel.className = 'panel';
   panel.innerHTML = `
     <div class="panel-header">
-      <div>
+      <div class="panel-title-row">
         <h2>Liberação por categoria (verba CAIXA)</h2>
-        <div class="muted">Mesmas 20 categorias do Detalhamento FC — aqui com a verba do crédito CAIXA (não a do contrato do empreiteiro). Libera automaticamente na mesma proporção do % de avanço efetivo da categoria. Use "liberado manual" quando o banco liberar valor diferente do calculado.</div>
+        ${infoIconHtml('Mesmas 20 categorias do Detalhamento FC — aqui com a verba do crédito CAIXA (não a do contrato do empreiteiro). Libera automaticamente na mesma proporção do % de avanço efetivo da categoria. Use "liberado manual" quando o banco liberar valor diferente do calculado.')}
       </div>
     </div>
     <div class="table-scroll"><table class="data"><thead><tr>
@@ -2268,9 +2288,9 @@ function renderConsumosRecursoProprioPanel() {
   panel.className = 'panel';
   panel.innerHTML = `
     <div class="panel-header">
-      <div>
+      <div class="panel-title-row">
         <h2>Saldo de recurso próprio disponível</h2>
-        <div class="muted">Recurso próprio planejado (${money(STATE.parametros.recursoProprioPlanejado)}) menos cada item que já consumiu esse saldo. O recurso próprio só foi usado nos meses antes da liberação do CAIXA começar a fluir, mas pode ser usado de novo se o fluxo de caixa exigir — lance/edite os itens conforme o extrato real.</div>
+        ${infoIconHtml(`Recurso próprio planejado (${money(STATE.parametros.recursoProprioPlanejado)}) menos cada item que já consumiu esse saldo. O recurso próprio só foi usado nos meses antes da liberação do CAIXA começar a fluir, mas pode ser usado de novo se o fluxo de caixa exigir — lance/edite os itens conforme o extrato real.`)}
       </div>
       <button class="btn primary" id="btnNovoConsumo">+ Novo item</button>
     </div>
@@ -2473,23 +2493,32 @@ function renderRastreabilidade() {
   root.innerHTML = '';
   const panel = document.createElement('div');
   panel.className = 'panel';
-  panel.innerHTML = `<div class="panel-header">
+  panel.innerHTML = `<div class="panel-header"><div class="panel-title-row">
     <h2>Rastreabilidade dos números</h2>
-    <div class="muted">De onde vem cada indicador mostrado no app — fórmula e origem dos dados. Somente leitura.</div>
-  </div>`;
+    ${infoIconHtml('De onde vem cada indicador mostrado no app — fórmula e origem dos dados. Somente leitura.')}
+  </div></div>`;
   const grid = document.createElement('div');
   grid.className = 'glossary-grid';
   for (const item of glossarioItens()) {
     const el = document.createElement('div');
     el.className = 'glossary-item';
     el.innerHTML = `
-      <div class="glossary-top">
-        <span class="glossary-label">${esc(item.label)}</span>
-        <span class="glossary-value">${esc(item.valor)}</span>
+      <button type="button" class="glossary-top">
+        <span class="glossary-title-group">
+          <span class="glossary-label">${esc(item.label)}</span>
+          <span class="glossary-value">${esc(item.valor)}</span>
+        </span>
+        <span class="glossary-toggle">mais ▾</span>
+      </button>
+      <div class="glossary-detail">
+        <div class="glossary-formula">${esc(item.formula)}</div>
+        <div class="glossary-fonte">Fonte: ${esc(item.fonte)}</div>
       </div>
-      <div class="glossary-formula">${esc(item.formula)}</div>
-      <div class="glossary-fonte">Fonte: ${esc(item.fonte)}</div>
     `;
+    el.querySelector('.glossary-top').addEventListener('click', () => {
+      const isOpen = el.classList.toggle('open');
+      el.querySelector('.glossary-toggle').textContent = isOpen ? 'menos ▴' : 'mais ▾';
+    });
     grid.appendChild(el);
   }
   panel.appendChild(grid);
@@ -2499,10 +2528,10 @@ function renderRastreabilidade() {
 function renderRegrasCalculoPanel() {
   const panel = document.createElement('div');
   panel.className = 'panel';
-  panel.innerHTML = `<div class="panel-header">
+  panel.innerHTML = `<div class="panel-header"><div class="panel-title-row">
     <h2>Regras de cálculo (avançado)</h2>
-    <div class="muted">Parâmetros que alteram fórmulas usadas em todo o app. Ver detalhes na aba Rastreabilidade.</div>
-  </div>`;
+    ${infoIconHtml('Parâmetros que alteram fórmulas usadas em todo o app. Ver detalhes na aba Rastreabilidade.')}
+  </div></div>`;
   const form = document.createElement('div');
   form.className = 'form-grid';
 
@@ -2566,7 +2595,7 @@ function renderParametros() {
 
   const paramPanel = document.createElement('div');
   paramPanel.className = 'panel';
-  paramPanel.innerHTML = `<div class="panel-header"><h2>Parâmetros financeiros</h2><div class="muted">Base para os cálculos de liberação de caixa e saldo disponível.</div></div>`;
+  paramPanel.innerHTML = `<div class="panel-header"><div class="panel-title-row"><h2>Parâmetros financeiros</h2>${infoIconHtml('Base para os cálculos de liberação de caixa e saldo disponível.')}</div></div>`;
   const paramForm = document.createElement('div');
   paramForm.className = 'form-grid';
   const paramFields = [
@@ -2676,4 +2705,5 @@ function openModal(title, buildBody) {
    Init
    ========================================================================== */
 setupTabs();
+setupInfoIcons();
 loadState().catch((e) => { console.error(e); toast('Erro ao carregar dados.', true); });
