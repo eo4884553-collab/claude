@@ -63,10 +63,13 @@ nav.groups{padding:14px 10px 20px; flex:1;}
 .navitem .ic{width:16px; text-align:center; opacity:.85; font-size:13px;}
 #sidebar .foot{padding:14px 20px 18px; border-top:1px solid var(--border-soft); font-size:11px; color:var(--text-faint);}
 #sidebar .foot button{
-  font-family:inherit; font-size:11px; color:var(--text-dim); background:var(--surface-2); border:1px solid var(--border);
-  border-radius:6px; padding:5px 9px; cursor:pointer; margin-top:8px;
+  display:block; width:100%; font-family:inherit; font-size:11px; color:var(--text-dim); background:var(--surface-2); border:1px solid var(--border);
+  border-radius:6px; padding:6px 9px; cursor:pointer; margin-top:8px; text-align:left;
 }
-#sidebar .foot button:hover{color:var(--bad);}
+#sidebar .foot #exportBtn{color:var(--accent-strong); border-color:var(--accent); background:var(--accent-soft);}
+#sidebar .foot #exportBtn:hover{background:var(--accent); color:var(--accent-ink);}
+#sidebar .foot #resetBtn:hover{color:var(--bad);}
+#sidebar .foot button[disabled]{opacity:.6; cursor:default;}
 
 #main{flex:1; min-width:0; padding:28px 36px 80px; max-width:1360px;}
 .topline{display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:22px; flex-wrap:wrap;}
@@ -191,6 +194,7 @@ h1 .info-ic, h2 .info-ic{ top:-3px; }
     <nav class="groups" id="navgroups"></nav>
     <div class="foot">
       Dados salvos automaticamente neste navegador.
+      <button id="exportBtn" type="button">⭳ Exportar HTML</button>
       <button id="resetBtn" type="button">Restaurar exemplo</button>
     </div>
   </aside>
@@ -201,6 +205,10 @@ h1 .info-ic, h2 .info-ic{ top:-3px; }
 
 <script>
 'use strict';
+/* __PIQUINZADA_STATE_SEED__ */
+/* captura o HTML "limpo" (antes do primeiro render) para poder gerar um
+   arquivo .html autonomo com os dados atuais embutidos — ver exportSnapshot() */
+const PRISTINE_HTML = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
 /* ==================================================================
    PIQUINZADA 2027 — TORRE DE CONTROLE PMO
    ================================================================== */
@@ -456,8 +464,14 @@ const STORAGE_KEY = 'piquinzada2027_pmo_v2';
 let state = loadState();
 function loadState(){
   try{
-    const raw = localStorage.getItem(STORAGE_KEY);
     const fresh = freshState();
+    // arquivo exportado (ver exportSnapshot): abre direto com os dados daquele instante
+    if(window.__PIQUINZADA_STATE__){
+      const seeded = window.__PIQUINZADA_STATE__;
+      Object.keys(fresh).forEach(k=>{ if(!(k in seeded)) seeded[k] = fresh[k]; });
+      return seeded;
+    }
+    const raw = localStorage.getItem(STORAGE_KEY);
     if(!raw) return fresh;
     const parsed = JSON.parse(raw);
     Object.keys(fresh).forEach(k=>{ if(!(k in parsed)) parsed[k] = fresh[k]; });
@@ -1792,6 +1806,46 @@ $('#resetBtn').addEventListener('click', ()=>{
     render();
   }
 });
+
+/* ---------------- exportar snapshot .html (com os dados atuais embutidos) ---------------- */
+function buildExportHtml(){
+  const marker = '/* __PIQUINZADA_STATE_SEED__ */';
+  // escapa "<" para nenhum dado do usuario (ex.: um texto com tag de script) poder fechar a tag na marra
+  const safeJson = JSON.stringify(state).replace(/</g, '\\u003c');
+  const seedScript = `<\/script><script>window.__PIQUINZADA_STATE__=${safeJson};<\/script><script>`;
+  return PRISTINE_HTML.replace(marker, marker + seedScript);
+}
+function exportFilename(){
+  return `piquinzada-2027-${todayISO()}.html`;
+}
+async function exportSnapshot(){
+  const btn = $('#exportBtn');
+  const original = btn.textContent;
+  btn.disabled = true;
+  const html = buildExportHtml();
+  const filename = exportFilename();
+  let downloads = null;
+  try{ downloads = (window.claude && window.claude.use) ? await window.claude.use('downloads') : null; }catch(_){ downloads = null; }
+  try{
+    if(downloads){
+      const res = await downloads.save({filename, data: html});
+      btn.textContent = res.status==='saved' ? '✓ Exportado' : '✓ Enviado';
+    } else {
+      // fora do visualizador de Artifacts (ex.: arquivo reaberto localmente) — download comum do navegador
+      const blob = new Blob([html], {type:'text/html'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(()=>URL.revokeObjectURL(url), 4000);
+      btn.textContent = '✓ Exportado';
+    }
+  }catch(err){
+    btn.textContent = (err && err.code==='declined') ? original : '✕ Falhou, tente de novo';
+  }
+  setTimeout(()=>{ btn.textContent = original; btn.disabled = false; }, 2200);
+}
+$('#exportBtn').addEventListener('click', exportSnapshot);
 
 render();
 </script>
