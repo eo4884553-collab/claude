@@ -1,0 +1,1791 @@
+<title>Piquinzada Torre de Controle</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#FDF6FA; --surface:#FFFFFF; --surface-2:#FBE9F4; --border:#F1D3E5; --border-soft:#F7E4EF;
+  --text:#241220; --text-dim:#6B5566; --text-faint:#A0899B;
+  --accent:#E01F7F; --accent-strong:#B8156A; --accent-soft:#FBDCEE; --accent-ink:#FFFFFF;
+  --lime:#7C9A1A; --lime-bg:#C4E23C; --lime-soft:#EEF6D2; --gold:#C97A17; --gold-soft:#FBE9CE;
+  --good:#1E8F63; --good-soft:#DCF0E6; --warn:#C1780F; --warn-soft:#FBEACC; --bad:#D6323F; --bad-soft:#FAE0E2;
+  --shadow: 0 1px 2px rgba(120,10,70,.07), 0 8px 24px -12px rgba(120,10,70,.20);
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1C1420; --surface:#271A28; --surface-2:#33213A; --border:#472C46; --border-soft:#38243A;
+    --text:#F7ECF3; --text-dim:#C7A8C0; --text-faint:#8C6D89;
+    --accent:#FF4FA3; --accent-strong:#FF7CBC; --accent-soft:#4A1E3C; --accent-ink:#1C0C17;
+    --lime:#D2ED5C; --lime-bg:#3D4A16; --lime-soft:#2C3512; --gold:#F2A63D; --gold-soft:#3D2C14;
+    --good:#3DBE87; --good-soft:#1C3A2C; --warn:#E0A234; --warn-soft:#3D2E14; --bad:#F0616D; --bad-soft:#3E1E22;
+    --shadow: 0 1px 2px rgba(0,0,0,.35), 0 12px 30px -14px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1C1420; --surface:#271A28; --surface-2:#33213A; --border:#472C46; --border-soft:#38243A;
+  --text:#F7ECF3; --text-dim:#C7A8C0; --text-faint:#8C6D89;
+  --accent:#FF4FA3; --accent-strong:#FF7CBC; --accent-soft:#4A1E3C; --accent-ink:#1C0C17;
+  --lime:#D2ED5C; --lime-bg:#3D4A16; --lime-soft:#2C3512; --gold:#F2A63D; --gold-soft:#3D2C14;
+  --good:#3DBE87; --good-soft:#1C3A2C; --warn:#E0A234; --warn-soft:#3D2E14; --bad:#F0616D; --bad-soft:#3E1E22;
+  --shadow: 0 1px 2px rgba(0,0,0,.35), 0 12px 30px -14px rgba(0,0,0,.6);
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:'Public Sans',system-ui,-apple-system,Segoe UI,sans-serif;
+  font-size:14px; line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,.display{font-family:'Fraunces',Georgia,serif; text-wrap:balance;}
+.mono, .num, input[type="number"], td.num, .kpi-value{font-family:'IBM Plex Mono',ui-monospace,monospace; font-variant-numeric:tabular-nums;}
+a{color:var(--accent-strong);}
+::selection{background:var(--accent-soft);}
+
+/* ---------- layout shell ---------- */
+#app{display:flex; min-height:100vh;}
+#sidebar{
+  width:236px; flex:none; background:var(--surface); border-right:1px solid var(--border);
+  display:flex; flex-direction:column; position:sticky; top:0; height:100vh; overflow-y:auto;
+}
+#sidebar .brand{padding:22px 20px 14px; border-bottom:1px solid var(--border-soft);}
+#sidebar .brand .mark{font-family:'Fraunces',serif; font-size:20px; font-weight:600; letter-spacing:-.01em;}
+#sidebar .brand .sub{font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.08em; margin-top:2px;}
+nav.groups{padding:14px 10px 20px; flex:1;}
+.navgroup{margin-bottom:16px;}
+.navgroup .label{font-size:10.5px; text-transform:uppercase; letter-spacing:.09em; color:var(--text-faint); padding:0 10px 6px;}
+.navitem{
+  display:flex; align-items:center; gap:9px; width:100%; text-align:left; padding:8px 10px; border-radius:8px;
+  border:none; background:transparent; color:var(--text-dim); font-size:13.2px; font-family:inherit; cursor:pointer;
+  margin-bottom:1px;
+}
+.navitem:hover{background:var(--surface-2); color:var(--text);}
+.navitem.active{background:var(--accent-soft); color:var(--accent-strong); font-weight:600;}
+.navitem .ic{width:16px; text-align:center; opacity:.85; font-size:13px;}
+#sidebar .foot{padding:14px 20px 18px; border-top:1px solid var(--border-soft); font-size:11px; color:var(--text-faint);}
+#sidebar .foot button{
+  font-family:inherit; font-size:11px; color:var(--text-dim); background:var(--surface-2); border:1px solid var(--border);
+  border-radius:6px; padding:5px 9px; cursor:pointer; margin-top:8px;
+}
+#sidebar .foot button:hover{color:var(--bad);}
+
+#main{flex:1; min-width:0; padding:28px 36px 80px; max-width:1360px;}
+.topline{display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:22px; flex-wrap:wrap;}
+.topline h1{font-size:26px; margin:0; font-weight:600;}
+.topline .desc{color:var(--text-dim); font-size:13px; max-width:60ch;}
+
+/* ---------- primitives ---------- */
+.card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow);}
+.section{margin-bottom:34px;}
+.section > h2{font-size:17px; margin:0 0 3px; font-weight:600;}
+.section > .sub{color:var(--text-dim); font-size:12.5px; margin-bottom:14px;}
+
+.pillrow{display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap;}
+.pill{
+  padding:6px 13px; border-radius:99px; border:1px solid var(--border); background:var(--surface);
+  font-size:12.5px; font-weight:600; cursor:pointer; color:var(--text-dim);
+}
+.pill.active{background:var(--text); color:var(--bg); border-color:var(--text);}
+.pill[data-scen="base"].active{background:var(--accent); border-color:var(--accent); color:var(--accent-ink);}
+
+.badge{display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:99px; font-size:11.5px; font-weight:700; letter-spacing:.02em;}
+.badge.good{background:var(--good-soft); color:var(--good);}
+.badge.warn{background:var(--warn-soft); color:var(--warn);}
+.badge.bad{background:var(--bad-soft); color:var(--bad);}
+.badge .dot{width:6px; height:6px; border-radius:50%; background:currentColor;}
+
+label.field{display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--text-dim);}
+label.field .lbl{font-weight:500; color:var(--text);}
+input, select{
+  font-family:inherit; font-size:13px; padding:7px 9px; border-radius:7px; border:1px solid var(--border);
+  background:var(--surface); color:var(--text); width:100%;
+}
+input:focus, select:focus{outline:2px solid var(--accent); outline-offset:1px; border-color:var(--accent);}
+input[readonly]{background:var(--surface-2); color:var(--text-dim);}
+table{border-collapse:collapse; width:100%; font-size:12.6px;}
+th{text-align:left; font-size:10.8px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-faint); font-weight:600; padding:7px 10px; border-bottom:1px solid var(--border);}
+td{padding:7px 10px; border-bottom:1px solid var(--border-soft); vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+td.num, th.num{text-align:right;}
+.tablewrap{overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface);}
+table input, table select{padding:5px 7px; font-size:12.4px;}
+tfoot td{font-weight:700; border-top:1px solid var(--border); border-bottom:none;}
+
+.grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:16px;}
+.grid2{display:grid; grid-template-columns:repeat(2,1fr); gap:16px;}
+.gridN{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px;}
+@media (max-width:1000px){.grid3{grid-template-columns:1fr;} .grid2{grid-template-columns:1fr;}}
+
+.kpi{padding:14px 16px; border-radius:var(--radius); border:1px solid var(--border); background:var(--surface);}
+.kpi .lbl{font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.05em;}
+.kpi .kpi-value{font-size:20px; font-weight:600; margin-top:3px;}
+
+.scenario-card{border-radius:14px; border:1px solid var(--border); background:var(--surface); box-shadow:var(--shadow); overflow:hidden;}
+.scenario-card .head{padding:14px 18px; color:#fff; display:flex; justify-content:space-between; align-items:center;}
+.scenario-card .head .name{font-family:'Fraunces',serif; font-size:16.5px; font-weight:600;}
+.scenario-card .body{padding:14px 18px 16px;}
+.kv{display:flex; justify-content:space-between; align-items:baseline; padding:5px 0; border-bottom:1px dashed var(--border-soft); font-size:12.6px; gap:10px;}
+.kv:last-child{border-bottom:none;}
+.kv .k{color:var(--text-dim);}
+.kv .v{font-weight:600; text-align:right;}
+.kv.total .k, .kv.total .v{font-weight:700; font-size:13.6px;}
+
+.section-hdr-row{background:var(--surface-2);}
+.section-hdr-row td{font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); padding-top:11px;}
+
+.callout{border-radius:var(--radius); border:1px solid var(--border); padding:16px 18px; background:var(--surface);}
+.callout.accent{border-color:var(--accent); background:var(--accent-soft);}
+.recbox{display:grid; grid-template-columns:1fr 1fr; gap:14px 26px;}
+.recbox .item .lbl{font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.05em;}
+.recbox .item .val{font-size:14.5px; font-weight:600; margin-top:2px;}
+
+.hint{font-size:11.5px; color:var(--text-faint); margin-top:3px;}
+.heatgrid{display:grid; grid-template-columns:70px repeat(5,1fr); gap:4px; max-width:520px;}
+.heatcell{display:flex; align-items:center; justify-content:center; height:44px; border-radius:6px; font-weight:700; font-size:13px;}
+.heataxis{display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--text-dim);}
+
+button.btn{
+  font-family:inherit; font-size:12.5px; font-weight:600; padding:8px 14px; border-radius:8px; cursor:pointer;
+  border:1px solid var(--border); background:var(--surface); color:var(--text);
+}
+button.btn.primary{background:var(--accent); border-color:var(--accent); color:var(--accent-ink);}
+button.btn.danger{color:var(--bad);}
+button.btn.small{padding:5px 9px; font-size:11.5px;}
+button.rm{border:none; background:transparent; color:var(--text-faint); cursor:pointer; font-size:15px; padding:2px 6px;}
+button.rm:hover{color:var(--bad);}
+
+.divider{height:1px; background:var(--border); margin:22px 0;}
+.sticky-note{font-size:11.5px; color:var(--text-faint); font-style:italic;}
+[hidden]{display:none !important;}
+.chartwrap{position:relative; height:260px;}
+.helptext{font-size:12.5px; color:var(--text-dim); line-height:1.6;}
+.legend-dot{display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:6px;}
+
+/* info tooltip icon */
+.info-ic{
+  position:relative; display:inline-flex; align-items:center; justify-content:center;
+  width:16px; height:16px; border-radius:50%; background:var(--surface-2); border:1px solid var(--border);
+  color:var(--text-dim); font-size:10.5px; font-weight:700; font-family:'Public Sans',sans-serif; font-style:italic;
+  cursor:help; vertical-align:middle; margin-left:5px; top:-1px;
+}
+.info-ic:hover, .info-ic:focus-visible{background:var(--accent); border-color:var(--accent); color:var(--accent-ink); outline:none;}
+.info-ic .tip{
+  position:absolute; z-index:40; left:50%; bottom:calc(100% + 8px); transform:translateX(-50%) translateY(4px);
+  width:min(280px, 60vw); background:var(--text); color:var(--bg); font-size:12px; font-weight:400; font-style:normal;
+  line-height:1.45; padding:9px 11px; border-radius:8px; box-shadow:var(--shadow);
+  opacity:0; pointer-events:none; transition:opacity .12s ease, transform .12s ease;
+}
+.info-ic .tip::after{
+  content:''; position:absolute; top:100%; left:50%; transform:translateX(-50%);
+  border:5px solid transparent; border-top-color:var(--text);
+}
+.info-ic:hover .tip, .info-ic:focus-visible .tip{opacity:1; transform:translateX(-50%) translateY(0);}
+h1 .info-ic, h2 .info-ic{ top:-3px; }
+</style>
+
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="mark">🎭 Piquinzada</div>
+      <div class="sub">Torre de Controle · PMO 2027</div>
+    </div>
+    <nav class="groups" id="navgroups"></nav>
+    <div class="foot">
+      Dados salvos automaticamente neste navegador.
+      <button id="resetBtn" type="button">Restaurar exemplo</button>
+    </div>
+  </aside>
+  <main id="main">
+    <div id="view"></div>
+  </main>
+</div>
+
+<script>
+'use strict';
+/* ==================================================================
+   PIQUINZADA 2027 — TORRE DE CONTROLE PMO
+   ================================================================== */
+const SCEN = ['conservador','base','agressivo'];
+const SCEN_LABEL = {conservador:'Conservador', base:'Base', agressivo:'Agressivo'};
+const SCEN_COLOR = {conservador:'var(--bad)', base:'var(--accent)', agressivo:'var(--good)'};
+const SCEN_HEX = {conservador:'#D6323F', base:'#E01F7F', agressivo:'#5C7A16'};
+const SCEN_DESC = {
+  conservador: 'Hipóteses prudentes: menor público, ticket mais baixo, patrocínio menos avançado. Normal que dê resultado negativo — serve de gatilho de risco.',
+  base: 'A expectativa mais provável da gestão. É o cenário de referência usado em Fluxo de Caixa, Break-even, Score e Gates.',
+  agressivo: 'Cenário otimista, porém tecnicamente possível: maior público, ticket mais alto e patrocínio mais avançado.',
+};
+
+/* ---------------- helpers ---------------- */
+const $ = (sel, el) => (el||document).querySelector(sel);
+const $$ = (sel, el) => Array.from((el||document).querySelectorAll(sel));
+const sum = arr => arr.reduce((a,b)=>a+(Number(b)||0),0);
+const sumObj = obj => sum(Object.values(obj));
+const clamp = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
+const fmtCur = v => (isFinite(v)?v:0).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0});
+const fmtCur2 = v => (isFinite(v)?v:0).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:2});
+const fmtPct = (v,d=1) => (isFinite(v)?v*100:0).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d})+'%';
+const fmtInt = v => Math.round(isFinite(v)?v:0).toLocaleString('pt-BR');
+const fmtNum = (v,d=1) => (isFinite(v)?v:0).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});
+function getPath(obj, path){ return path.reduce((o,k)=>(o==null?o:o[k]), obj); }
+function setPath(obj, path, value){ let o=obj; for(let i=0;i<path.length-1;i++) o=o[path[i]]; o[path[path.length-1]] = value; }
+function uid(){ return Math.random().toString(36).slice(2,9); }
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function addDays(iso, n){ const d = new Date(iso+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
+function daysBetween(a,b){ return Math.round((new Date(b+'T00:00:00') - new Date(a+'T00:00:00'))/86400000); }
+
+/* ---------------- default data (valores reais lançados pelo cliente) ---------------- */
+const LOT_LABELS = ['Pré-venda','1º lote','2º lote','3º lote','Último lote'];
+const LOT_DEFAULTS = {
+  conservador: [[150,32],[150,126],[150,315],[150,189],[150,38]],
+  base:        [[130,50],[160,200],[190,500],[210,300],[260,60]],
+  agressivo:   [[250,142],[250,568],[250,1419],[250,851],[250,170]],
+};
+// cotas comerciais reais + probabilidade de fechamento (direta, editável por linha)
+const TIERS = [
+  ['Apresenta', 60000, 0, 0.70, 'Marca no nome do evento + palco + mídia principal', 'Banco, bebida, varejo, telecom'],
+  ['Cota titular', 17000, 1, 0.70, 'Marca no nome do evento + palco + mídia principal', 'Banco, bebida, varejo, telecom'],
+  ['Premium', 12000, 1, 0.70, 'Alta exposição + ativações + camarote', 'Bebidas, varejo, construção'],
+  ['Master Plus', 8000, 2, 0.65, 'Logo premium + ativações + conteúdo', 'Empresas regionais e nacionais'],
+  ['Master 1', 5500, 2, 0.60, 'Logo + espaço de ativação', 'Comércio e serviços'],
+  ['Diamante', 4500, 3, 0.55, 'Logo em peças selecionadas', 'Parceiros locais'],
+  ['Ouro', 3000, 4, 1.55, 'Logo em peças selecionadas', 'Parceiros locais'],
+  ['Prata', 1300, 6, 2.55, 'Logo em peças selecionadas', 'Parceiros locais'],
+];
+const TIER_PROB_MULT = {conservador:0.8, base:1.0, agressivo:1.0};
+const TIER_QTY_MULT = {conservador:1.0, base:1.0, agressivo:1.3};
+const STAGE_LIST = ['Contratado','Proposta Enviada','Negociação','Prospecção'];
+const DEFAULT_STAGE_PROB = {'Contratado':1.0,'Proposta Enviada':0.5,'Negociação':0.3,'Prospecção':0.15};
+
+const ESTRUTURA_ITEMS = [
+  ['palco','Palco',[22400,0,30800]], ['som','Som',[14400,0,19800]],
+  ['iluminacao','Iluminação',[11200,0,15400]], ['led','Painel de LED',[9600,0,13200]],
+  ['gerador','Gerador',[7200,0,9900]], ['banheiros','Banheiros químicos',[4800,0,6600]],
+  ['gradil','Gradil / contenção',[4000,0,5500]], ['tendas','Tendas',[3200,0,4400]],
+  ['mobiliario','Mobiliário',[1600,0,2200]], ['camarote','Estrutura de camarote',[800,0,1100]],
+  ['decoracao','Decoração',[800,0,1100]],
+];
+const OPERACAO_ITEMS = [
+  ['seguranca','Segurança',[12600,8400,16800]], ['brigadistas','Brigadistas',[3150,2100,4200]],
+  ['bombeiro','Bombeiro civil',[2250,1500,3000]], ['ambulancia','Ambulância / SAMU privado',[2250,1500,3000]],
+  ['limpeza','Limpeza',[4050,2700,5400]], ['recepcao','Recepção / credenciamento',[2700,1800,3600]],
+  ['producao','Produção geral',[9900,6600,13200]], ['equipeApoio','Equipe de apoio',[4050,2700,5400]],
+  ['licencas','Licenças e alvarás',[1800,1200,2400]], ['ecad','ECAD',[1350,900,1800]],
+  ['seguroEvento','Seguro do evento',[900,600,1200]],
+];
+const MARKETING_ITEMS = [
+  ['trafegoPago','Tráfego pago',[1600,3200,14400]], ['influenciadores','Influenciadores',[800,1600,7200]],
+  ['designer','Designer',[500,1000,4500]], ['fotografia','Fotografia',[500,1000,4500]],
+  ['filmagem','Filmagem',[500,1000,4500]], ['assessoria','Assessoria de imprensa',[400,800,3600]],
+  ['midia','Mídia (rádio/OOH)',[400,800,3600]], ['impressos','Impressos',[200,400,1800]],
+  ['comunicacaoVisual','Comunicação visual',[100,200,900]],
+];
+const LOGISTICA_ITEMS = [
+  ['transporte','Transporte',[4200,4200,11200]], ['passagens','Passagens',[2250,2250,6000]],
+  ['hospedagem','Hospedagem',[4500,4500,12000]], ['alimentacao','Alimentação',[1800,1800,4800]],
+  ['camarim','Camarim',[1500,1500,4000]], ['transfers','Transfers',[750,750,2000]],
+];
+const ATRACOES_ITEMS = [
+  ['cachePrincipal','Cachê atração principal',[40000,40000,200000]],
+  ['cacheApoio','Cachês das atrações de apoio',[8000,6000,14000]],
+  ['djs','DJs',[6000,4500,10500]],
+  ['bandaAbertura','Banda de abertura',[4000,3000,7000]],
+  ['participacoesEspeciais','Participações especiais',[2000,1500,3500]],
+];
+const COST_GROUPS = [
+  {key:'atracoes', label:'Atrações', items:ATRACOES_ITEMS},
+  {key:'estrutura', label:'Estrutura', items:ESTRUTURA_ITEMS},
+  {key:'operacao', label:'Operação', items:OPERACAO_ITEMS},
+  {key:'marketing', label:'Marketing', items:MARKETING_ITEMS},
+  {key:'logistica', label:'Logística', items:LOGISTICA_ITEMS},
+];
+// mapeamento de cada item para o "grupo Orçamento x Real" (9 categorias solicitadas)
+const OXR_GROUP = {
+  'atracoes.cachePrincipal':'Atrações','atracoes.cacheApoio':'Atrações','atracoes.djs':'Atrações',
+  'atracoes.bandaAbertura':'Atrações','atracoes.participacoesEspeciais':'Atrações',
+  'estrutura.palco':'Estrutura','estrutura.som':'Estrutura','estrutura.iluminacao':'Estrutura',
+  'estrutura.led':'Estrutura','estrutura.gerador':'Estrutura','estrutura.banheiros':'Estrutura',
+  'estrutura.gradil':'Estrutura','estrutura.tendas':'Estrutura','estrutura.mobiliario':'Estrutura',
+  'estrutura.camarote':'Estrutura','estrutura.decoracao':'Estrutura',
+  'operacao.seguranca':'Segurança','operacao.brigadistas':'Segurança','operacao.bombeiro':'Segurança','operacao.ambulancia':'Segurança',
+  'operacao.limpeza':'Produção','operacao.recepcao':'Produção','operacao.producao':'Produção','operacao.equipeApoio':'Produção',
+  'operacao.licencas':'Licenças','operacao.ecad':'Licenças','operacao.seguroEvento':'Licenças',
+  'marketing.trafegoPago':'Marketing','marketing.influenciadores':'Marketing','marketing.designer':'Marketing',
+  'marketing.fotografia':'Marketing','marketing.filmagem':'Marketing','marketing.assessoria':'Marketing',
+  'marketing.midia':'Marketing','marketing.impressos':'Marketing','marketing.comunicacaoVisual':'Marketing',
+  'logistica.transporte':'Logística','logistica.passagens':'Logística','logistica.hospedagem':'Logística',
+  'logistica.alimentacao':'Logística','logistica.camarim':'Logística','logistica.transfers':'Logística',
+  'outros.despesasAdm':'Administrativo', 'outros.tributosValor':'Administrativo', 'outros.contingencia':'Contingência',
+  'outros.custoTaxaIngressos':'Produção', 'outros.openBar':'Produção',
+};
+const OXR_CATS = ['Atrações','Estrutura','Produção','Segurança','Marketing','Logística','Licenças','Administrativo','Contingência'];
+
+function entradaDefaults(idx, scen){
+  const o = {
+    capMax:[1000,1110,3500][idx], conversaoPct:[0.7,0.85,0.9][idx], cortesias:[0,0,0][idx],
+    taxaPlataforma:0.07, taxaCartao:0.0, tributosIngressos:0.0,
+    consumoBruto:[0,0,0][idx],
+    custoOpConsumoPct: [0,0,0][idx],
+    outrasReceitas:0,
+    atracoes:{}, estrutura:{}, operacao:{}, marketing:{}, logistica:{},
+    outros:{
+      tributosReceita:0, taxasBancarias:0,
+      comissoes:0, despesasAdm:0,
+      contingenciaPct:[0.07,0.08,0.10][idx],
+      openBarValor:[50,59,50][idx],
+    },
+  };
+  ATRACOES_ITEMS.forEach(([k,,vals])=> o.atracoes[k]=vals[idx]);
+  ESTRUTURA_ITEMS.forEach(([k,,vals])=> o.estrutura[k]=vals[idx]);
+  OPERACAO_ITEMS.forEach(([k,,vals])=> o.operacao[k]=vals[idx]);
+  MARKETING_ITEMS.forEach(([k,,vals])=> o.marketing[k]=vals[idx]);
+  LOGISTICA_ITEMS.forEach(([k,,vals])=> o.logistica[k]=vals[idx]);
+  return o;
+}
+function round4(x){ return Math.round(x*10000)/10000; }
+
+function vendaDefaults(scen){
+  return LOT_DEFAULTS[scen].map(([preco,qtd],i)=>({id:uid(), lote:LOT_LABELS[i], preco, qtd}));
+}
+function patrocinioDefaults(scen){
+  return TIERS.map(([cota,valor,qtd,prob,contra,perfil],i)=>({
+    id:uid(), cota, valorUnit: valor,
+    qtd: Math.round(qtd*TIER_QTY_MULT[scen]),
+    prob: Math.round(prob*TIER_PROB_MULT[scen]*10000)/10000,
+    estagio: 'Negociação', contrapartida:contra, perfil,
+  }));
+}
+const CUSTOS_SPEC = (()=>{
+  const rows = [];
+  COST_GROUPS.forEach(g=> g.items.forEach(([key,label])=> rows.push({
+    grupo:g.label, path:[g.key,key], subcategoria:label,
+  })));
+  rows.push({grupo:'Administrativo', path:['outros','despesasAdm'], subcategoria:'Despesas administrativas'});
+  rows.push({grupo:'Administrativo', path:['outros','tributosValor'], subcategoria:'Tributos, taxas bancárias e comissões (sobre a receita)', computed:true});
+  rows.push({grupo:'Produção', path:['outros','custoTaxaIngressos'], subcategoria:'Taxas sobre ingressos (plataforma/cartão/tributos)', computed:true});
+  rows.push({grupo:'Produção', path:['outros','openBar'], subcategoria:'Open bar (valor por pessoa × capacidade)', computed:true});
+  rows.push({grupo:'Contingência', path:['outros','contingencia'], subcategoria:'Reserva de contingência', computed:true});
+  return rows;
+})();
+function custosDefaults(){
+  return CUSTOS_SPEC.map((spec,i)=>({
+    id:uid(), grupo:spec.grupo, path:spec.path, subcategoria:spec.subcategoria, computed:!!spec.computed,
+    fornecedor:'', descricao:'',
+    orcamentoAprovado:null, valorContratado:0, valorPago:0,
+    dataPrevista:'', dataPagamento:'', status:'Não iniciado',
+    responsavel: (spec.grupo==='Administrativo'||spec.grupo==='Contingência')?'Financeiro':(spec.grupo==='Marketing'?'Marketing':'Produção'), obs:'',
+  }));
+}
+const RISK_CATS = ['Financeiro','Comercial','Ingressos','Patrocínio','Artista','Fornecedor','Infraestrutura','Segurança','Licenciamento','Clima','Marketing','Operação'];
+const RESPOSTAS = ['Mitigar','Aceitar','Transferir','Evitar'];
+const STATUS_RISCO = ['Aberto','Em andamento','Mitigado','Encerrado'];
+const RISCOS_DEFAULT = [
+  ['Financeiro','Déficit de caixa antes do evento','Concentração de custos (sinais/cachês) no início do cronograma','Necessidade de aporte emergencial ou atraso de pagamentos',3,4,'Mitigar','Negociar prazos de pagamento e escalonar sinais; manter linha de crédito de contingência'],
+  ['Financeiro','Estouro do orçamento aprovado (BAC)','Reestimativas subdimensionadas em itens de estrutura/produção','Redução da margem ou necessidade de patrocínio extra',3,3,'Mitigar','Acompanhar EAC semanalmente na aba Custos; travar reserva de contingência'],
+  ['Comercial','Baixa velocidade de vendas de ingressos','Concorrência de eventos na mesma data/região','Meta de pagantes não atingida, pressão sobre break-even',3,4,'Mitigar','Reforçar campanha de tráfego pago e ação de lotes promocionais'],
+  ['Ingressos','Excesso de cortesias/permutas','Falta de política formal de cortesias','Redução da receita líquida de bilheteria',2,3,'Mitigar','Definir e aprovar limite máximo de cortesias por área'],
+  ['Patrocínio','Não fechamento das cotas em negociação','Ciclo de decisão do patrocinador mais longo que o cronograma do evento','Cobertura do cachê principal comprometida',4,5,'Mitigar','Priorizar pipeline com follow-up semanal; ter plano B de cotas menores'],
+  ['Patrocínio','Inadimplência de patrocinador contratado','Fragilidade financeira do patrocinador','Receita esperada não realizada',2,4,'Transferir','Formalizar contrato com sinal e garantias; nota fiscal antecipada'],
+  ['Artista','Cancelamento da atração principal','Agenda do artista, motivos de saúde ou força maior','Reformulação total do line-up e possível cancelamento do evento',2,5,'Mitigar','Cláusula contratual de contingência e seguro de cancelamento'],
+  ['Artista','Aumento do cachê em renegociação','Alta demanda de mercado pela atração','Piora do break-even e da margem',2,3,'Aceitar','Fechar contrato com valor travado o quanto antes (ver Gate 2)'],
+  ['Fornecedor','Fornecedor-chave (estrutura/som) não entrega','Concentração em fornecedor único, sem plano B','Impacto direto na qualidade e segurança do evento',2,4,'Mitigar','Contratar fornecedor backup e prever multas contratuais'],
+  ['Infraestrutura','Falha estrutural (palco/gradil/energia)','Montagem fora do padrão técnico ou fiscalização insuficiente','Risco à segurança do público e possível interdição',2,5,'Mitigar','Laudo técnico (ART) obrigatório e vistoria antes da abertura dos portões'],
+  ['Segurança','Incidente de segurança/tumulto','Efetivo de segurança subdimensionado para o público','Risco à integridade física e exposição jurídica/reputacional',2,5,'Mitigar','Dimensionar segurança conforme normas e plano de emergência'],
+  ['Licenciamento','Atraso ou negativa de alvará/licença','Documentação incompleta ou prazo apertado junto ao órgão público','Risco de cancelamento ou adiamento do evento',2,5,'Mitigar','Iniciar processo de licenciamento com folga mínima de 90 dias'],
+  ['Clima','Condições climáticas adversas no dia do evento','Evento ao ar livre em período de chuvas','Queda de público, custos extras de cobertura, risco de segurança',3,3,'Transferir','Contratar seguro climático e plano de contingência de cobertura'],
+  ['Marketing','Baixo engajamento das campanhas digitais','Criativos/mensagens não performando como esperado','Reforça o risco comercial de baixa venda de ingressos',3,3,'Mitigar','Testes A/B de criativos e realocação ágil de verba de mídia'],
+  ['Operação','Falha na operação de credenciamento/portaria','Equipe insuficiente ou sistema de check-in instável','Filas, atraso na abertura, insatisfação do público',3,2,'Mitigar','Testar sistema de credenciamento antes do evento e reforçar equipe'],
+  ['Operação','Acidente de trabalho na montagem/desmontagem','Prazos apertados e equipe terceirizada sem treinamento','Risco jurídico, atraso no cronograma físico',2,4,'Mitigar','Exigir NRs e treinamento de segurança de todos os fornecedores'],
+].map(r=>({id:uid(), categoria:r[0], risco:r[1], causa:r[2], consequencia:r[3], prob:r[4], impacto:r[5], resposta:r[6], plano:r[7], responsavel:'Produção', prazo:'', status:'Aberto'}));
+
+const FC_ENT_LABELS = ['Ingressos','Patrocínios','Bar / Ativações','Outras receitas'];
+const FC_ENT_KEYS = ['receitaIngressos','patrocinio','receitaConsumo','outras'];
+const FC_ENT_DEFAULT_PCT = [
+  [0,5,10,10,10,5,5,5,10,15,15,10],
+  [5,10,15,15,10,5,5,5,10,10,5,5],
+  [0,0,0,0,0,0,0,0,0,0,0,100],
+  [0,0,0,0,0,0,0,0,0,0,50,50],
+];
+const FC_SAI_LABELS = ['Atrações (cachês)','Estrutura','Operação (produção/segurança/licenças)','Marketing','Logística','Administrativo','Taxas sobre ingressos','Open bar','Contingência'];
+const FC_SAI_KEYS = ['subAtracoes','subEstrutura','subOperacao','subMarketing','subLogistica','despesasAdm','custoTaxaIngressos','openBar','contingenciaValor'];
+const FC_SAI_DEFAULT_PCT = [
+  [0,20,0,0,0,0,0,0,0,0,30,50],
+  [0,0,0,0,0,0,0,0,10,20,30,40],
+  [0,0,0,0,0,0,0,0,5,15,30,50],
+  [5,5,5,5,10,10,10,10,10,10,10,10],
+  [0,0,0,0,0,0,0,0,10,20,30,40],
+  [8,8,8,8,9,9,9,9,9,8,8,7],
+  [0,5,10,10,10,5,5,5,10,15,15,10],
+  [0,0,0,0,0,0,0,0,0,0,30,70],
+  [0,0,0,0,0,0,0,0,0,20,30,50],
+];
+const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+
+/* ---------------- state ---------------- */
+function freshState(){
+  const entradas = {}; const vendas = {}; const patrocinios = {};
+  SCEN.forEach((s,i)=>{ entradas[s]=entradaDefaults(i,s); vendas[s]=vendaDefaults(s); patrocinios[s]=patrocinioDefaults(s); });
+  return {
+    entradas, vendas, patrocinios,
+    stageProb: Object.assign({}, DEFAULT_STAGE_PROB),
+    custos: custosDefaults(),
+    riscos: RISCOS_DEFAULT.map(r=>Object.assign({},r)),
+    gates: {
+      pctPatrocinioMin:0.60, pctVendasMin:0.70, gate3:'Não',
+      resp:{g1:'Diretoria', g2:'Comercial', g3:'Produção', g4:'Operações', g5:'Direção Geral'},
+      prazo:{g1:'',g2:'',g3:'',g4:'',g5:''},
+      decisao:{g1:'Pendente',g2:'Pendente',g3:'Pendente',g4:'Pendente',g5:'Pendente'},
+    },
+    venda: { dataInicio: todayISO(), dataEvento: addDays(todayISO(), 150), vendidosHoje: 0 },
+    fluxo: {
+      saldoInicial:0, scen:'base',
+      pctEnt: FC_ENT_KEYS.reduce((acc,k,i)=>(acc[k]=FC_ENT_DEFAULT_PCT[i].map(x=>x/100),acc),{}),
+      pctSai: FC_SAI_KEYS.reduce((acc,k,i)=>(acc[k]=FC_SAI_DEFAULT_PCT[i].map(x=>x/100),acc),{}),
+    },
+    params: { margemVerde:0.10, msegVerde:0.15, margemVermelho:0.0 },
+    breakeven: { scen:'base', simPatrocinio:100000, simIngressos:2500, simCache:220000, simMargem:0.10 },
+    sensibilidade: { scen:'base' },
+    score: {
+      weights:{margem:0.25, mseg:0.20, patro:0.15, exposicao:0.10, contratado:0.10, contingencia:0.05, riscos:0.10, capgiro:0.05},
+      metas:{margem:0.20, mseg:0.25},
+      bands:[[80,100,'VIÁVEL / GO'],[65,79.999,'VIÁVEL COM ATENÇÃO'],[50,64.999,'ALTO RISCO / REAVALIAR'],[0,49.999,'NÃO RECOMENDADO / NO-GO']],
+      scen:'base',
+    },
+    ui: { scenTab:{ entradas:'base', vendas:'base', patrocinios:'base', breakeven:'base', sensibilidade:'base' }, entradasSection:'evento' },
+  };
+}
+const STORAGE_KEY = 'piquinzada2027_pmo_v2';
+let state = loadState();
+function loadState(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const fresh = freshState();
+    if(!raw) return fresh;
+    const parsed = JSON.parse(raw);
+    Object.keys(fresh).forEach(k=>{ if(!(k in parsed)) parsed[k] = fresh[k]; });
+    return parsed;
+  }catch(e){ return freshState(); }
+}
+function saveState(){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
+}
+
+/* ---------------- compute engine (espelha as formulas da planilha) ---------------- */
+function computeVendas(scen){
+  const lots = state.vendas[scen];
+  const qtd = sum(lots.map(l=>l.qtd));
+  const receitaBruta = sum(lots.map(l=>l.preco*l.qtd));
+  const e = state.entradas[scen];
+  const taxaTotal = e.taxaPlataforma + e.taxaCartao + e.tributosIngressos;
+  const receitaLiquida = receitaBruta * (1 - taxaTotal);
+  const ticketMedio = qtd ? receitaBruta/qtd : 0;
+  return {qtd, receitaBruta, receitaLiquida, ticketMedio};
+}
+function computePatrocinio(scen){
+  const tiers = state.patrocinios[scen];
+  let nCotas=0, contratado=0, pipeline=0, esperado=0, nominal=0;
+  tiers.forEach(t=>{
+    const receitaAlvo = t.valorUnit*t.qtd;
+    const prob = Number(t.prob)||0;
+    const ponderada = receitaAlvo*prob;
+    nCotas += Number(t.qtd)||0; nominal += receitaAlvo;
+    if(t.estagio==='Contratado') contratado += ponderada; else pipeline += ponderada;
+    esperado += ponderada;
+  });
+  return {nCotas, contratado, pipeline, esperado, nominal};
+}
+function computeCustoGroups(scen){
+  const e = state.entradas[scen];
+  const subAtracoes = sumObj(e.atracoes), subEstrutura = sumObj(e.estrutura), subOperacao = sumObj(e.operacao),
+        subMarketing = sumObj(e.marketing), subLogistica = sumObj(e.logistica);
+  // custo direto "fixo": nao inclui taxa sobre ingressos nem open bar (ver computeScenario)
+  const custoDiretos = subAtracoes+subEstrutura+subOperacao+subMarketing+subLogistica+e.outros.despesasAdm;
+  return {subAtracoes, subEstrutura, subOperacao, subMarketing, subLogistica, custoDiretos};
+}
+function computeScenario(scen, overrides){
+  const e = state.entradas[scen];
+  const ov = overrides || {};
+  const v = computeVendas(scen);
+  const p = computePatrocinio(scen);
+  const g = computeCustoGroups(scen);
+
+  const pagantesFactor = ov.pagantesFactor ?? 1;
+  const ticketFactor = ov.ticketFactor ?? 1;
+  const patroFactor = ov.patroFactor ?? 1;
+  const consumoFactor = ov.consumoFactor ?? 1;
+  const cacheOverride = ov.cachePrincipal ?? e.atracoes.cachePrincipal;
+  const estruturaFactor = ov.estruturaFactor ?? 1;
+  const custoTotalFactor = ov.custoTotalFactor ?? 1;
+
+  // pagantes = capacidade x conversao da capacidade (igual ao modelo original: Premissas!D4*D6),
+  // e nao a soma bruta dos lotes de venda — o plano de lotes define o TICKET MEDIO, a conversao define o volume
+  const pagantes = e.capMax * e.conversaoPct * pagantesFactor;
+  const publicoTotal = pagantes + e.cortesias;
+  const ocupacao = e.capMax ? publicoTotal/e.capMax : 0;
+  const taxaTotal = e.taxaPlataforma + e.taxaCartao + e.tributosIngressos;
+  // receita de ingressos e reportada BRUTA (antes de taxas) — a taxa aparece como linha de custo,
+  // exatamente como no modelo original do cliente (Cenarios!D5 é bruto; a taxa vira Custos!B10)
+  const receitaIngressos = pagantes * v.ticketMedio * ticketFactor;
+  const custoTaxaIngressos = receitaIngressos * taxaTotal;
+
+  const margemConsumoPP = e.consumoBruto*(1-e.custoOpConsumoPct);
+  const receitaConsumo = margemConsumoPP * pagantes * consumoFactor;
+
+  const patrocinio = p.esperado * patroFactor;
+  const outras = e.outrasReceitas;
+  const receitaTotal = receitaIngressos + receitaConsumo + patrocinio + outras;
+
+  const subAtracoes = g.subAtracoes - e.atracoes.cachePrincipal + cacheOverride;
+  const subEstrutura = g.subEstrutura * estruturaFactor;
+  const custoDiretos = subAtracoes + subEstrutura + g.subOperacao + g.subMarketing + g.subLogistica + e.outros.despesasAdm;
+  const openBar = e.outros.openBarValor * e.capMax;
+  const tributosValor = (e.outros.tributosReceita + e.outros.taxasBancarias + e.outros.comissoes) * receitaTotal;
+  // base sujeita a contingencia: custos fixos + taxa sobre ingressos (igual ao modelo original)
+  const baseConting = custoDiretos + custoTaxaIngressos + tributosValor;
+  const contingenciaValor = baseConting * e.outros.contingenciaPct;
+  // open bar fica FORA da contingencia (mesma estrutura da planilha do cliente)
+  let custoTotal = (baseConting + contingenciaValor + openBar) * custoTotalFactor;
+
+  const resultado = receitaTotal - custoTotal;
+  const margem = receitaTotal ? resultado/receitaTotal : 0;
+  const receitaPP = pagantes ? receitaTotal/pagantes : 0;
+  const custoPP = pagantes ? custoTotal/pagantes : 0;
+  const contribPP = v.ticketMedio*ticketFactor*(1-taxaTotal) + margemConsumoPP*consumoFactor;
+  // break-even usa a mesma simplificacao do modelo original: exclui taxa de ingressos e open bar da base
+  const beBase = custoDiretos * (1 + e.outros.contingenciaPct);
+  const beSem = contribPP ? beBase/contribPP : 0;
+  const beCom = contribPP ? Math.max(0,(beBase - patrocinio - outras)/contribPP) : 0;
+  const pctCapBe = e.capMax ? beCom/e.capMax : 0;
+  const mseg = pagantes ? (pagantes-beCom)/pagantes : 0;
+  const patroMin = e.atracoes.cachePrincipal;
+  const cobertura = e.atracoes.cachePrincipal ? patrocinio/e.atracoes.cachePrincipal : 0;
+
+  const status = (margem>=state.params.margemVerde && mseg>=state.params.msegVerde) ? 'VERDE'
+    : (margem<state.params.margemVermelho || mseg<0) ? 'VERMELHO' : 'AMARELO';
+  const classif = status==='VERDE' ? 'GO' : status==='VERMELHO' ? 'NO-GO' : 'GO COM RESSALVAS';
+
+  return {
+    scen, pagantes, publicoTotal, ocupacao, ticketMedio: v.ticketMedio*ticketFactor,
+    receitaIngressos, receitaConsumo, patrocinio, outras, receitaTotal,
+    custoTotal, resultado, margem, receitaPP, custoPP, contribPP, beSem, beCom, pctCapBe, mseg,
+    patroMin, cobertura, status, classif,
+    patroContratado: p.contratado, patroPipeline: p.pipeline, patroNominal: p.nominal, nCotas: p.nCotas,
+    custoDiretos, subAtracoes, subEstrutura, subOperacao: g.subOperacao, subMarketing: g.subMarketing,
+    subLogistica: g.subLogistica, tributosValor, contingenciaValor, despesasAdm: e.outros.despesasAdm,
+    custoTaxaIngressos, openBar, beBase, cachePrincipal: e.atracoes.cachePrincipal, capMax: e.capMax,
+  };
+}
+function allScenarios(){ const r={}; SCEN.forEach(s=> r[s]=computeScenario(s)); return r; }
+
+function computeCustosSummary(){
+  const rows = state.custos.map(c=>{
+    const orcInicial = c.computed ? computedCostValue(c) : getPath(state.entradas.base, c.path);
+    const orcAprovado = (c.orcamentoAprovado==null) ? orcInicial : Number(c.orcamentoAprovado);
+    const contratado = Number(c.valorContratado)||0;
+    const pago = Number(c.valorPago)||0;
+    const eac = Math.max(orcAprovado, contratado);
+    return Object.assign({}, c, {orcInicial, orcAprovado, contratado, pago, saldo: contratado-pago, eac});
+  });
+  const bac = sum(rows.map(r=>r.orcAprovado));
+  const ac = sum(rows.map(r=>r.pago));
+  const committed = sum(rows.map(r=>r.contratado));
+  const eac = sum(rows.map(r=>r.eac));
+  const etc = eac-ac; const vac = bac-eac;
+  return {rows, bac, ac, committed, eac, etc, vac, pctComprom: bac?committed/bac:0, pctPago: bac?ac/bac:0};
+}
+function computedCostValue(c){
+  const base = computeScenario('base');
+  if(c.path[1]==='tributosValor') return base.tributosValor;
+  if(c.path[1]==='contingencia') return base.contingenciaValor;
+  if(c.path[1]==='custoTaxaIngressos') return base.custoTaxaIngressos;
+  if(c.path[1]==='openBar') return base.openBar;
+  return 0;
+}
+function computeOxR(){
+  const cs = computeCustosSummary();
+  return OXR_CATS.map(cat=>{
+    const rows = cs.rows.filter(r=> OXR_GROUP[r.path.join('.')] === cat);
+    const orcInicial = sum(rows.map(r=>r.orcInicial));
+    const orcRevisado = sum(rows.map(r=>r.orcAprovado));
+    const contratado = sum(rows.map(r=>r.contratado));
+    const realizado = sum(rows.map(r=>r.pago));
+    const projFinal = sum(rows.map(r=>r.eac));
+    const saldo = orcRevisado-realizado;
+    const desvio = projFinal-orcRevisado;
+    const desvioPct = orcRevisado ? desvio/orcRevisado : 0;
+    const classif = desvioPct<=0 ? 'Dentro do orçamento' : desvioPct<=0.05 ? 'Atenção' : 'Estourado';
+    return {cat, orcInicial, orcRevisado, contratado, realizado, saldo, desvio, desvioPct, projFinal, classif};
+  });
+}
+
+function computeVendaTracking(){
+  const v = state.venda;
+  const cs = computeScenario('base');
+  const hoje = todayISO();
+  const diasDecorridos = Math.max(1, daysBetween(v.dataInicio, hoje));
+  const diasRestantes = Math.max(0, daysBetween(hoje, v.dataEvento));
+  const vendidos = Number(v.vendidosHoje)||0;
+  const metaVendas = cs.pagantes;
+  const gap = metaVendas - vendidos;
+  const velocidade = vendidos/diasDecorridos;
+  const vendaDiariaNecessaria = diasRestantes>0 ? Math.max(0,gap)/diasRestantes : 0;
+  const projecaoFinal = vendidos + velocidade*diasRestantes;
+  const pctVendido = cs.capMax ? vendidos/cs.capMax : 0;
+  const receitaRealizada = vendidos * cs.ticketMedio;
+  return {diasDecorridos, diasRestantes, vendidos, metaVendas, gap, velocidade, vendaDiariaNecessaria, projecaoFinal, pctVendido, receitaRealizada, ingressosDisponiveis: cs.capMax-vendidos};
+}
+
+function computeBreakEven(scen){
+  const cs = computeScenario(scen);
+  const e = state.entradas[scen];
+  const taxaTotal = e.taxaPlataforma+e.taxaCartao+e.tributosIngressos;
+  const ticketMinimo = cs.pagantes ? (cs.beBase - cs.patrocinio - cs.receitaConsumo - cs.outras)/cs.pagantes/(1-taxaTotal) : 0;
+  return Object.assign({}, cs, {ticketMinimo});
+}
+function simulador1(scen, patrocinioHipotetico){
+  const cs = computeScenario(scen);
+  return Math.max(0, (cs.beBase - patrocinioHipotetico - cs.outras)/cs.contribPP);
+}
+function simulador2(scen, ingressosHipoteticos){
+  const cs = computeScenario(scen);
+  return Math.max(0, cs.beBase - ingressosHipoteticos*cs.contribPP - cs.outras);
+}
+function simulador3(scen, novoCache){
+  const cs = computeScenario(scen, {cachePrincipal: novoCache});
+  return {novoCustoTotal: cs.custoTotal, novoBreakEven: cs.beCom};
+}
+function simulador4(scen, margemAlvo){
+  const cs = computeScenario(scen);
+  const e = state.entradas[scen];
+  const taxaTotal = e.taxaPlataforma+e.taxaCartao+e.tributosIngressos;
+  if(margemAlvo>=1 || !cs.pagantes) return 0;
+  const receitaNecessaria = cs.custoTotal/(1-margemAlvo);
+  return Math.max(0,(receitaNecessaria - cs.patrocinio - cs.receitaConsumo - cs.outras)/cs.pagantes/(1-taxaTotal));
+}
+
+const SENS_VARS = [
+  {key:'ingressos', label:'Venda de ingressos (qtd. de pagantes)'},
+  {key:'ticket', label:'Ticket médio'},
+  {key:'patrocinio', label:'Patrocínio'},
+  {key:'cache', label:'Cachê da atração principal'},
+  {key:'estrutura', label:'Custos de estrutura'},
+  {key:'custosGerais', label:'Custos gerais (custo total)'},
+  {key:'consumo', label:'Consumo por participante'},
+];
+function sensResultado(scen, varKey, variacao){
+  const f = 1+variacao;
+  const base = computeScenario(scen);
+  let ov = {};
+  if(varKey==='ingressos') ov = {pagantesFactor:f, consumoFactor:f};
+  else if(varKey==='ticket') ov = {ticketFactor:f};
+  else if(varKey==='patrocinio') ov = {patroFactor:f};
+  else if(varKey==='cache') ov = {cachePrincipal: base.cachePrincipal*f};
+  else if(varKey==='estrutura') ov = {estruturaFactor:f};
+  else if(varKey==='custosGerais') ov = {custoTotalFactor:f};
+  else if(varKey==='consumo') ov = {consumoFactor:f};
+  return computeScenario(scen, ov).resultado;
+}
+const SENS_VARIACOES = [-0.3,-0.2,-0.1,0,0.1,0.2];
+function sensLevel(pct){
+  const a = Math.abs(pct);
+  if(a<0.05) return 'Baixo'; if(a<0.15) return 'Moderado'; if(a<0.30) return 'Alto'; return 'Crítico';
+}
+
+function computeFluxoCaixa(){
+  const scen = state.fluxo.scen;
+  const cs = computeScenario(scen);
+  const entAnnual = {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras};
+  const saiAnnual = {subAtracoes:cs.subAtracoes, subEstrutura:cs.subEstrutura, subOperacao:cs.subOperacao, subMarketing:cs.subMarketing,
+    subLogistica:cs.subLogistica, despesasAdm:cs.despesasAdm, custoTaxaIngressos:cs.custoTaxaIngressos, openBar:cs.openBar, contingenciaValor:cs.contingenciaValor};
+  const entMonthly = FC_ENT_KEYS.map(k=> state.fluxo.pctEnt[k].map(p=>p*entAnnual[k]));
+  const saiMonthly = FC_SAI_KEYS.map(k=> state.fluxo.pctSai[k].map(p=>p*saiAnnual[k]));
+  const totalEnt = MESES.map((_,m)=> sum(entMonthly.map(row=>row[m])));
+  const totalSai = MESES.map((_,m)=> sum(saiMonthly.map(row=>row[m])));
+  const periodo = MESES.map((_,m)=> totalEnt[m]-totalSai[m]);
+  const acumulado = []; let acc = state.fluxo.saldoInicial;
+  periodo.forEach(p=>{ acc += p; acumulado.push(acc); });
+  const capGiro = Math.max(0, -Math.min(...acumulado));
+  const resultadoFinal = sum(totalEnt)-sum(totalSai);
+  const alerta = resultadoFinal>0 && Math.min(...acumulado)<0 ? 'risco'
+    : Math.min(...acumulado)<0 ? 'risco2' : 'ok';
+  return {entMonthly, saiMonthly, totalEnt, totalSai, periodo, acumulado, capGiro, resultadoFinal, alerta};
+}
+function capGiroFor(scen){
+  const cs = computeScenario(scen);
+  const entAnnual = {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras};
+  const saiAnnual = {subAtracoes:cs.subAtracoes, subEstrutura:cs.subEstrutura, subOperacao:cs.subOperacao, subMarketing:cs.subMarketing,
+    subLogistica:cs.subLogistica, despesasAdm:cs.despesasAdm, custoTaxaIngressos:cs.custoTaxaIngressos, openBar:cs.openBar, contingenciaValor:cs.contingenciaValor};
+  const entMonthly = FC_ENT_KEYS.map(k=> state.fluxo.pctEnt[k].map(p=>p*entAnnual[k]));
+  const saiMonthly = FC_SAI_KEYS.map(k=> state.fluxo.pctSai[k].map(p=>p*saiAnnual[k]));
+  const totalEnt = MESES.map((_,m)=> sum(entMonthly.map(row=>row[m])));
+  const totalSai = MESES.map((_,m)=> sum(saiMonthly.map(row=>row[m])));
+  let acc = state.fluxo.saldoInicial; const acumulado=[];
+  MESES.forEach((_,m)=>{ acc += totalEnt[m]-totalSai[m]; acumulado.push(acc); });
+  return Math.max(0, -Math.min(...acumulado));
+}
+
+function riskScore(r){ return r.prob*r.impacto; }
+function riskLevel(score){ if(score>=16) return 'Crítico'; if(score>=10) return 'Alto'; if(score>=5) return 'Moderado'; return 'Baixo'; }
+function riscosCriticosAbertos(){ return state.riscos.filter(r=> riskScore(r)>=16 && r.status!=='Encerrado').length; }
+function maiorRiscoAtual(){
+  const abertos = state.riscos.filter(r=>r.status!=='Encerrado');
+  if(!abertos.length) return null;
+  return abertos.reduce((best,r)=> riskScore(r)>riskScore(best)?r:best, abertos[0]);
+}
+
+function computeGates(){
+  const base = computeScenario('base');
+  const trk = computeVendaTracking();
+  const g2Meta = state.gates.pctPatrocinioMin * base.cachePrincipal;
+  const g4Meta = state.gates.pctVendasMin;
+  return [
+    {n:1, titulo:'Viabilidade inicial', criterio:'Cenário Base deve estar classificado como GO ou GO COM RESSALVAS',
+     meta:'≠ NO-GO', resultado:base.classif, atingido: base.classif!=='NO-GO'},
+    {n:2, titulo:'Contratação da atração principal', criterio:'Patrocínio contratado deve atingir o % mínimo do cachê definido',
+     meta:g2Meta, metaFmt:fmtCur(g2Meta), resultado:base.patroContratado, resultadoFmt:fmtCur(base.patroContratado), atingido: base.patroContratado>=g2Meta},
+    {n:3, titulo:'Lançamento oficial', criterio:'Estrutura reservada, licenciamento iniciado e 1º lote definido',
+     meta:'Sim', resultado:state.gates.gate3, atingido: state.gates.gate3==='Sim', parcial: state.gates.gate3==='Parcial'},
+    {n:4, titulo:'Confirmação operacional', criterio:'% de vendas realizadas deve atingir a meta mínima',
+     meta:g4Meta, metaFmt:fmtPct(g4Meta), resultado:trk.pctVendido, resultadoFmt:fmtPct(trk.pctVendido), atingido: trk.pctVendido>=g4Meta},
+    {n:5, titulo:'Liberação final do evento', criterio:'Licenças emitidas, caixa suficiente e zero riscos críticos abertos',
+     meta:'0 riscos críticos', resultado:riscosCriticosAbertos(), resultadoFmt:String(riscosCriticosAbertos()), atingido: riscosCriticosAbertos()===0},
+  ];
+}
+
+function computeScore(){
+  const scen = state.score.scen;
+  const cs = computeScenario(scen);
+  const cust = computeCustosSummary();
+  const w = state.score.weights, m = state.score.metas;
+  const sub = v => clamp(v,0,1)*100;
+  const factors = [
+    {label:'Margem esperada', weight:w.margem, meta:m.margem, valor:cs.margem, fmt:fmtPct, sub:sub(cs.margem/m.margem)},
+    {label:'Margem de segurança (distância do break-even)', weight:w.mseg, meta:m.mseg, valor:cs.mseg, fmt:fmtPct, sub:sub(cs.mseg/m.mseg)},
+    {label:'Patrocínio contratado / esperado', weight:w.patro, meta:1, valor: cs.patrocinio? cs.patroContratado/cs.patrocinio : 1, fmt:fmtPct, sub:0},
+    {label:'Exposição financeira (invertida)', weight:w.exposicao, meta:1, valor: 1-((cust.bac-cs.patroContratado)/(cust.bac||1)), fmt:fmtPct, sub:0},
+    {label:'% de custos já contratados (BAC)', weight:w.contratado, meta:1, valor: cust.pctComprom, fmt:fmtPct, sub:0},
+    {label:'Contingência ainda disponível', weight:w.contingencia, meta:1, valor: 1, fmt:fmtPct, sub:0},
+    {label:'Riscos críticos abertos (invertido)', weight:w.riscos, meta:0, valor: riscosCriticosAbertos(), fmt:v=>String(v), sub: Math.max(0,100-riscosCriticosAbertos()*25)},
+    {label:'Necessidade de capital de giro (invertida)', weight:w.capgiro, meta:1, valor: 1-(capGiroFor(scen)/(cs.custoTotal||1)), fmt:fmtPct, sub:0},
+  ];
+  factors.forEach(f=>{ if(!f.sub) f.sub = clamp(f.valor/f.meta,0,1)*100; });
+  const contingRow = state.custos.find(c=>c.path[1]==='contingencia');
+  if(contingRow){
+    const cs2 = computeCustosSummary();
+    const row = cs2.rows.find(r=>r.path[1]==='contingencia');
+    if(row){ factors[5].valor = row.orcAprovado? clamp(1-row.pago/row.orcAprovado,0,1):1; factors[5].sub = factors[5].valor*100; }
+  }
+  const totalWeight = sum(factors.map(f=>f.weight));
+  const score = sum(factors.map(f=>f.weight*f.sub));
+  const band = state.score.bands.find(b=> score>=b[0] && score<=b[1]) || state.score.bands[state.score.bands.length-1];
+  return {factors, totalWeight, score, classif: band[2]};
+}
+
+/* ---------------- shell / nav / generic binding ---------------- */
+const NAV = [
+  {group:'Visão geral', items:[
+    {id:'dashboard', label:'Dashboard', ic:'◆'},
+    {id:'comparativo', label:'Comparativo', ic:'▤'},
+    {id:'score', label:'Score de viabilidade', ic:'◎'},
+  ]},
+  {group:'Planejamento', items:[
+    {id:'entradas', label:'Entradas PMO', ic:'✎'},
+    {id:'vendas', label:'Vendas', ic:'🎟'},
+    {id:'patrocinios', label:'Patrocínios', ic:'◈'},
+    {id:'custos', label:'Custos', ic:'▦'},
+  ]},
+  {group:'Controle financeiro', items:[
+    {id:'oxr', label:'Orçamento x Real', ic:'⇄'},
+    {id:'fluxo', label:'Fluxo de caixa', ic:'∿'},
+    {id:'breakeven', label:'Break-even', ic:'✕'},
+    {id:'sensibilidade', label:'Sensibilidade', ic:'≈'},
+  ]},
+  {group:'Governança', items:[
+    {id:'riscos', label:'Riscos', ic:'⚠'},
+    {id:'gates', label:'Gates PMO', ic:'⛩'},
+  ]},
+];
+if(!state.ui) state.ui = { scenTab:{ entradas:'base', vendas:'base', patrocinios:'base', breakeven:'base', sensibilidade:'base' }, entradasSection:'evento' };
+let currentView = 'dashboard';
+
+function renderNav(){
+  $('#navgroups').innerHTML = NAV.map(g=>`
+    <div class="navgroup">
+      <div class="label">${g.group}</div>
+      ${g.items.map(it=>`<button class="navitem ${it.id===currentView?'active':''}" data-nav="${it.id}"><span class="ic">${it.ic}</span>${it.label}</button>`).join('')}
+    </div>`).join('');
+}
+
+const VIEWS = {}; // preenchido pelas proximas partes
+function goTo(id){ currentView = id; render(); window.scrollTo(0,0); }
+function render(){
+  renderNav();
+  const fn = VIEWS[currentView];
+  $('#view').innerHTML = fn ? fn() : '<p>Em construção.</p>';
+  wireGenericInputs();
+  const wireFn = VIEWS[currentView+'_wire'];
+  if(wireFn) wireFn();
+}
+
+/* liga inputs genericos via data-bind="a.b.c" (aceita indices numericos p/ arrays) */
+function coerceType(el){
+  if(el.type==='number') return 'number';
+  if(el.dataset.kind==='pct') return 'pct';
+  return 'text';
+}
+function wireGenericInputs(){
+  $$('#view [data-bind]').forEach(el=>{
+    el.addEventListener(el.tagName==='SELECT'?'change':'input', onGenericBind);
+    if(el.tagName==='INPUT' && el.type!=='number') el.addEventListener('change', onGenericBind);
+  });
+  $$('#view [data-action]').forEach(el=>{
+    el.addEventListener('click', onAction);
+  });
+  $$('#view [data-tab]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const [group,val] = el.dataset.tab.split(':');
+      setPath(state, group.split('.'), val);
+      saveState(); render();
+    });
+  });
+}
+function onGenericBind(e){
+  const el = e.target;
+  const path = el.dataset.bind.split('.');
+  let val = el.value;
+  const kind = coerceType(el);
+  if(kind==='number') val = val===''?0:Number(val);
+  else if(kind==='pct') val = val===''?0:Number(val)/100;
+  setPath(state, path, val);
+  saveState();
+  if(el.dataset.norerender) return;
+  const preserveFocus = el.id || null;
+  render();
+  if(preserveFocus){ const again = document.getElementById(preserveFocus); if(again){ again.focus(); if(again.setSelectionRange && again.type==='text') { try{ again.setSelectionRange(again.value.length, again.value.length);}catch(_){} } } }
+}
+function onAction(e){
+  const el = e.currentTarget || e.target.closest('[data-action]');
+  const [action, ...args] = el.dataset.action.split(':');
+  ACTIONS[action] && ACTIONS[action](...args);
+}
+const ACTIONS = {};
+
+/* inputs auxiliares (nao ligados por data-bind, ex. abrem modais/simuladores) */
+function mkId(bindPath){ return 'f_'+bindPath.replace(/[^a-zA-Z0-9]/g,'_'); }
+function fld(label, bindPath, opts){
+  opts = opts||{};
+  const value = getPath(state, bindPath.split('.'));
+  const kind = opts.kind||'currency';
+  let displayVal = value;
+  let type='number', step=opts.step||'1', kindAttr='';
+  if(kind==='pct'){ displayVal = Math.round(value*1000)/10; step = opts.step||'0.1'; kindAttr='data-kind="pct"'; }
+  else if(kind==='int'){ step='1'; }
+  else if(kind==='currency'){ step = opts.step||'1'; }
+  else if(kind==='text'){ type='text'; }
+  else if(kind==='date'){ type='date'; }
+  return `<label class="field">
+    <span class="lbl">${label}</span>
+    <input id="${mkId(bindPath)}" type="${type}" ${type==='number'?`step="${step}"`:''} value="${type==='text'||type==='date'?String(displayVal??''):displayVal}" data-bind="${bindPath}" ${kindAttr}>
+  </label>`;
+}
+function tblInput(bindPath, value, opts){
+  opts = opts||{};
+  const type = opts.type||'text';
+  const step = opts.step||'1';
+  const styleAttr = opts.width ? `style="width:${opts.width};"` : '';
+  return `<input id="${mkId(bindPath)}" type="${type}" ${type==='number'?`step="${step}"`:''} class="${opts.cls||''}" data-bind="${bindPath}" ${opts.kind?`data-kind="${opts.kind}"`:''} value="${value==null?'':value}" ${styleAttr}>`;
+}
+function selectFld(label, bindPath, options){
+  const value = getPath(state, bindPath.split('.'));
+  return `<label class="field"><span class="lbl">${label}</span>
+    <select data-bind="${bindPath}">${options.map(o=>`<option value="${o}" ${o===value?'selected':''}>${o}</option>`).join('')}</select>
+  </label>`;
+}
+function badge(status){
+  const map = {VERDE:['good','VERDE'], AMARELO:['warn','AMARELO'], VERMELHO:['bad','VERMELHO'],
+    GO:['good','GO'], 'GO COM RESSALVAS':['warn','GO COM RESSALVAS'], 'NO-GO':['bad','NO-GO'],
+    'Atingido':['good','Atingido'], 'Não atingido':['bad','Não atingido'], 'Em andamento':['warn','Em andamento'],
+    'Baixo':['good','Baixo'], 'Moderado':['warn','Moderado'], 'Alto':['bad','Alto'], 'Crítico':['bad','Crítico'],
+    'Dentro do orçamento':['good','Dentro do orçamento'], 'Atenção':['warn','Atenção'], 'Estourado':['bad','Estourado'],
+  };
+  const [cls,txt] = map[status] || ['warn', status];
+  return `<span class="badge ${cls}"><span class="dot"></span>${txt}</span>`;
+}
+function scenPills(groupPath, current, extra){
+  return `<div class="pillrow">${SCEN.map(s=>`<button class="pill ${s===current?'active':''}" data-scen="${s}" data-tab="${groupPath}:${s}">${SCEN_LABEL[s]}</button>`).join('')}${extra||''}</div>`;
+}
+function esc(s){ return String(s).replace(/"/g,'&quot;'); }
+function infoIcon(text){
+  return `<span class="info-ic" tabindex="0" role="note" aria-label="${esc(text)}">i<span class="tip">${text}</span></span>`;
+}
+
+/* ---------------- graficos SVG nativos (sem dependencia externa) ---------------- */
+function niceMax(v){
+  if(v<=0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v/p;
+  const step = n<=1?1:n<=2?2:n<=5?5:10;
+  return step*p;
+}
+function svgBarChart(items, opts){
+  opts = opts||{};
+  const W = opts.width||320, H = opts.height||220;
+  const padT=26, padB=32, padL=8, padR=8;
+  const plotW = W-padL-padR, plotH = H-padT-padB;
+  const vals = items.map(i=>i.value);
+  const rawMax = Math.max(0, ...vals), rawMin = Math.min(0, ...vals);
+  const domMax = rawMax>0 ? niceMax(rawMax) : 0;
+  const domMin = rawMin<0 ? -niceMax(-rawMin) : 0;
+  const span = (domMax-domMin)||1;
+  const zeroY = padT + plotH*(domMax/span);
+  const n = items.length;
+  const gap = plotW*0.12/n;
+  const bw = (plotW - gap*(n+1))/n;
+  const fmt = opts.fmt || (v=>fmtCur(v));
+  let bars='', labels='';
+  items.forEach((it,i)=>{
+    const x = padL + gap + i*(bw+gap);
+    const valY = padT + plotH*((domMax-it.value)/span);
+    const y = Math.min(valY, zeroY), h = Math.max(1,Math.abs(valY-zeroY));
+    const labelY = it.value>=0 ? valY-6 : valY+14;
+    bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="4" style="fill:${it.color}"></rect>`;
+    bars += `<text x="${(x+bw/2).toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" style="fill:var(--text)" font-family="IBM Plex Mono, monospace">${fmt(it.value)}</text>`;
+    labels += `<text x="${(x+bw/2).toFixed(1)}" y="${(H-10).toFixed(1)}" text-anchor="middle" font-size="11" style="fill:var(--text-dim)" font-family="Public Sans, sans-serif">${it.label}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%" role="img" aria-label="gráfico de barras">
+    <line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${W-padR}" y2="${zeroY.toFixed(1)}" style="stroke:var(--border)" stroke-width="1"></line>
+    ${bars}${labels}
+  </svg>`;
+}
+function svgHBarChart(items, opts){
+  opts = opts||{};
+  const W = opts.width||600, rowH = opts.rowH||30;
+  const H = items.length*rowH + 10;
+  const labelW = opts.labelW||190, padR=70;
+  const plotW = W-labelW-padR;
+  const maxV = niceMax(Math.max(1,...items.map(i=>i.value)));
+  const fmt = opts.fmt || (v=>fmtCur(v));
+  let rows='';
+  items.forEach((it,i)=>{
+    const y = i*rowH+6;
+    const w = Math.max(2, plotW*(it.value/maxV));
+    rows += `<text x="${labelW-8}" y="${y+rowH*0.42}" text-anchor="end" font-size="11.5" style="fill:var(--text)" font-family="Public Sans, sans-serif">${it.label}</text>`;
+    rows += `<rect x="${labelW}" y="${y}" width="${w.toFixed(1)}" height="${rowH-12}" rx="4" style="fill:${it.color}"></rect>`;
+    rows += `<text x="${(labelW+w+8).toFixed(1)}" y="${y+rowH*0.42}" font-size="11" font-weight="700" style="fill:var(--text)" font-family="IBM Plex Mono, monospace">${fmt(it.value)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="ranking de impacto">${rows}</svg>`;
+}
+function svgLineAreaChart(labels, series, opts){
+  opts = opts||{};
+  const W = opts.width||900, H = opts.height||260;
+  const padT=18, padB=26, padL=52, padR=14;
+  const plotW=W-padL-padR, plotH=H-padT-padB;
+  const allVals = series.flatMap(s=>s.data);
+  const rawMax = Math.max(0,...allVals), rawMin = Math.min(0,...allVals);
+  const domMax = niceMax(rawMax||1), domMin = rawMin<0 ? -niceMax(-rawMin) : 0;
+  const span=(domMax-domMin)||1;
+  const n = labels.length;
+  const x = i => padL + plotW*(i/(n-1||1));
+  const y = v => padT + plotH*((domMax-v)/span);
+  const zeroY = y(0);
+  let grid='';
+  const ticks = 4;
+  for(let t=0;t<=ticks;t++){
+    const val = domMin + (span*t/ticks);
+    const yy = y(val);
+    grid += `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W-padR}" y2="${yy.toFixed(1)}" style="stroke:var(--border-soft)" stroke-width="1"></line>`;
+    grid += `<text x="${padL-8}" y="${(yy+3).toFixed(1)}" text-anchor="end" font-size="10" style="fill:var(--text-faint)" font-family="IBM Plex Mono, monospace">${fmtCur0k(val)}</text>`;
+  }
+  let xlabels='';
+  labels.forEach((l,i)=>{ xlabels += `<text x="${x(i).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="10.5" style="fill:var(--text-dim)" font-family="Public Sans, sans-serif">${l}</text>`; });
+  let paths='';
+  series.forEach(s=>{
+    const pts = s.data.map((v,i)=>`${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+    if(s.area){
+      const areaPts = [`${x(0).toFixed(1)},${zeroY.toFixed(1)}`, ...pts, `${x(n-1).toFixed(1)},${zeroY.toFixed(1)}`];
+      paths += `<polygon points="${areaPts.join(' ')}" style="fill:${s.color}" opacity="0.16"></polygon>`;
+    }
+    const dash = s.dash ? `stroke-dasharray="5,4"` : '';
+    paths += `<polyline points="${pts.join(' ')}" fill="none" style="stroke:${s.color}" stroke-width="2.2" ${dash} stroke-linejoin="round" stroke-linecap="round"></polyline>`;
+    if(!s.dash) s.data.forEach((v,i)=>{ paths += `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3" style="fill:${s.color}"></circle>`; });
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="100%" role="img" aria-label="fluxo de caixa">${grid}${paths}${xlabels}</svg>`;
+}
+function fmtCur0k(v){
+  if(Math.abs(v)>=1000) return (v/1000).toLocaleString('pt-BR',{maximumFractionDigits:0})+'k';
+  return fmtInt(v);
+}
+function chartLegend(items){
+  return `<div style="display:flex; gap:16px; flex-wrap:wrap; margin-top:8px;">${items.map(it=>
+    `<span style="font-size:11.5px; color:var(--text-dim); display:inline-flex; align-items:center;"><span class="legend-dot" style="background:${it.color}"></span>${it.label}</span>`).join('')}</div>`;
+}
+
+/* ================= DASHBOARD ================= */
+VIEWS.dashboard = function(){
+  const cs = allScenarios();
+  const trk = computeVendaTracking();
+  const cust = computeCustosSummary();
+  const base = cs.base;
+  const scoreRes = computeScore();
+  const risco = maiorRiscoAtual();
+  const patroGap = Math.max(0, base.patroMin - base.patroContratado);
+
+  const acaoPrioritaria = base.classif==='NO-GO'
+    ? 'Revisar premissas comerciais e de custo do cenário Base antes de assumir novos compromissos financeiros.'
+    : riscosCriticosAbertos()>0
+      ? 'Tratar os riscos críticos abertos na aba Riscos antes do próximo Gate.'
+      : base.patroContratado < state.gates.pctPatrocinioMin*base.cachePrincipal
+        ? 'Avançar negociações de patrocínio antes de contratar definitivamente a atração principal (Gate 2).'
+        : 'Manter ritmo de vendas e patrocínio; revisar o Dashboard semanalmente.';
+
+  const card = (scen) => {
+    const c = cs[scen];
+    return `<div class="scenario-card">
+      <div class="head" style="background:${SCEN_HEX[scen]}">
+        <span class="name">${SCEN_LABEL[scen]} <span class="info-ic" style="background:rgba(255,255,255,.25); border-color:rgba(255,255,255,.5); color:#fff;" tabindex="0" role="note" aria-label="${esc(SCEN_DESC[scen])}">i<span class="tip">${SCEN_DESC[scen]}</span></span></span>${badge(c.status)}
+      </div>
+      <div class="body">
+        <div class="kv total"><span class="k">Receita total</span><span class="v">${fmtCur(c.receitaTotal)}</span></div>
+        <div class="kv"><span class="k">↳ Ingressos</span><span class="v">${fmtCur(c.receitaIngressos)}</span></div>
+        <div class="kv"><span class="k">↳ Patrocínio</span><span class="v">${fmtCur(c.patrocinio)}</span></div>
+        <div class="kv"><span class="k">↳ Consumo/ativações</span><span class="v">${fmtCur(c.receitaConsumo)}</span></div>
+        <div class="kv total"><span class="k">Custo total</span><span class="v">${fmtCur(c.custoTotal)}</span></div>
+        <div class="kv total"><span class="k">Resultado</span><span class="v" style="color:${c.resultado>=0?'var(--good)':'var(--bad)'}">${fmtCur(c.resultado)}</span></div>
+        <div class="kv"><span class="k">Margem líquida</span><span class="v">${fmtPct(c.margem)}</span></div>
+        <div class="kv"><span class="k">Pagantes</span><span class="v">${fmtInt(c.pagantes)}</span></div>
+        <div class="kv"><span class="k">Capacidade utilizada</span><span class="v">${fmtPct(c.ocupacao)}</span></div>
+        <div class="kv"><span class="k">Ticket médio</span><span class="v">${fmtCur2(c.ticketMedio)}</span></div>
+        <div class="kv"><span class="k">Break-even (pagantes)</span><span class="v">${fmtInt(c.beCom)}</span></div>
+        <div class="kv"><span class="k">% capacidade p/ BE</span><span class="v">${fmtPct(c.pctCapBe)}</span></div>
+        <div class="kv"><span class="k">Receita / participante</span><span class="v">${fmtCur2(c.receitaPP)}</span></div>
+        <div class="kv"><span class="k">Custo / participante</span><span class="v">${fmtCur2(c.custoPP)}</span></div>
+        <div class="kv"><span class="k">Patrocínio necessário</span><span class="v">${fmtCur(c.patroMin)}</span></div>
+        <div class="kv"><span class="k">Patrocínio considerado</span><span class="v">${fmtCur(c.patrocinio)}</span></div>
+        <div class="kv"><span class="k">Cobertura do cachê</span><span class="v">${fmtPct(c.cobertura)}</span></div>
+        <div class="kv"><span class="k">Margem de segurança</span><span class="v">${fmtPct(c.mseg)}</span></div>
+        <div class="kv total"><span class="k">Classificação</span><span class="v">${badge(c.classif)}</span></div>
+      </div>
+    </div>`;
+  };
+
+  const execKpis = [
+    ['Receita projetada (Base)', fmtCur(base.receitaTotal)], ['Receita contratada (patrocínio)', fmtCur(base.patroContratado)],
+    ['Custo projetado (BAC)', fmtCur(cust.bac)], ['Custo contratado', fmtCur(cust.committed)],
+    ['Resultado projetado (Base)', fmtCur(base.resultado)], ['Margem (Base)', fmtPct(base.margem)],
+    ['Break-even (ingressos)', fmtInt(base.beCom)], ['Ingressos vendidos', fmtInt(trk.vendidos)],
+    ['Ingressos restantes (meta)', fmtInt(Math.max(0,trk.gap))], ['Ocupação (Base)', fmtPct(base.ocupacao)],
+    ['Patrocínio pipeline', fmtCur(base.patroPipeline)], ['Cobertura de patrocínio', fmtPct(base.cobertura)],
+    ['Capital de giro necessário', fmtCur(capGiroFor('base'))], ['Exposição financeira', fmtCur(cust.bac-base.patroContratado)],
+    ['Forecast final (EAC)', fmtCur(cust.eac)], ['Score de viabilidade', fmtNum(scoreRes.score,1)],
+  ];
+  const vendaKpis = [
+    ['Data do evento', new Date(state.venda.dataEvento+'T00:00:00').toLocaleDateString('pt-BR')],
+    ['Dias restantes', fmtInt(trk.diasRestantes)], ['% vendido (capacidade Base)', fmtPct(trk.pctVendido)],
+    ['Gap para a meta', fmtInt(Math.max(0,trk.gap))], ['Velocidade média (ing./dia)', fmtNum(trk.velocidade,2)],
+    ['Venda diária necessária', fmtNum(trk.vendaDiariaNecessaria,2)], ['Projeção de público final', fmtInt(trk.projecaoFinal)],
+  ];
+
+  return `
+  <div class="topline"><div><h1>Dashboard executivo${infoIcon('Painel principal: mostra os 3 cenários lado a lado, os KPIs financeiros e comerciais do cenário Base, o ritmo de vendas e uma recomendação automática de go/no-go. Nada aqui é editável — os números vêm de Entradas, Vendas, Patrocínios e Custos.')}</h1><div class="desc">Visão consolidada dos três cenários — tudo aqui é calculado a partir de Entradas, Vendas, Patrocínios e Custos.</div></div></div>
+
+  <div class="section">
+    <div class="grid3">${SCEN.map(card).join('')}</div>
+  </div>
+
+  <div class="section">
+    <h2>KPIs executivos${infoIcon('Os números-chave do cenário Base, combinando o que está orçado com o que já foi contratado/realizado até agora. Pense nisso como o "resumo de uma linha" para a diretoria.')} <span class="hint">· cenário Base / realizado</span></h2>
+    <div class="gridN">${execKpis.map(([l,v])=>`<div class="kpi"><div class="lbl">${l}</div><div class="kpi-value">${v}</div></div>`).join('')}</div>
+  </div>
+
+  <div class="section">
+    <h2>Indicadores de venda${infoIcon('Ritmo real de vendas: quantos dias faltam, quantos ingressos ainda faltam vender e quantos por dia você precisa vender a partir de hoje para bater a meta do cenário Base.')}</h2>
+    <div class="gridN">${vendaKpis.map(([l,v])=>`<div class="kpi"><div class="lbl">${l}</div><div class="kpi-value">${v}</div></div>`).join('')}</div>
+    <div class="hint" style="margin-top:8px;">Atualize "Ingressos vendidos até hoje" e as datas na aba Vendas.</div>
+  </div>
+
+  <div class="section">
+    <h2>Recomendação PMO${infoIcon('Uma leitura automática do momento do projeto: status geral, maior risco em aberto e qual deveria ser a próxima ação prioritária da gestão — atualiza sozinha conforme os dados mudam.')}</h2>
+    <div class="callout accent">
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+        <span style="font-family:'Fraunces',serif; font-size:15px; font-weight:600;">Status do projeto:</span>
+        ${badge(base.classif)}
+        <span class="hint" style="margin-left:auto;">Score: ${fmtNum(scoreRes.score,1)}/100 — ${scoreRes.classif}</span>
+      </div>
+      <div class="recbox">
+        <div class="item"><div class="lbl">Resultado Base</div><div class="val">${fmtCur(base.resultado)}</div></div>
+        <div class="item"><div class="lbl">Margem</div><div class="val">${fmtPct(base.margem)}</div></div>
+        <div class="item"><div class="lbl">Break-even (ingressos)</div><div class="val">${fmtInt(base.beCom)}</div></div>
+        <div class="item"><div class="lbl">Patrocínio mínimo adicional</div><div class="val">${fmtCur(patroGap)}</div></div>
+        <div class="item" style="grid-column:1/-1;"><div class="lbl">Maior risco atual</div><div class="val">${risco ? `${risco.risco} (score ${riskScore(risco)})` : '—'}</div></div>
+        <div class="item" style="grid-column:1/-1;"><div class="lbl">Ação prioritária</div><div class="val">${acaoPrioritaria}</div></div>
+      </div>
+    </div>
+  </div>`;
+};
+
+/* ================= ENTRADAS PMO ================= */
+function readonlyRow(label, value){
+  return `<div class="kv"><span class="k">${label}</span><span class="v mono">${value}</span></div>`;
+}
+function costGroupBlock(scen, group){
+  const total = sumObj(state.entradas[scen][group.key]);
+  return `<div class="card" style="padding:16px 18px; margin-bottom:14px;">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px;">
+      <h3 style="margin:0; font-size:14.5px;">${group.label}</h3>
+      <span class="mono" style="font-weight:700; color:var(--accent-strong);">${fmtCur(total)}</span>
+    </div>
+    <div class="gridN">
+      ${group.items.map(([key,label])=> fld(label, `entradas.${scen}.${group.key}.${key}`, {kind:'currency'})).join('')}
+    </div>
+  </div>`;
+}
+VIEWS.entradas = function(){
+  const scen = state.ui.scenTab.entradas;
+  const e = state.entradas[scen];
+  const cs = computeScenario(scen);
+  const sec = state.ui.entradasSection || 'evento';
+  const SECTIONS = [
+    ['evento','Evento'], ['ingressos','Ingressos'], ['patrocinio','Patrocínio'], ['consumo','Consumo/ativações'],
+    ['custos','Custos por categoria'], ['outros','Outros'],
+  ];
+
+  let body = '';
+  if(sec==='evento'){
+    body = `<div class="grid2">
+      <div class="card" style="padding:16px 18px;">
+        <h3 style="margin:0 0 10px; font-size:14.5px;">Premissas do evento</h3>
+        <div class="gridN">
+          ${fld('Capacidade máxima do evento', `entradas.${scen}.capMax`, {kind:'int'})}
+          ${fld('Conversão da capacidade (% que efetivamente compra)', `entradas.${scen}.conversaoPct`, {kind:'pct'})}
+          ${fld('Número de cortesias', `entradas.${scen}.cortesias`, {kind:'int'})}
+        </div>
+      </div>
+      <div class="card" style="padding:16px 18px;">
+        <h3 style="margin:0 0 10px; font-size:14.5px;">Calculado</h3>
+        ${readonlyRow('Pagantes (capacidade × conversão)', fmtInt(cs.pagantes))}
+        ${readonlyRow('Público total (pagantes + cortesias)', fmtInt(cs.publicoTotal))}
+        ${readonlyRow('% Ocupação da capacidade', fmtPct(cs.ocupacao))}
+        <div class="hint" style="margin-top:8px;">O plano de lotes na aba Vendas define o TICKET MÉDIO; a Conversão acima define o VOLUME de pagantes usado nos cálculos financeiros.</div>
+      </div>
+    </div>`;
+  } else if(sec==='ingressos'){
+    body = `<div class="grid2">
+      <div class="card" style="padding:16px 18px;">
+        <h3 style="margin:0 0 10px; font-size:14.5px;">Taxas sobre ingressos</h3>
+        <div class="gridN">
+          ${fld('Taxa da plataforma de venda', `entradas.${scen}.taxaPlataforma`, {kind:'pct'})}
+          ${fld('Taxa de cartão / meios de pagamento', `entradas.${scen}.taxaCartao`, {kind:'pct'})}
+          ${fld('Tributos incidentes sobre ingressos', `entradas.${scen}.tributosIngressos`, {kind:'pct'})}
+        </div>
+      </div>
+      <div class="card" style="padding:16px 18px;">
+        <h3 style="margin:0 0 10px; font-size:14.5px;">Calculado (fonte: aba Vendas)</h3>
+        ${readonlyRow('Ticket médio (plano de lotes)', fmtCur2(cs.ticketMedio))}
+        ${readonlyRow('Receita bruta de ingressos', fmtCur(cs.receitaIngressos))}
+        ${readonlyRow('Taxa sobre ingressos (custo)', fmtCur(cs.custoTaxaIngressos))}
+      </div>
+    </div>`;
+  } else if(sec==='patrocinio'){
+    body = `<div class="card" style="padding:16px 18px;">
+      <h3 style="margin:0 0 10px; font-size:14.5px;">Calculado (fonte: aba Patrocínios)</h3>
+      <div class="gridN">
+        <div>${readonlyRow('Nº de cotas comerciais', fmtInt(cs.nCotas))}</div>
+        <div>${readonlyRow('Patrocínio contratado (assinado)', fmtCur(cs.patroContratado))}</div>
+        <div>${readonlyRow('Patrocínio em pipeline', fmtCur(cs.patroPipeline))}</div>
+        <div>${readonlyRow('Patrocínio esperado (ponderado)', fmtCur(cs.patrocinio))}</div>
+        <div>${readonlyRow('Cobertura do cachê', fmtPct(cs.cobertura))}</div>
+      </div>
+    </div>`;
+  } else if(sec==='consumo'){
+    body = `<div class="grid2">
+      <div class="card" style="padding:16px 18px;">
+        <h3 style="margin:0 0 10px; font-size:14.5px;">Consumo / bar / ativações</h3>
+        <div class="gridN">
+          ${fld('Consumo médio bruto por pessoa', `entradas.${scen}.consumoBruto`, {kind:'currency', step:'0.5'})}
+          ${fld('Custo operacional do consumo', `entradas.${scen}.custoOpConsumoPct`, {kind:'pct'})}
+          ${fld('Outras receitas', `entradas.${scen}.outrasReceitas`, {kind:'currency'})}
+        </div>
+      </div>
+      <div class="card" style="padding:16px 18px;">
+        <h3 style="margin:0 0 10px; font-size:14.5px;">Calculado</h3>
+        ${readonlyRow('Margem líquida por pessoa', fmtCur2(e.consumoBruto*(1-e.custoOpConsumoPct)))}
+        ${readonlyRow('Receita líquida de consumo/ativações', fmtCur(cs.receitaConsumo))}
+      </div>
+    </div>`;
+  } else if(sec==='custos'){
+    body = COST_GROUPS.map(g=>costGroupBlock(scen,g)).join('');
+  } else if(sec==='outros'){
+    body = `<div class="grid2">
+      <div class="card" style="padding:16px 18px;">
+        <h3 style="margin:0 0 10px; font-size:14.5px;">Outros custos e taxas</h3>
+        <div class="gridN">
+          ${fld('Open bar (valor por pessoa)', `entradas.${scen}.outros.openBarValor`, {kind:'currency', step:'1'})}
+          ${fld('Despesas administrativas', `entradas.${scen}.outros.despesasAdm`, {kind:'currency'})}
+          ${fld('Tributos sobre a receita total', `entradas.${scen}.outros.tributosReceita`, {kind:'pct'})}
+          ${fld('Taxas bancárias', `entradas.${scen}.outros.taxasBancarias`, {kind:'pct'})}
+          ${fld('Comissões sobre vendas', `entradas.${scen}.outros.comissoes`, {kind:'pct'})}
+          ${fld('Reserva de contingência', `entradas.${scen}.outros.contingenciaPct`, {kind:'pct'})}
+        </div>
+        <div class="hint" style="margin-top:8px;">Open bar é cobrado sobre a CAPACIDADE do evento (não só sobre os pagantes) e fica fora da contingência — mesma regra da planilha original.</div>
+      </div>
+      <div class="card" style="padding:16px 18px;">
+        <h3 style="margin:0 0 10px; font-size:14.5px;">Totais de custo (calculado)</h3>
+        ${readonlyRow('Custos diretos (fixos)', fmtCur(cs.custoDiretos))}
+        ${readonlyRow('Taxa sobre ingressos (valor)', fmtCur(cs.custoTaxaIngressos))}
+        ${readonlyRow('Tributos/taxas/comissões (valor)', fmtCur(cs.tributosValor))}
+        ${readonlyRow('Contingência (valor)', fmtCur(cs.contingenciaValor))}
+        ${readonlyRow('Open bar (valor)', fmtCur(cs.openBar))}
+        ${readonlyRow('CUSTO TOTAL DO CENÁRIO', fmtCur(cs.custoTotal))}
+      </div>
+    </div>`;
+  }
+
+  return `
+  <div class="topline"><div><h1>Entradas PMO${infoIcon('Aqui você alimenta as premissas de cada cenário: capacidade do evento, taxas de ingresso, consumo, e todos os custos (atrações, estrutura, operação, marketing, logística e outros). É a base que alimenta o Dashboard, Break-even, Fluxo de Caixa e todo o resto do app.')}</h1><div class="desc">Fonte única das premissas de evento, consumo e custos — por cenário. Detalhe de ingressos e patrocínio fica nas abas dedicadas.</div></div></div>
+  ${scenPills('ui.scenTab.entradas', scen)}
+  <div class="pillrow" style="margin-top:-6px;">
+    ${SECTIONS.map(([id,label])=>`<button class="pill ${id===sec?'active':''}" data-action="setEntradasSection:${id}">${label}</button>`).join('')}
+  </div>
+  ${body}`;
+};
+ACTIONS.setEntradasSection = (id)=>{ state.ui.entradasSection = id; saveState(); render(); };
+
+/* ================= VENDAS ================= */
+VIEWS.vendas = function(){
+  const scen = state.ui.scenTab.vendas;
+  const lots = state.vendas[scen];
+  const v = computeVendas(scen);
+  const trk = computeVendaTracking();
+  const rows = lots.map((l,i)=>{
+    const bruta = l.preco*l.qtd;
+    const mix = v.qtd ? l.qtd/v.qtd : 0;
+    return `<tr>
+      <td>${tblInput(`vendas.${scen}.${i}.lote`, l.lote)}</td>
+      <td class="num">${tblInput(`vendas.${scen}.${i}.preco`, l.preco, {type:'number', cls:'num'})}</td>
+      <td class="num">${tblInput(`vendas.${scen}.${i}.qtd`, l.qtd, {type:'number', cls:'num'})}</td>
+      <td class="num mono">${fmtPct(mix)}</td>
+      <td class="num mono">${fmtCur(bruta)}</td>
+      <td><button class="rm" data-action="rmLot:${scen}:${i}" title="Remover lote">✕</button></td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="topline"><div><h1>Vendas de ingressos${infoIcon('Cadastre os lotes de venda (preço e quantidade planejada) de cada cenário. Mais abaixo, registre quantos ingressos já foram vendidos de verdade — isso alimenta a projeção de público final e os Gates PMO.')}</h1><div class="desc">Fonte única dos lotes de ingresso por cenário, mais o acompanhamento de vendas realizadas.</div></div></div>
+  ${scenPills('ui.scenTab.vendas', scen)}
+
+  <div class="section">
+    <h2>Plano de lotes — ${SCEN_LABEL[scen]}</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Lote</th><th class="num">Preço (R$)</th><th class="num">Qtd. planejada</th><th class="num">% mix</th><th class="num">Receita bruta</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td>Total</td><td></td><td class="num mono">${fmtInt(v.qtd)}</td><td></td><td class="num mono">${fmtCur(v.receitaBruta)}</td><td></td></tr></tfoot>
+      </table>
+    </div>
+    <button class="btn small" style="margin-top:10px;" data-action="addLot:${scen}">+ Adicionar lote</button>
+    <div class="gridN" style="margin-top:16px;">
+      <div class="kpi"><div class="lbl">Ingressos planejados</div><div class="kpi-value">${fmtInt(v.qtd)}</div></div>
+      <div class="kpi"><div class="lbl">Ticket médio planejado</div><div class="kpi-value">${fmtCur2(v.ticketMedio)}</div></div>
+      <div class="kpi"><div class="lbl">Receita bruta planejada</div><div class="kpi-value">${fmtCur(v.receitaBruta)}</div></div>
+      <div class="kpi"><div class="lbl">Receita líquida planejada</div><div class="kpi-value">${fmtCur(v.receitaLiquida)}</div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Acompanhamento de vendas realizado <span class="hint">· indicadores de venda, independente do cenário</span></h2>
+    <div class="card" style="padding:16px 18px;">
+      <div class="gridN">
+        ${fld('Data de início das vendas', 'venda.dataInicio', {kind:'date'})}
+        ${fld('Data do evento', 'venda.dataEvento', {kind:'date'})}
+        ${fld('Ingressos vendidos até hoje', 'venda.vendidosHoje', {kind:'int'})}
+      </div>
+      <div class="divider"></div>
+      <div class="gridN">
+        <div class="kpi"><div class="lbl">Ingressos disponíveis</div><div class="kpi-value">${fmtInt(trk.ingressosDisponiveis)}</div></div>
+        <div class="kpi"><div class="lbl">% vendido (capacidade Base)</div><div class="kpi-value">${fmtPct(trk.pctVendido)}</div></div>
+        <div class="kpi"><div class="lbl">Receita realizada</div><div class="kpi-value">${fmtCur(trk.receitaRealizada)}</div></div>
+        <div class="kpi"><div class="lbl">Meta de vendas (Base)</div><div class="kpi-value">${fmtInt(trk.metaVendas)}</div></div>
+        <div class="kpi"><div class="lbl">Gap para a meta</div><div class="kpi-value">${fmtInt(trk.gap)}</div></div>
+        <div class="kpi"><div class="lbl">Dias restantes</div><div class="kpi-value">${fmtInt(trk.diasRestantes)}</div></div>
+        <div class="kpi"><div class="lbl">Velocidade média (ing./dia)</div><div class="kpi-value">${fmtNum(trk.velocidade,2)}</div></div>
+        <div class="kpi"><div class="lbl">Venda diária necessária</div><div class="kpi-value">${fmtNum(trk.vendaDiariaNecessaria,2)}</div></div>
+        <div class="kpi"><div class="lbl">Projeção de público final</div><div class="kpi-value">${fmtInt(trk.projecaoFinal)}</div></div>
+      </div>
+    </div>
+  </div>`;
+};
+ACTIONS.addLot = (scen)=>{ state.vendas[scen].push({id:uid(), lote:'Novo lote', preco:100, qtd:0}); saveState(); render(); };
+ACTIONS.rmLot = (scen,i)=>{ state.vendas[scen].splice(Number(i),1); saveState(); render(); };
+
+/* ================= PATROCINIOS ================= */
+VIEWS.patrocinios = function(){
+  const scen = state.ui.scenTab.patrocinios;
+  const tiers = state.patrocinios[scen];
+  const p = computePatrocinio(scen);
+
+  const stageRows = STAGE_LIST.map(s=>`<div class="kv"><span class="k">${s}</span><span class="v"><input id="${mkId('stageProb.'+s)}" type="number" step="1" style="width:70px; display:inline-block;" data-bind="stageProb.${s}" data-kind="pct" value="${Math.round(state.stageProb[s]*1000)/10}"> %</span></div>`).join('');
+
+  const rows = tiers.map((t,i)=>{
+    const alvo = t.valorUnit*t.qtd;
+    const prob = Number(t.prob)||0;
+    const ponderada = alvo*prob;
+    return `<tr>
+      <td>${tblInput(`patrocinios.${scen}.${i}.cota`, t.cota)}</td>
+      <td class="num">${tblInput(`patrocinios.${scen}.${i}.valorUnit`, t.valorUnit, {type:'number', step:'500', cls:'num'})}</td>
+      <td class="num">${tblInput(`patrocinios.${scen}.${i}.qtd`, t.qtd, {type:'number', cls:'num'})}</td>
+      <td><select id="${mkId('patrocinios.'+scen+'.'+i+'.estagio')}" data-bind="patrocinios.${scen}.${i}.estagio">${STAGE_LIST.map(s=>`<option value="${s}" ${s===t.estagio?'selected':''}>${s}</option>`).join('')}</select></td>
+      <td class="num">${tblInput(`patrocinios.${scen}.${i}.prob`, Math.round(prob*1000)/10, {type:'number', step:'1', cls:'num', kind:'pct', width:'62px'})}</td>
+      <td class="num mono">${fmtCur(alvo)}</td>
+      <td class="num mono">${fmtCur(ponderada)}</td>
+      <td><button class="rm" data-action="rmTier:${scen}:${i}">✕</button></td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="topline"><div><h1>Patrocínios ${infoIcon('Pipeline comercial de cotas de patrocínio. A Probabilidade é editável linha a linha — o Estágio é só uma etiqueta de acompanhamento (não altera o cálculo). Receita ponderada = Valor × Qtd × Probabilidade.')}</h1><div class="desc">Pipeline comercial por cenário. A probabilidade de fechamento é editável cota a cota.</div></div></div>
+
+  <div class="card" style="padding:14px 18px; margin-bottom:20px;">
+    <h3 style="margin:0 0 8px; font-size:13.5px;">Probabilidade sugerida por estágio ${infoIcon('Apenas uma referência rápida para você preencher a coluna Probabilidade de cada cota manualmente — mudar o Estágio não recalcula a probabilidade sozinho.')} <span class="hint">(referência — ajuste a probabilidade de cada cota na tabela abaixo)</span></h3>
+    <div class="gridN">${stageRows}</div>
+  </div>
+
+  ${scenPills('ui.scenTab.patrocinios', scen)}
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Cota</th><th class="num">Valor unitário</th><th class="num">Qtd. alvo</th><th>Estágio</th><th class="num">Prob. %</th><th class="num">Receita alvo</th><th class="num">Receita ponderada</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td colspan="2">Total</td><td class="num mono">${fmtInt(p.nCotas)}</td><td></td><td></td><td class="num mono">${fmtCur(p.nominal)}</td><td class="num mono">${fmtCur(p.esperado)}</td><td></td></tr></tfoot>
+    </table>
+  </div>
+  <button class="btn small" style="margin-top:10px;" data-action="addTier:${scen}">+ Adicionar cota</button>
+
+  <div class="gridN" style="margin-top:18px;">
+    <div class="kpi"><div class="lbl">Patrocínio contratado (assinado)</div><div class="kpi-value">${fmtCur(p.contratado)}</div></div>
+    <div class="kpi"><div class="lbl">Patrocínio em pipeline</div><div class="kpi-value">${fmtCur(p.pipeline)}</div></div>
+    <div class="kpi"><div class="lbl">Receita ponderada (esperado)</div><div class="kpi-value">${fmtCur(p.esperado)}</div></div>
+  </div>`;
+};
+ACTIONS.addTier = (scen)=>{ state.patrocinios[scen].push({id:uid(), cota:'Nova cota', valorUnit:5000, qtd:1, estagio:'Prospecção', prob:state.stageProb['Prospecção']||0.15, contrapartida:'', perfil:''}); saveState(); render(); };
+ACTIONS.rmTier = (scen,i)=>{ state.patrocinios[scen].splice(Number(i),1); saveState(); render(); };
+
+/* ================= CUSTOS ================= */
+const CUSTO_STATUS = ['Não iniciado','Em cotação','Contratado','Pago Parcial','Pago Total','Cancelado'];
+VIEWS.custos = function(){
+  const cs = computeCustosSummary();
+  let lastGroup = null;
+  const rows = cs.rows.map((r,i)=>{
+    const groupHdr = r.grupo!==lastGroup ? `<tr class="section-hdr-row"><td colspan="12">${r.grupo}</td></tr>` : '';
+    lastGroup = r.grupo;
+    return groupHdr + `<tr>
+      <td>${r.subcategoria}</td>
+      <td>${tblInput(`custos.${i}.fornecedor`, r.fornecedor)}</td>
+      <td class="num mono">${fmtCur(r.orcInicial)}</td>
+      <td class="num">${tblInput(`custos.${i}.orcamentoAprovado`, Math.round(r.orcAprovado), {type:'number', cls:'num'})}</td>
+      <td class="num">${tblInput(`custos.${i}.valorContratado`, r.contratado, {type:'number', cls:'num'})}</td>
+      <td class="num">${tblInput(`custos.${i}.valorPago`, r.pago, {type:'number', cls:'num'})}</td>
+      <td class="num mono">${fmtCur(r.saldo)}</td>
+      <td><select id="${mkId('custos.'+i+'.status')}" data-bind="custos.${i}.status">${CUSTO_STATUS.map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}</select></td>
+      <td>${tblInput(`custos.${i}.responsavel`, r.responsavel)}</td>
+      <td>${tblInput(`custos.${i}.dataPrevista`, r.dataPrevista, {type:'date'})}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="topline"><div><h1>Custos — registro PMO${infoIcon('Controle de execução orçamentária do cenário Base: para cada item de custo, acompanhe fornecedor, quanto foi contratado, quanto já foi pago e o status. BAC/AC/EAC/VAC são os indicadores de Earned Value (Project Controls) calculados automaticamente.')}</h1><div class="desc">Cada linha puxa o orçamento inicial do cenário Base. Acompanhe contratação e pagamento por fornecedor (Project Controls / Earned Value adaptado).</div></div></div>
+
+  <div class="gridN" style="margin-bottom:18px;">
+    <div class="kpi"><div class="lbl">BAC — orçamento aprovado</div><div class="kpi-value">${fmtCur(cs.bac)}</div></div>
+    <div class="kpi"><div class="lbl">AC — custo realizado (pago)</div><div class="kpi-value">${fmtCur(cs.ac)}</div></div>
+    <div class="kpi"><div class="lbl">Valor contratado</div><div class="kpi-value">${fmtCur(cs.committed)}</div></div>
+    <div class="kpi"><div class="lbl">ETC — a gastar ainda</div><div class="kpi-value">${fmtCur(cs.etc)}</div></div>
+    <div class="kpi"><div class="lbl">EAC — projeção final</div><div class="kpi-value">${fmtCur(cs.eac)}</div></div>
+    <div class="kpi"><div class="lbl">VAC — variação (BAC−EAC)</div><div class="kpi-value" style="color:${cs.vac>=0?'var(--good)':'var(--bad)'}">${fmtCur(cs.vac)}</div></div>
+    <div class="kpi"><div class="lbl">% comprometido</div><div class="kpi-value">${fmtPct(cs.pctComprom)}</div></div>
+    <div class="kpi"><div class="lbl">% pago</div><div class="kpi-value">${fmtPct(cs.pctPago)}</div></div>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Subcategoria</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+  <div class="hint" style="margin-top:8px;">Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal.</div>`;
+};
+
+/* ================= ORCAMENTO x REAL ================= */
+VIEWS.oxr = function(){
+  const rows = computeOxR();
+  const totals = {
+    orcInicial: sum(rows.map(r=>r.orcInicial)), orcRevisado: sum(rows.map(r=>r.orcRevisado)),
+    contratado: sum(rows.map(r=>r.contratado)), realizado: sum(rows.map(r=>r.realizado)),
+    saldo: sum(rows.map(r=>r.saldo)), projFinal: sum(rows.map(r=>r.projFinal)),
+  };
+  const trs = rows.map(r=>`<tr>
+    <td>${r.cat}</td><td class="num mono">${fmtCur(r.orcInicial)}</td><td class="num mono">${fmtCur(r.orcRevisado)}</td>
+    <td class="num mono">${fmtCur(r.contratado)}</td><td class="num mono">${fmtCur(r.realizado)}</td>
+    <td class="num mono">${fmtCur(r.saldo)}</td><td class="num mono">${fmtCur(r.desvio)}</td>
+    <td class="num mono">${fmtPct(r.desvioPct)}</td><td class="num mono">${fmtCur(r.projFinal)}</td><td>${badge(r.classif)}</td>
+  </tr>`).join('');
+  return `
+  <div class="topline"><div><h1>Orçamento × Real${infoIcon('Consolida a aba Custos em 9 categorias e compara o orçamento revisado (aprovado) com o que foi de fato contratado e realizado, sinalizando se cada categoria está Dentro do orçamento, em Atenção ou Estourada.')}</h1><div class="desc">Rollup automático por categoria — tudo vem da aba Custos.</div></div></div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Categoria</th><th class="num">Orç. inicial</th><th class="num">Orç. revisado</th><th class="num">Contratado</th><th class="num">Realizado</th><th class="num">Saldo</th><th class="num">Desvio R$</th><th class="num">Desvio %</th><th class="num">Projeção final</th><th>Classificação</th></tr></thead>
+      <tbody>${trs}</tbody>
+      <tfoot><tr><td>TOTAL</td><td class="num mono">${fmtCur(totals.orcInicial)}</td><td class="num mono">${fmtCur(totals.orcRevisado)}</td>
+        <td class="num mono">${fmtCur(totals.contratado)}</td><td class="num mono">${fmtCur(totals.realizado)}</td>
+        <td class="num mono">${fmtCur(totals.saldo)}</td><td></td><td></td><td class="num mono">${fmtCur(totals.projFinal)}</td><td></td></tr></tfoot>
+    </table>
+  </div>`;
+};
+
+/* ================= FLUXO DE CAIXA ================= */
+function pctMonthTable(title, labels, keys, storePath){
+  const rows = keys.map((k,ri)=>{
+    const cells = MESES.map((_,m)=>{
+      const path = `${storePath}.${k}.${m}`;
+      const v = Math.round((getPath(state, path.split('.'))||0)*1000)/10;
+      return `<td><input id="${mkId(path)}" type="number" step="1" data-bind="${path}" data-kind="pct" value="${v}" style="width:52px; padding:4px 5px; font-size:11.5px;"></td>`;
+    }).join('');
+    return `<tr><td style="white-space:nowrap;">${labels[ri]}</td>${cells}</tr>`;
+  }).join('');
+  return `<div class="tablewrap" style="margin-bottom:10px;"><table>
+    <thead><tr><th>${title}</th>${MESES.map(m=>`<th class="num">${m}</th>`).join('')}</tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+VIEWS.fluxo = function(){
+  const scen = state.fluxo.scen;
+  const fc = computeFluxoCaixa();
+  const cs = computeScenario(scen);
+
+  const alertMsg = fc.alerta==='risco'
+    ? `⚠ Risco: o projeto é lucrativo no total (${fmtCur(fc.resultadoFinal)}), mas apresenta déficit de caixa antes/durante o evento — capital de giro necessário: ${fmtCur(fc.capGiro)}.`
+    : fc.alerta==='risco2' ? `⚠ Risco: o caixa fica negativo em algum mês — capital de giro necessário: ${fmtCur(fc.capGiro)}.`
+    : '✓ Caixa positivo em todos os meses do ano.';
+  const alertCls = fc.alerta==='ok' ? 'good' : 'bad';
+
+  return `
+  <div class="topline"><div><h1>Fluxo de caixa${infoIcon('Projeta entradas e saídas mês a mês para enxergar o caixa antes do evento. Distribua o % de cada linha de receita/custo ao longo do ano; o app calcula o saldo acumulado e avisa se falta capital de giro mesmo quando o resultado final é positivo.')}</h1><div class="desc">Distribua o % de cada linha ao longo dos meses (referência: cenário selecionado abaixo).</div></div></div>
+
+  <div class="pillrow">${SCEN.map(s=>`<button class="pill ${s===scen?'active':''}" data-tab="fluxo.scen:${s}">${SCEN_LABEL[s]}</button>`).join('')}
+    <label class="field" style="flex-direction:row; align-items:center; gap:6px; margin-left:14px;">
+      <span class="lbl" style="white-space:nowrap;">Saldo inicial de caixa</span>
+      <input id="${mkId('fluxo.saldoInicial')}" type="number" step="100" data-bind="fluxo.saldoInicial" value="${state.fluxo.saldoInicial}" style="width:120px;">
+    </label>
+  </div>
+
+  <div class="section">
+    <h2>Entradas <span class="hint">% do total anual em cada mês</span></h2>
+    ${pctMonthTable('Linha', FC_ENT_LABELS, FC_ENT_KEYS, 'fluxo.pctEnt')}
+    <h2 style="margin-top:20px;">Saídas <span class="hint">% do total anual em cada mês</span></h2>
+    ${pctMonthTable('Linha', FC_SAI_LABELS, FC_SAI_KEYS, 'fluxo.pctSai')}
+  </div>
+
+  <div class="section">
+    <h2>Saldo de caixa projetado — ${SCEN_LABEL[scen]}</h2>
+    <div class="chartwrap" style="height:260px;">${svgLineAreaChart(MESES, [
+      {data:fc.acumulado, color:'var(--accent)', area:true},
+      {data:fc.totalEnt, color:'var(--good)', dash:true},
+      {data:fc.totalSai, color:'var(--bad)', dash:true},
+    ])}</div>
+    ${chartLegend([{label:'Saldo acumulado', color:'var(--accent)'},{label:'Entradas', color:'var(--good)'},{label:'Saídas', color:'var(--bad)'}])}
+    <div class="gridN" style="margin-top:14px;">
+      <div class="kpi"><div class="lbl">Entradas totais</div><div class="kpi-value">${fmtCur(sum(fc.totalEnt))}</div></div>
+      <div class="kpi"><div class="lbl">Saídas totais</div><div class="kpi-value">${fmtCur(sum(fc.totalSai))}</div></div>
+      <div class="kpi"><div class="lbl">Resultado do exercício</div><div class="kpi-value">${fmtCur(fc.resultadoFinal)}</div></div>
+      <div class="kpi"><div class="lbl">Necessidade de capital de giro</div><div class="kpi-value">${fmtCur(fc.capGiro)}</div></div>
+    </div>
+    <div class="callout" style="margin-top:14px; border-color:var(--${alertCls}); background:var(--${alertCls}-soft); color:var(--${alertCls});">
+      <strong>${alertMsg}</strong>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Capital de giro por cenário <span class="hint">reutiliza as mesmas distribuições mensais acima</span></h2>
+    <div class="gridN">${SCEN.map(s=>`<div class="kpi"><div class="lbl">${SCEN_LABEL[s]}</div><div class="kpi-value">${fmtCur(capGiroFor(s))}</div></div>`).join('')}</div>
+  </div>`;
+};
+
+/* ================= BREAK-EVEN ================= */
+VIEWS.breakeven = function(){
+  const be = SCEN.reduce((acc,s)=>(acc[s]=computeBreakEven(s),acc),{});
+  const rows = [
+    ['Ponto de equilíbrio — ingressos SEM patrocínio', s=>fmtInt(be[s].beSem)],
+    ['Ponto de equilíbrio — ingressos COM patrocínio esperado', s=>fmtInt(be[s].beCom)],
+    ['% mínimo de ocupação da capacidade', s=>fmtPct(be[s].pctCapBe)],
+    ['Receita mínima necessária (= Custo Total)', s=>fmtCur(be[s].custoTotal)],
+    ['Patrocínio mínimo necessário (cobrir o cachê)', s=>fmtCur(be[s].patroMin)],
+    ['Margem de segurança', s=>fmtPct(be[s].mseg)],
+    ['Ticket médio mínimo (mantendo demais premissas)', s=>fmtCur2(be[s].ticketMinimo)],
+  ];
+  const scen = state.breakeven.scen;
+  const sim1 = simulador1(scen, Number(state.breakeven.simPatrocinio)||0);
+  const sim2 = simulador2(scen, Number(state.breakeven.simIngressos)||0);
+  const sim3 = simulador3(scen, Number(state.breakeven.simCache)||0);
+  const sim4 = simulador4(scen, Number(state.breakeven.simMargem)||0);
+
+  return `
+  <div class="topline"><div><h1>Ponto de equilíbrio${infoIcon('Quantos ingressos (ou quanto patrocínio) você precisa para não ter prejuízo, em cada cenário. Os 4 simuladores abaixo respondem perguntas rápidas de "e se" sem você precisar mexer nas premissas.')}</h1><div class="desc">Métricas por cenário, mais simuladores "e se?" para apoiar decisões rápidas.</div></div></div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Indicador</th>${SCEN.map(s=>`<th class="num">${SCEN_LABEL[s]}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(([label,fn])=>`<tr><td>${label}</td>${SCEN.map(s=>`<td class="num mono">${fn(s)}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>
+  </div>
+
+  <div class="section" style="margin-top:26px;">
+    <h2>Simuladores "e se...?"</h2>
+    ${scenPills('breakeven.scen', scen)}
+    <div class="grid2">
+      <div class="card" style="padding:16px 18px;">
+        <h3 style="margin:0 0 8px; font-size:13.5px;">1 · Se o patrocínio for R$ ___, quantos ingressos preciso vender?</h3>
+        ${fld('Patrocínio hipotético', 'breakeven.simPatrocinio', {kind:'currency', step:'5000'})}
+        <div class="kv total" style="margin-top:8px;"><span class="k">Ingressos necessários</span><span class="v">${fmtInt(sim1)}</span></div>
+      </div>
+      <div class="card" style="padding:16px 18px;">
+        <h3 style="margin:0 0 8px; font-size:13.5px;">2 · Se eu vender ___ ingressos, quanto de patrocínio preciso?</h3>
+        ${fld('Ingressos hipotéticos', 'breakeven.simIngressos', {kind:'int'})}
+        <div class="kv total" style="margin-top:8px;"><span class="k">Patrocínio necessário</span><span class="v">${fmtCur(sim2)}</span></div>
+      </div>
+      <div class="card" style="padding:16px 18px;">
+        <h3 style="margin:0 0 8px; font-size:13.5px;">3 · Se o cachê subir para R$ ___, qual o novo break-even?</h3>
+        ${fld('Novo cachê hipotético', 'breakeven.simCache', {kind:'currency', step:'5000'})}
+        <div class="kv"><span class="k">Novo custo total</span><span class="v">${fmtCur(sim3.novoCustoTotal)}</span></div>
+        <div class="kv total"><span class="k">Novo break-even (ingressos)</span><span class="v">${fmtInt(sim3.novoBreakEven)}</span></div>
+      </div>
+      <div class="card" style="padding:16px 18px;">
+        <h3 style="margin:0 0 8px; font-size:13.5px;">4 · Qual o ticket médio mínimo para atingir a margem alvo ___?</h3>
+        ${fld('Margem líquida alvo', 'breakeven.simMargem', {kind:'pct'})}
+        <div class="kv total" style="margin-top:8px;"><span class="k">Ticket médio mínimo</span><span class="v">${fmtCur2(sim4)}</span></div>
+      </div>
+    </div>
+  </div>`;
+};
+
+/* ================= SENSIBILIDADE ================= */
+VIEWS.sensibilidade = function(){
+  const scen = state.sensibilidade.scen;
+  const base = computeScenario(scen).resultado;
+  const receitaBase = computeScenario(scen).receitaTotal;
+
+  const matrixRows = SENS_VARS.map(v=>{
+    const cells = SENS_VARIACOES.map(variacao=>{
+      const r = sensResultado(scen, v.key, variacao);
+      const isBase = variacao===0;
+      return `<td class="num mono" style="${isBase?'font-weight:700;':''}">${fmtCur(r)}</td>`;
+    }).join('');
+    return `<tr><td>${v.label}</td>${cells}</tr>`;
+  }).join('');
+
+  const rankRows = SENS_VARS.map(v=>{
+    const rNeg = sensResultado(scen, v.key, -0.2), rPos = sensResultado(scen, v.key, 0.2);
+    const impacto = Math.max(Math.abs(rNeg-base), Math.abs(rPos-base));
+    const pct = receitaBase ? impacto/receitaBase : 0;
+    return {label:v.label, impacto, pct, nivel: sensLevel(pct)};
+  }).sort((a,b)=>b.impacto-a.impacto);
+
+  return `
+  <div class="topline"><div><h1>Análise de sensibilidade${infoIcon('Testa o quanto o resultado financeiro muda se uma única variável (vendas, ticket, patrocínio, cachê, custos...) subir ou descer, mantendo tudo o mais igual. O ranking mostra quais variáveis pesam mais no resultado.')}</h1><div class="desc">Impacto no resultado quando cada variável muda isoladamente (demais premissas mantidas fixas).</div></div></div>
+  ${scenPills('sensibilidade.scen', scen)}
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Variável</th>${SENS_VARIACOES.map(v=>`<th class="num">${v===0?'BASE':(v>0?'+':'')+Math.round(v*100)+'%'}</th>`).join('')}</tr></thead>
+      <tbody>${matrixRows}</tbody>
+    </table>
+  </div>
+
+  <div class="section" style="margin-top:26px;">
+    <h2>Ranking de impacto <span class="hint">variação de referência: ±20%</span></h2>
+    <div class="tablewrap" style="padding:12px 6px;">${svgHBarChart(rankRows.map(r=>({label:r.label, value:r.impacto, color:levelColor(r.nivel)})), {fmt:v=>fmtCur0k(v)})}</div>
+  </div>`;
+};
+function levelColor(n){ return n==='Baixo'?'var(--good)':n==='Moderado'?'var(--gold)':n==='Alto'?'var(--warn)':'var(--bad)'; }
+
+/* ================= RISCOS ================= */
+VIEWS.riscos = function(){
+  const risks = state.riscos;
+  const rows = risks.map((r,i)=>{
+    const score = riskScore(r); const nivel = riskLevel(score);
+    return `<tr>
+      <td><select id="${mkId('riscos.'+i+'.categoria')}" data-bind="riscos.${i}.categoria">${RISK_CATS.map(c=>`<option ${c===r.categoria?'selected':''}>${c}</option>`).join('')}</select></td>
+      <td style="min-width:190px;">${tblInput(`riscos.${i}.risco`, r.risco)}</td>
+      <td class="num">${tblInput(`riscos.${i}.prob`, r.prob, {type:'number', cls:'num'})}</td>
+      <td class="num">${tblInput(`riscos.${i}.impacto`, r.impacto, {type:'number', cls:'num'})}</td>
+      <td class="num mono">${score}</td>
+      <td>${badge(nivel)}</td>
+      <td><select id="${mkId('riscos.'+i+'.resposta')}" data-bind="riscos.${i}.resposta">${RESPOSTAS.map(s=>`<option ${s===r.resposta?'selected':''}>${s}</option>`).join('')}</select></td>
+      <td><select id="${mkId('riscos.'+i+'.status')}" data-bind="riscos.${i}.status">${STATUS_RISCO.map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}</select></td>
+      <td><button class="rm" data-action="rmRisco:${i}">✕</button></td>
+    </tr>`;
+  }).join('');
+
+  const heat = [5,4,3,2,1].map(prob=>{
+    const cells = [1,2,3,4,5].map(imp=>{
+      const count = risks.filter(r=>r.prob===prob && r.impacto===imp).length;
+      const score = prob*imp;
+      const bg = score>=16?'var(--bad-soft)':score>=10?'#F3D3B0':score>=5?'var(--warn-soft)':'var(--good-soft)';
+      const fg = score>=16?'var(--bad)':score>=10?'#A85A1E':score>=5?'var(--warn)':'var(--good)';
+      return `<div class="heatcell" style="background:${bg}; color:${fg};">${count||''}</div>`;
+    }).join('');
+    return `<div class="heataxis">${prob}</div>${cells}`;
+  }).join('');
+
+  return `
+  <div class="topline"><div><h1>Gestão de riscos${infoIcon('Registro de riscos do projeto: cada linha tem uma Probabilidade e um Impacto de 1 a 5, cujo produto vira o Score e a classificação de severidade. O mapa de calor mostra onde os riscos estão concentrados.')}</h1><div class="desc">Risk register PMO — Probabilidade e Impacto de 1 (muito baixo) a 5 (muito alto). Score = Probabilidade × Impacto.</div></div></div>
+
+  <div class="gridN" style="margin-bottom:18px;">
+    <div class="kpi"><div class="lbl">Total de riscos</div><div class="kpi-value">${risks.length}</div></div>
+    <div class="kpi"><div class="lbl">Críticos abertos (score ≥ 16)</div><div class="kpi-value" style="color:${riscosCriticosAbertos()>0?'var(--bad)':'var(--good)'}">${riscosCriticosAbertos()}</div></div>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Categoria</th><th>Risco</th><th class="num">Prob.</th><th class="num">Impacto</th><th class="num">Score</th><th>Nível</th><th>Resposta</th><th>Status</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+  <button class="btn small" style="margin-top:10px;" data-action="addRisco">+ Adicionar risco</button>
+
+  <div class="section" style="margin-top:26px;">
+    <h2>Mapa de calor — Probabilidade × Impacto</h2>
+    <div class="heatgrid">
+      <div></div><div class="heataxis">1</div><div class="heataxis">2</div><div class="heataxis">3</div><div class="heataxis">4</div><div class="heataxis">5</div>
+      ${heat}
+    </div>
+    <div class="hint" style="margin-top:8px;">Linhas = probabilidade, colunas = impacto. Número = quantidade de riscos naquela célula.</div>
+  </div>`;
+};
+ACTIONS.addRisco = ()=>{ state.riscos.push({id:uid(), categoria:'Operação', risco:'Novo risco', causa:'', consequencia:'', prob:3, impacto:3, resposta:'Mitigar', plano:'', responsavel:'Produção', prazo:'', status:'Aberto'}); saveState(); render(); };
+ACTIONS.rmRisco = (i)=>{ state.riscos.splice(Number(i),1); saveState(); render(); };
+
+/* ================= GATES PMO ================= */
+VIEWS.gates = function(){
+  const gates = computeGates();
+  const decisoes = ['Aprovado','Aprovado com ressalvas','Reprovado','Pendente'];
+  const respKeys = {1:'g1',2:'g2',3:'g3',4:'g4',5:'g5'};
+
+  const rows = gates.map(g=>{
+    const statusTxt = g.n===3 ? (g.atingido?'Atingido':g.parcial?'Em andamento':'Não atingido')
+      : (g.atingido?'Atingido':'Não atingido');
+    const resultCell = g.n===3
+      ? `<select id="${mkId('gates.gate3')}" data-bind="gates.gate3"><option ${state.gates.gate3==='Sim'?'selected':''}>Sim</option><option ${state.gates.gate3==='Não'?'selected':''}>Não</option><option ${state.gates.gate3==='Parcial'?'selected':''}>Parcial</option></select>`
+      : `<span class="mono">${g.resultadoFmt||g.resultado}</span>`;
+    const metaCell = g.n===2||g.n===4 ? `<span class="mono">${g.metaFmt}</span>` : g.meta;
+    const rk = respKeys[g.n];
+    return `<tr>
+      <td><strong>Gate ${g.n}</strong><br><span class="hint">${g.titulo}</span></td>
+      <td style="max-width:260px;">${g.criterio}</td>
+      <td class="num">${metaCell}</td>
+      <td class="num">${resultCell}</td>
+      <td>${badge(statusTxt)}</td>
+      <td>${tblInput(`gates.resp.${rk}`, state.gates.resp[rk])}</td>
+      <td>${tblInput(`gates.prazo.${rk}`, state.gates.prazo[rk], {type:'date'})}</td>
+      <td><select id="${mkId('gates.decisao.'+rk)}" data-bind="gates.decisao.${rk}">${decisoes.map(d=>`<option ${d===state.gates.decisao[rk]?'selected':''}>${d}</option>`).join('')}</select></td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="topline"><div><h1>Gates PMO${infoIcon('Cinco pontos de controle formais do projeto — do "podemos seguir com o evento" até a liberação final. Cada gate compara uma meta com o resultado atual e mostra se já foi Atingido.')}</h1><div class="desc">Pontos formais de decisão go/no-go ao longo do ciclo de vida do evento.</div></div></div>
+
+  <div class="card" style="padding:14px 18px; margin-bottom:18px;">
+    <div class="gridN">
+      ${fld('Gate 2 · % mínimo de patrocínio/garantia exigido', 'gates.pctPatrocinioMin', {kind:'pct'})}
+      ${fld('Gate 4 · % mínimo de vendas realizadas exigido', 'gates.pctVendasMin', {kind:'pct'})}
+    </div>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Gate</th><th>Critério</th><th class="num">Meta</th><th class="num">Resultado atual</th><th>Status</th><th>Responsável</th><th>Prazo</th><th>Decisão</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+  <div class="hint" style="margin-top:10px;">O Gate 2 não deve ser considerado atingido enquanto o patrocínio contratado não alcançar o % mínimo definido acima — essa é a trava antes de contratar definitivamente a atração principal.</div>`;
+};
+
+/* ================= COMPARATIVO ================= */
+VIEWS.comparativo = function(){
+  const cs = allScenarios();
+  const rows = [
+    ['Pagantes', s=>fmtInt(cs[s].pagantes)], ['% Ocupação', s=>fmtPct(cs[s].ocupacao)],
+    ['Ticket médio', s=>fmtCur2(cs[s].ticketMedio)], ['Receita de ingressos', s=>fmtCur(cs[s].receitaIngressos)],
+    ['Receita de consumo/ativações', s=>fmtCur(cs[s].receitaConsumo)], ['Patrocínio esperado', s=>fmtCur(cs[s].patrocinio)],
+    ['RECEITA TOTAL', s=>fmtCur(cs[s].receitaTotal)], ['CUSTO TOTAL', s=>fmtCur(cs[s].custoTotal)],
+    ['RESULTADO', s=>fmtCur(cs[s].resultado)], ['MARGEM', s=>fmtPct(cs[s].margem)],
+    ['Break-even (ingressos)', s=>fmtInt(cs[s].beCom)],
+    ['Exposição financeira', s=>fmtCur(computeCustosSummary().bac - cs[s].patroContratado)],
+    ['Necessidade de capital de giro', s=>fmtCur(capGiroFor(s))],
+    ['Status', s=>badge(cs[s].status)], ['Classificação', s=>badge(cs[s].classif)],
+  ];
+  return `
+  <div class="topline"><div><h1>Comparativo dos 3 cenários${infoIcon('Coloca Conservador, Base e Agressivo lado a lado nos mesmos indicadores, com gráficos de receita, custo, resultado e margem para facilitar a comparação visual.')}</h1><div class="desc">Tudo aqui é lido diretamente do motor de cálculo.</div></div></div>
+  <div class="tablewrap" style="margin-bottom:26px;">
+    <table>
+      <thead><tr><th>Indicador</th>${SCEN.map(s=>`<th class="num">${SCEN_LABEL[s]}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(([l,fn])=>`<tr><td>${l}</td>${SCEN.map(s=>`<td class="num">${fn(s)}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>
+  </div>
+  <div class="grid2">
+    <div class="card" style="padding:14px 18px;"><h3 style="margin:0 0 8px; font-size:13px;">Receita total</h3><div class="chartwrap" style="height:200px;">${svgBarChart(SCEN.map(s=>({label:SCEN_LABEL[s], value:cs[s].receitaTotal, color:SCEN_HEX[s]})), {fmt:v=>fmtCur0k(v)})}</div></div>
+    <div class="card" style="padding:14px 18px;"><h3 style="margin:0 0 8px; font-size:13px;">Custo total</h3><div class="chartwrap" style="height:200px;">${svgBarChart(SCEN.map(s=>({label:SCEN_LABEL[s], value:cs[s].custoTotal, color:SCEN_HEX[s]})), {fmt:v=>fmtCur0k(v)})}</div></div>
+    <div class="card" style="padding:14px 18px;"><h3 style="margin:0 0 8px; font-size:13px;">Resultado</h3><div class="chartwrap" style="height:200px;">${svgBarChart(SCEN.map(s=>({label:SCEN_LABEL[s], value:cs[s].resultado, color:SCEN_HEX[s]})), {fmt:v=>fmtCur0k(v)})}</div></div>
+    <div class="card" style="padding:14px 18px;"><h3 style="margin:0 0 8px; font-size:13px;">Margem</h3><div class="chartwrap" style="height:200px;">${svgBarChart(SCEN.map(s=>({label:SCEN_LABEL[s], value:cs[s].margem, color:SCEN_HEX[s]})), {fmt:v=>fmtPct(v)})}</div></div>
+  </div>`;
+};
+
+/* ================= SCORE DE VIABILIDADE ================= */
+VIEWS.score = function(){
+  const scen = state.score.scen;
+  const res = computeScore();
+  const gaugeColor = res.score>=80?'var(--good)':res.score>=50?'var(--warn)':'var(--bad)';
+
+  const factorRows = res.factors.map((f,i)=>`<tr>
+    <td>${f.label}</td>
+    <td class="num"><span style="display:inline-flex; align-items:center; gap:4px; justify-content:flex-end;">${tblInput(`score.weights.${Object.keys(state.score.weights)[i]}`, Math.round(f.weight*1000)/10, {type:'number', cls:'num', kind:'pct', width:'56px'})}<span class="hint">%</span></span></td>
+    <td class="num mono">${f.fmt(f.valor)}</td>
+    <td class="num mono">${fmtNum(f.sub,1)}</td>
+  </tr>`).join('');
+
+  return `
+  <div class="topline"><div><h1>Score de viabilidade${infoIcon('Índice de 0 a 100 que combina margem, distância do break-even, patrocínio contratado, exposição financeira, riscos e capital de giro num único número, para responder rápido: o evento está viável?')}</h1><div class="desc">Índice de 0 a 100. Pesos e metas de referência são editáveis.</div></div></div>
+  ${scenPills('score.scen', scen)}
+
+  <div class="grid2">
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Fator</th><th class="num">Peso</th><th class="num">Valor atual</th><th class="num">Subscore</th></tr></thead>
+        <tbody>${factorRows}</tbody>
+        <tfoot><tr><td>Soma dos pesos</td><td class="num mono">${fmtPct(res.totalWeight)}</td><td></td><td></td></tr></tfoot>
+      </table>
+    </div>
+    <div class="card" style="padding:22px; text-align:center;">
+      <div class="hint">SCORE DE VIABILIDADE</div>
+      <div style="font-family:'Fraunces',serif; font-size:56px; font-weight:600; color:${gaugeColor}; line-height:1;">${fmtNum(res.score,1)}</div>
+      <div style="margin-top:10px;">${badge(res.classif)}</div>
+      <div class="divider"></div>
+      <div style="text-align:left;">
+        ${state.score.bands.map(b=>`<div class="kv"><span class="k">${b[2]}</span><span class="v mono">${b[0]}–${b[1]===100?100:Math.floor(b[1])}</span></div>`).join('')}
+      </div>
+    </div>
+  </div>`;
+};
+
+/* ================= BOOT ================= */
+$('#navgroups').addEventListener('click', (e)=>{
+  const btn = e.target.closest('[data-nav]');
+  if(btn) goTo(btn.dataset.nav);
+});
+$('#resetBtn').addEventListener('click', ()=>{
+  if(confirm('Isso vai apagar os dados salvos neste navegador e restaurar os valores de exemplo. Continuar?')){
+    localStorage.removeItem(STORAGE_KEY);
+    state = freshState();
+    saveState();
+    currentView = 'dashboard';
+    render();
+  }
+});
+
+render();
+</script>
