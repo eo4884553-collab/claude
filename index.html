@@ -59,6 +59,11 @@ main{flex:1;padding:14px;}
 .panel h2{margin:0 0 4px;font-size:15px;}
 .panel h3{margin:0 0 8px;font-size:12.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;}
 .hint{color:var(--muted);font-size:11.5px;line-height:1.5;}
+.info-icon{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--muted2);color:var(--bg);font-size:10px;font-weight:700;font-style:normal;cursor:help;margin-left:7px;position:relative;vertical-align:middle;line-height:1;}
+.info-icon:hover,.info-icon:focus{background:var(--accent);outline:none;}
+.info-icon .info-tip{display:none;position:absolute;top:130%;left:0;z-index:60;width:340px;max-width:min(340px,70vw);background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;font-weight:400;line-height:1.5;color:var(--text);box-shadow:0 10px 28px rgba(0,0,0,.4);text-align:left;white-space:normal;}
+.info-icon:hover .info-tip,.info-icon:focus .info-tip{display:block;}
+.panel h2,.panel h3{display:flex;align-items:center;flex-wrap:wrap;}
 .grid{display:grid;gap:10px;}
 .grid.kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));}
 .kpi{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
@@ -343,6 +348,11 @@ function normStr(s){ return (s||'').toString().toLowerCase().normalize('NFD').re
 function escapeHtml(s){
   return (s==null?'':String(s)).replace(/[&<>"']/g, (c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+// Ícone "i" pequeno ao lado de um título — mantém a explicação disponível (passe o mouse ou
+// toque/foque no ícone) sem poluir a tela com parágrafos fixos.
+function infoIcon(text){
+  return `<span class="info-icon" tabindex="0" role="note" aria-label="${escapeHtml(text)}">i<span class="info-tip">${escapeHtml(text)}</span></span>`;
+}
 function downloadFile(filename, content, mime){
   const blob = new Blob([content], {type: mime || 'text/plain'});
   const url = URL.createObjectURL(blob);
@@ -537,6 +547,12 @@ function recalcAll(){
   const reajustePercent = state.reajustePercent || 0;
   const totalMedidoReajustado = totalMedidoBM * (1 + reajustePercent);
   const margemReajustada = totalMedidoReajustado - totalCustoRealizado;
+  // Custo real: custo de material já lançado (custoItems) + custo real de mão de obra/serviços
+  // medidos nos contratos de fornecedores (aba Contratos) — mais preciso que a Meta de Custo,
+  // que distribui o valor orçado do contrato nas linhas de mão de obra sem refletir o executado.
+  const custoContratos = sumBy(state.contratos||[], 'valorMedidoTotal');
+  const custoReal = totalCustoRealizado + custoContratos;
+  const margemReal = totalMedidoBM - custoReal;
 
   const statusCounts = {'Não faturado':0,'Em aprovação':0,'Faturado aprovado':0};
   state.medicaoItems.forEach(it=>{ statusCounts[it.statusFaturamento||'Não faturado'] = (statusCounts[it.statusFaturamento||'Não faturado']||0)+1; });
@@ -547,6 +563,7 @@ function recalcAll(){
     reajustePercent, totalMedidoReajustado:+totalMedidoReajustado.toFixed(2),
     qtdContratadaTotal:+qtdContratadaTotal.toFixed(2), qtdMedidaTotal:+qtdMedidaTotal.toFixed(2),
     totalMetaCusto:+totalMetaCusto.toFixed(2), totalCustoRealizado:+totalCustoRealizado.toFixed(2),
+    custoContratos:+custoContratos.toFixed(2), custoReal:+custoReal.toFixed(2), margemReal:+margemReal.toFixed(2),
     margemTotal:+margemTotal.toFixed(2), margemReajustada:+margemReajustada.toFixed(2), statusCounts,
     avancoFisico: qtdContratadaTotal>0 ? qtdMedidaTotal/qtdContratadaTotal : 0,
     avancoFinanceiro: totalContrato>0 ? totalMedidoBM/totalContrato : 0,
@@ -1203,16 +1220,17 @@ function renderKpiStrip(){
     ['Meta de Custo', fmtMoney(a.totalMetaCusto)],
     ['Custo Realizado', fmtMoney(a.totalCustoRealizado)],
     ['Margem (Fat-Custo)', fmtMoney(a.margemTotal), a.margemTotal<0?'bad':'good'],
+    ['Custo Real', fmtMoney(a.custoReal), null, `Custo de material lançado (${fmtMoney(a.totalCustoRealizado)}) + custo real medido nos contratos de fornecedores (${fmtMoney(a.custoContratos)}) — sobe conforme mais medições de fornecedores são lançadas.`],
+    ['Margem Real', fmtMoney(a.margemReal), a.margemReal<0?'bad':'good', `Medido BM (${fmtMoney(a.totalMedidoBM)}) − Custo Real (${fmtMoney(a.custoReal)}). Mais precisa que a margem padrão, que usa a Meta de Custo (valor orçado distribuído nas linhas de mão de obra) em vez do custo de fornecedor realmente executado.`],
   ];
-  strip.innerHTML = items.map(([l,v,cls])=>`<div class="kpi-mini"><div class="l">${l}</div><div class="v${cls?(' '+cls):''}">${v}</div></div>`).join('');
+  strip.innerHTML = items.map(([l,v,cls,tip])=>`<div class="kpi-mini"${tip?` title="${escapeHtml(tip)}"`:''}><div class="l">${l}</div><div class="v${cls?(' '+cls):''}">${v}</div></div>`).join('');
 }
 
 /* ---------------- IMPORTAR ---------------- */
 function renderImportar(main){
   const p1 = document.createElement('div'); p1.className='panel';
   const ci = state.contratoInfo || {};
-  p1.innerHTML = `<h2>Importar planilhas e documentos</h2>
-    <p class="hint">MEDIÇÃO atualiza Controle Master, Controle de Supressão, Lançar BM, faturamento e dashboards. ORÇAMENTO EXECUTIVO DETALHADO atualiza Físico-Financeiro, metas de custo, custos realizados e margem. Após importar, todos os campos continuam editáveis manualmente. Itens não presentes no arquivo importado são preservados — a base nunca é substituída por uma base vazia.</p>
+  p1.innerHTML = `<h2>Importar planilhas e documentos${infoIcon('MEDIÇÃO atualiza Controle Master, Controle de Supressão, Lançar BM, faturamento e dashboards. ORÇAMENTO EXECUTIVO DETALHADO atualiza Físico-Financeiro, metas de custo, custos realizados e margem. Após importar, todos os campos continuam editáveis manualmente. Itens não presentes no arquivo importado são preservados — a base nunca é substituída por uma base vazia.')}</h2>
     ${ci.contrato||ci.empresa||ci.objeto ? `<p class="hint"><b>Contrato:</b> ${ci.contrato||'—'} &nbsp; <b>Empresa:</b> ${ci.empresa||'—'}<br><b>Objeto:</b> ${ci.objeto||'—'}</p>` : ''}`;
 
   const grid = document.createElement('div'); grid.className='two-col';
@@ -1223,8 +1241,7 @@ function renderImportar(main){
   main.appendChild(p1);
 
   const p2 = document.createElement('div'); p2.className='panel';
-  p2.innerHTML = `<h2>Documentos PDF (leitura local via PDF.js)</h2>
-    <p class="hint">Os PDFs são lidos inteiramente no navegador — nenhum dado é enviado a servidores. A análise por IA (Anthropic) é opcional; sem chave/crédito, a leitura local do texto continua funcionando normalmente.</p>`;
+  p2.innerHTML = `<h2>Documentos PDF (leitura local via PDF.js)${infoIcon('Os PDFs são lidos inteiramente no navegador — nenhum dado é enviado a servidores. A análise por IA (Anthropic) é opcional; sem chave/crédito, a leitura local do texto continua funcionando normalmente.')}</h2>`;
   const drop = document.createElement('div'); drop.className='drop';
   drop.innerHTML = 'Arraste um PDF aqui ou <label style="color:var(--accent);cursor:pointer;">clique para selecionar<input type="file" accept="application/pdf" style="display:none" id="filePdf"></label>';
   ['dragover','dragleave','drop'].forEach(evt=>{
@@ -1237,9 +1254,8 @@ function renderImportar(main){
   p2.appendChild(drop);
 
   const apiRow = document.createElement('div'); apiRow.style.marginTop='10px';
-  apiRow.innerHTML = `<label class="field" style="max-width:420px;">Chave da API Anthropic (opcional, salva só neste navegador)
-    <input type="password" id="anthropicKey" placeholder="sk-ant-..." value="${localStorage.getItem(LS_APIKEY)||''}"></label>
-    <p class="small-note">Se deixado em branco, ou se a conta estiver sem crédito, o app usa apenas a extração local de texto do PDF.js — sem qualquer dependência da API.</p>`;
+  apiRow.innerHTML = `<label class="field" style="max-width:420px;">Chave da API Anthropic (opcional)${infoIcon('Salva só neste navegador. Se deixado em branco, ou se a conta estiver sem crédito, o app usa apenas a extração local de texto do PDF.js — sem qualquer dependência da API.')}
+    <input type="password" id="anthropicKey" placeholder="sk-ant-..." value="${localStorage.getItem(LS_APIKEY)||''}"></label>`;
   p2.appendChild(apiRow);
 
   const pdfList = document.createElement('div'); pdfList.id='pdfList';
@@ -1248,7 +1264,7 @@ function renderImportar(main){
   main.appendChild(p2);
 
   const p3 = document.createElement('div'); p3.className='panel';
-  p3.innerHTML = `<h2>Backup, restauração e publicação</h2>`;
+  p3.innerHTML = `<h2>Backup, restauração e publicação${infoIcon('Backup JSON: baixa um arquivo com todos os dados (medição, custos, histórico, larguras de coluna). Importar JSON: restaura um backup anterior (com confirmação de segurança). Salvar HTML: gera uma cópia deste app com os dados atuais embutidos — ideal para hospedar/publicar online mantendo o mesmo link, substituindo o arquivo hospedado. Salvar no navegador: grava o estado atual em localStorage imediatamente. Restaurar dados originais: apaga os dados salvos neste navegador e recarrega esta cópia com os dados originais nela embutidos — use se números de uma importação ou teste anterior tiverem ficado presos neste navegador. Build desta cópia: '+BUILD_ID)}</h2>`;
   const actions = document.createElement('div'); actions.className='section-actions';
   actions.innerHTML = `
     <button class="btn primary" id="ib_backup">⬇ Backup JSON</button>
@@ -1259,12 +1275,10 @@ function renderImportar(main){
     <input type="file" id="ib_restoreFile" accept=".json" style="display:none">
   `;
   p3.appendChild(actions);
-  p3.innerHTML += `<p class="small-note">Backup JSON: baixa um arquivo com todos os dados (medição, custos, histórico, larguras de coluna). Importar JSON: restaura um backup anterior (com confirmação de segurança). Salvar HTML: gera uma cópia deste app com os dados atuais embutidos — ideal para hospedar/publicar online mantendo o mesmo link, substituindo o arquivo hospedado. Salvar no navegador: grava o estado atual em localStorage imediatamente. Restaurar dados originais: apaga os dados salvos neste navegador e recarrega esta cópia com os dados originais nela embutidos — use se números de uma importação ou teste anterior tiverem ficado presos neste navegador. Build desta cópia: <code>${BUILD_ID}</code>.</p>`;
   main.appendChild(p3);
 
   const p4 = document.createElement('div'); p4.className='panel';
-  p4.innerHTML = `<h2>Exportar planilhas atualizadas (Excel)</h2>
-    <p class="hint">Gera arquivos .xlsx com a mesma estrutura e formatação das planilhas originais (cabeçalhos, hierarquia de disciplina/grupo, colunas por BM, larguras de coluna), já com todos os lançamentos feitos no app.</p>`;
+  p4.innerHTML = `<h2>Exportar planilhas atualizadas (Excel)${infoIcon('Gera arquivos .xlsx com a mesma estrutura e formatação das planilhas originais (cabeçalhos, hierarquia de disciplina/grupo, colunas por BM, larguras de coluna), já com todos os lançamentos feitos no app.')}</h2>`;
   const exActions = document.createElement('div'); exActions.className='section-actions';
   exActions.innerHTML = `
     <button class="btn primary" id="ex_medicao">⬇ Exportar MEDIÇÃO (.xlsx)</button>
@@ -1295,7 +1309,7 @@ function renderImportar(main){
 }
 function buildImportCard(title, desc, inputId, kind, lastInfo){
   const card = document.createElement('div'); card.className='panel'; card.style.margin='0';
-  card.innerHTML = `<h3>${title}</h3><p class="hint">${desc}</p>
+  card.innerHTML = `<h3>${title}${infoIcon(desc)}</h3>
     <div class="import-card">
       <label class="btn primary" style="text-align:center;">Selecionar arquivo .xlsx<input type="file" id="${inputId}" accept=".xlsx,.xls" style="display:none"></label>
       <div class="import-log">${lastInfo ? `Última importação: <b>${lastInfo.when}</b> — ${lastInfo.updated} atualizados, ${lastInfo.added} novos.` : 'Nenhuma importação registrada ainda (base atual carregada da última planilha fornecida).'}</div>
@@ -1392,7 +1406,7 @@ function foldTopN(rows, n, valueKeys){
 function renderDashboard(main){
   const a = state._agg;
   const p = document.createElement('div'); p.className='panel';
-  p.innerHTML = `<h2>Dashboard Executivo</h2><p class="hint">Faturamento (BM), avanço físico-financeiro e alertas consolidados em tempo real a partir da medição e do custo do contrato.</p>`;
+  p.innerHTML = `<h2>Dashboard Executivo${infoIcon('Faturamento (BM), avanço físico-financeiro e alertas consolidados em tempo real a partir da medição e do custo do contrato.')}</h2>`;
   if(a.margemTotal < 0){
     p.innerHTML += `<div class="risk-banner bad">⚠ Risco de margem: custo realizado (${fmtMoney(a.totalCustoRealizado)}) é maior que o faturamento BM (${fmtMoney(a.totalMedidoBM)}). Margem atual: ${fmtMoney(a.margemTotal)}.</div>`;
   } else {
@@ -1500,7 +1514,7 @@ function renderDashboard(main){
 function renderTotalProjeto(main){
   const a = state._agg;
   const p = document.createElement('div'); p.className='panel';
-  p.innerHTML = `<h2>Total do Projeto</h2><p class="hint">Consolidado geral — reflete automaticamente qualquer alteração feita em BM, faturamento, custo ou status.</p>`;
+  p.innerHTML = `<h2>Total do Projeto${infoIcon('Consolidado geral — reflete automaticamente qualquer alteração feita em BM, faturamento, custo ou status.')}</h2>`;
   const kpis = document.createElement('div'); kpis.className='grid kpis';
   kpis.innerHTML = [
     ['Itens de medição', state.medicaoItems.length],
@@ -1540,8 +1554,7 @@ function renderTotalProjeto(main){
 /* ---------------- LANÇAR BM ---------------- */
 function renderLancarBM(main){
   const p = document.createElement('div'); p.className='panel';
-  p.innerHTML = `<h2>Lançar BM & Base de Dados</h2><p class="hint">Lista de todos os subitens da medição. Selecione a BM ativa para lançar quantidade/valor medidos naquele boletim; os acumulados, saldos e status são recalculados automaticamente.</p>
-    <p class="hint"><b>Para aprovar uma medição:</b> use o filtro <b>BM</b> abaixo e escolha o número da BM — a lista mostra só os itens que tiveram quantidade medida naquela BM, e logo acima da tabela aparece o <b>total de quantidade/valor medido e aprovado daquela BM</b>. Aprove item a item com o botão "Aprovar", ou aprove todos de uma vez com "Status em massa". As alterações refletem automaticamente no Dashboard Executivo, Total do Projeto, Histórico de Desvios, Controle de Supressão e Físico-Financeiro.</p>`;
+  p.innerHTML = `<h2>Lançar BM & Base de Dados${infoIcon('Lista de todos os subitens da medição. Selecione a BM ativa para lançar quantidade/valor medidos naquele boletim; os acumulados, saldos e status são recalculados automaticamente. Para aprovar uma medição: use o filtro BM abaixo e escolha o número da BM — a lista mostra só os itens que tiveram quantidade medida naquela BM, e logo acima da tabela aparece o total de quantidade/valor medido e aprovado daquela BM. Aprove item a item com o botão "Aprovar", ou aprove todos de uma vez com "Status em massa". As alterações refletem automaticamente no Dashboard Executivo, Total do Projeto, Histórico de Desvios, Controle de Supressão e Físico-Financeiro.')}</h2>`;
 
   const bmRow = document.createElement('div'); bmRow.className='section-actions'; bmRow.style.alignItems='center';
   bmRow.innerHTML = `<label class="field" style="max-width:220px;">BM ativa
@@ -1720,7 +1733,7 @@ function statusTag(s){
 /* ---------------- CONTROLE DE SUPRESSÃO ---------------- */
 function renderSupressao(main){
   const p = document.createElement('div'); p.className='panel';
-  p.innerHTML = `<h2>Controle de Supressão</h2><p class="hint">Preenchido a partir da planilha de MEDIÇÃO. Total do contrato = coluna TOTAL da medição. Medido BM = soma dos valores medidos em cada BM. Suprimido automático = total do contrato − medido BM. Todos os valores continuam editáveis manualmente (a alteração manual sobrepõe o cálculo automático até ser limpa).</p>`;
+  p.innerHTML = `<h2>Controle de Supressão${infoIcon('Preenchido a partir da planilha de MEDIÇÃO. Total do contrato = coluna TOTAL da medição. Medido BM = soma dos valores medidos em cada BM. Suprimido automático = total do contrato − medido BM. Todos os valores continuam editáveis manualmente (a alteração manual sobrepõe o cálculo automático até ser limpa).')}</h2>`;
   main.appendChild(p);
 
   const p2 = document.createElement('div'); p2.className='panel';
@@ -1794,7 +1807,7 @@ function renderFisicoDashboard(main){
   const consumoTotal = a.totalMetaCusto>0 ? a.totalCustoRealizado/a.totalMetaCusto : 0;
 
   const p = document.createElement('div'); p.className='panel';
-  p.innerHTML = `<h2>Físico-Financeiro — Dashboard</h2><p class="hint">Meta de custo e custo realizado vêm do orçamento executivo; faturamento BM vem da medição. Margem = faturamento BM − custo realizado.</p>`;
+  p.innerHTML = `<h2>Físico-Financeiro — Dashboard${infoIcon('Meta de custo e custo realizado vêm do orçamento executivo; faturamento BM vem da medição. Margem = faturamento BM − custo realizado.')}</h2>`;
   if(a.margemTotal<0){
     p.innerHTML += `<div class="risk-banner bad">⚠ Margem consolidada negativa: ${fmtMoney(a.margemTotal)} — ${emRisco} de ${discRows.length} disciplinas com custo realizado acima do faturamento.</div>`;
   } else {
@@ -1846,8 +1859,7 @@ function renderFisicoDashboard(main){
 function renderFisicoAnalise(main){
   const a = state._agg;
   const p = document.createElement('div'); p.className='panel';
-  p.innerHTML = `<h2>Físico-Financeiro — Análise por Disciplina</h2>
-    <p class="hint">Referente à planilha de ORÇAMENTO EXECUTIVO DETALHADO: meta de custo ("TOTAL MATERIAL + M.O") e custo realizado/aplicado ("VALOR TOTAL") por linha. Faturamento BM vem da planilha de medição. Margem = faturamento BM − custo realizado. Em regra, o faturamento deve ser maior que o custo; quando não for, o risco é sinalizado.</p>`;
+  p.innerHTML = `<h2>Físico-Financeiro — Análise por Disciplina${infoIcon('Referente à planilha de ORÇAMENTO EXECUTIVO DETALHADO: meta de custo ("TOTAL MATERIAL + M.O") e custo realizado/aplicado ("VALOR TOTAL") por linha. Faturamento BM vem da planilha de medição. Margem = faturamento BM − custo realizado. Em regra, o faturamento deve ser maior que o custo; quando não for, o risco é sinalizado.')}</h2>`;
   main.appendChild(p);
 
   const p2 = document.createElement('div'); p2.className='panel';
@@ -1890,7 +1902,7 @@ function renderFisicoAnalise(main){
 }
 function renderFisicoBase(main){
   const p = document.createElement('div'); p.className='panel';
-  p.innerHTML = `<h2>Físico-Financeiro — Base de Dados</h2><p class="hint">Mesmas colunas essenciais da análise por disciplina, em nível de item, totalmente editável. Compartilha os mesmos dados de Lançar Custos — qualquer edição aqui reflete lá e vice-versa.</p>`;
+  p.innerHTML = `<h2>Físico-Financeiro — Base de Dados${infoIcon('Mesmas colunas essenciais da análise por disciplina, em nível de item, totalmente editável. Compartilha os mesmos dados de Lançar Custos — qualquer edição aqui reflete lá e vice-versa.')}</h2>`;
   main.appendChild(p);
   const p2 = document.createElement('div'); p2.className='panel';
   const filterHolder = document.createElement('div'); p2.appendChild(filterHolder);
@@ -1944,7 +1956,7 @@ function renderFisicoBase(main){
 /* ---------------- LANÇAR CUSTOS ---------------- */
 function renderCustos(main){
   const p = document.createElement('div'); p.className='panel';
-  p.innerHTML = `<h2>Lançar Custos</h2><p class="hint">Leitura clara dos itens (quebra de texto e largura ajustável), com lançamento manual de custo realizado ou meta, e importação de Excel para atualização automática.</p>`;
+  p.innerHTML = `<h2>Lançar Custos${infoIcon('Leitura clara dos itens (quebra de texto e largura ajustável), com lançamento manual de custo realizado ou meta, e importação de Excel para atualização automática.')}</h2>`;
   const actions = document.createElement('div'); actions.className='section-actions';
   actions.innerHTML = `<button class="btn primary" id="lc_import">⬆ Importar Excel de custo</button>
     <button class="btn" id="lc_add">+ Lançamento manual</button>
@@ -2146,7 +2158,7 @@ function renderContratos(main){
 function renderContratosList(main){
   const agg = contratoAgg();
   const p = document.createElement('div'); p.className='panel';
-  p.innerHTML = `<h2>Contratos de Fornecedores</h2><p class="hint">Controle dos contratos de prestação de serviço/fornecimento firmados com fornecedores e subcontratados — diretrizes, vigência, saldo e medições/faturamentos lançados por contrato.</p>`;
+  p.innerHTML = `<h2>Contratos de Fornecedores${infoIcon('Controle dos contratos de prestação de serviço/fornecimento firmados com fornecedores e subcontratados — diretrizes, vigência, saldo e medições/faturamentos lançados por contrato.')}</h2>`;
   const stats = document.createElement('div'); stats.className='stat-grid';
   stats.appendChild(statTile({label:'Contratos ativos', value: agg.ativos+' de '+agg.total, sub: agg.vencendo ? (agg.vencendo+' vencendo em 30 dias') : (agg.vencidos? (agg.vencidos+' vencido(s)') : '—')}));
   stats.appendChild(statTile({label:'Valor total contratado', value: fmtMoney(agg.totalContratado)}));
@@ -2622,7 +2634,7 @@ function openNovoContratoModal(){
 /* ---------------- HISTÓRICO ---------------- */
 function renderHistorico(main){
   const p = document.createElement('div'); p.className='panel';
-  p.innerHTML = `<h2>Histórico</h2><p class="hint">Histórico de desvios (alterações em BM, aprovação, faturamento e custo) e registro geral de importações/ações em massa.</p>`;
+  p.innerHTML = `<h2>Histórico${infoIcon('Histórico de desvios (alterações em BM, aprovação, faturamento e custo) e registro geral de importações/ações em massa.')}</h2>`;
   const actions = document.createElement('div'); actions.className='section-actions';
   actions.innerHTML = `<button class="btn" id="h_clear">Limpar histórico</button><button class="btn" id="h_export">⬇ Exportar histórico (CSV)</button>`;
   p.appendChild(actions);

@@ -46,6 +46,13 @@ Recursos principais:
   IA), diretrizes/pontos de atenção editáveis, termos aditivos, lançamento de medições/
   faturamentos por contrato e controle de saldo (valor total, medido, aprovado e saldo
   disponível), com alerta de contratos vencidos/vencendo.
+- Barra fixa no topo (sempre visível, em qualquer aba) com Total Contrato, Medido, Aprovado,
+  Avanço Físico, Meta de Custo, Custo Realizado, Margem e também **Custo Real** e **Margem
+  Real** — custo/margem considerando não só a Meta de Custo (orçamento distribuído nas linhas
+  de mão de obra) mas o custo efetivamente medido nos contratos de fornecedores, subindo
+  conforme mais medições de fornecedores são lançadas.
+- Interface enxuta: as explicações de cada seção ficam ocultas atrás de um ícone **"i"** ao
+  lado do título (passe o mouse ou toque para ver), em vez de parágrafos fixos ocupando a tela.
 
 O app já é carregado com os dados reais do contrato 90005/2025 (AIR MINAS AR CONDICIONADO LTDA —
 reforma do sistema de climatização e adequação da cobertura da Biblioteca Pública Estadual): 340
