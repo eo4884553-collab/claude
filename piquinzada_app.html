@@ -827,14 +827,17 @@ function render(){
 
 /* liga inputs genericos via data-bind="a.b.c" (aceita indices numericos p/ arrays) */
 function coerceType(el){
-  if(el.type==='number') return 'number';
   if(el.dataset.kind==='pct') return 'pct';
+  if(el.type==='number') return 'number';
   return 'text';
 }
 function wireGenericInputs(){
+  // commita no "change" (perder o foco / Enter / Tab), nunca em cada tecla digitada —
+  // recalcular e redesenhar a tela inteira a cada tecla destruía o campo no meio da digitação
+  // e fazia parecer que "aparecia outro valor sozinho".
   $$('#view [data-bind]').forEach(el=>{
-    el.addEventListener(el.tagName==='SELECT'?'change':'input', onGenericBind);
-    if(el.tagName==='INPUT' && el.type!=='number') el.addEventListener('change', onGenericBind);
+    el.addEventListener('change', onGenericBind);
+    if(el.tagName==='INPUT' && (el.type==='text' || el.type==='number')) el.addEventListener('keydown', onEnterCommit);
   });
   $$('#view [data-action]').forEach(el=>{
     el.addEventListener('click', onAction);
@@ -860,6 +863,9 @@ function onGenericBind(e){
   const preserveFocus = el.id || null;
   render();
   if(preserveFocus){ const again = document.getElementById(preserveFocus); if(again){ again.focus(); if(again.setSelectionRange && again.type==='text') { try{ again.setSelectionRange(again.value.length, again.value.length);}catch(_){} } } }
+}
+function onEnterCommit(e){
+  if(e.key==='Enter'){ e.preventDefault(); e.target.blur(); }
 }
 function onAction(e){
   const el = e.currentTarget || e.target.closest('[data-action]');
