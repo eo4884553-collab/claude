@@ -547,11 +547,11 @@ function recalcAll(){
   const reajustePercent = state.reajustePercent || 0;
   const totalMedidoReajustado = totalMedidoBM * (1 + reajustePercent);
   const margemReajustada = totalMedidoReajustado - totalCustoRealizado;
-  // Custo real: custo de material já lançado (custoItems) + custo real de mão de obra/serviços
-  // medidos nos contratos de fornecedores (aba Contratos) — mais preciso que a Meta de Custo,
-  // que distribui o valor orçado do contrato nas linhas de mão de obra sem refletir o executado.
-  const custoContratos = sumBy(state.contratos||[], 'valorMedidoTotal');
-  const custoReal = totalCustoRealizado + custoContratos;
+  // Custo real: custo de material já lançado (custoItems) menos o saldo ainda disponível
+  // (não comprometido/pago) nos contratos de fornecedores — reflete o custo já efetivamente
+  // consumido, descontando o que ainda resta de saldo contratual em aberto.
+  const saldoContratos = sumBy(state.contratos||[], 'saldo');
+  const custoReal = totalCustoRealizado - saldoContratos;
   const margemReal = totalMedidoBM - custoReal;
 
   const statusCounts = {'Não faturado':0,'Em aprovação':0,'Faturado aprovado':0};
@@ -563,7 +563,7 @@ function recalcAll(){
     reajustePercent, totalMedidoReajustado:+totalMedidoReajustado.toFixed(2),
     qtdContratadaTotal:+qtdContratadaTotal.toFixed(2), qtdMedidaTotal:+qtdMedidaTotal.toFixed(2),
     totalMetaCusto:+totalMetaCusto.toFixed(2), totalCustoRealizado:+totalCustoRealizado.toFixed(2),
-    custoContratos:+custoContratos.toFixed(2), custoReal:+custoReal.toFixed(2), margemReal:+margemReal.toFixed(2),
+    saldoContratos:+saldoContratos.toFixed(2), custoReal:+custoReal.toFixed(2), margemReal:+margemReal.toFixed(2),
     margemTotal:+margemTotal.toFixed(2), margemReajustada:+margemReajustada.toFixed(2), statusCounts,
     avancoFisico: qtdContratadaTotal>0 ? qtdMedidaTotal/qtdContratadaTotal : 0,
     avancoFinanceiro: totalContrato>0 ? totalMedidoBM/totalContrato : 0,
@@ -1220,8 +1220,8 @@ function renderKpiStrip(){
     ['Meta de Custo', fmtMoney(a.totalMetaCusto)],
     ['Custo Realizado', fmtMoney(a.totalCustoRealizado)],
     ['Margem (Fat-Custo)', fmtMoney(a.margemTotal), a.margemTotal<0?'bad':'good'],
-    ['Custo Real', fmtMoney(a.custoReal), null, `Custo de material lançado (${fmtMoney(a.totalCustoRealizado)}) + custo real medido nos contratos de fornecedores (${fmtMoney(a.custoContratos)}) — sobe conforme mais medições de fornecedores são lançadas.`],
-    ['Margem Real', fmtMoney(a.margemReal), a.margemReal<0?'bad':'good', `Medido BM (${fmtMoney(a.totalMedidoBM)}) − Custo Real (${fmtMoney(a.custoReal)}). Mais precisa que a margem padrão, que usa a Meta de Custo (valor orçado distribuído nas linhas de mão de obra) em vez do custo de fornecedor realmente executado.`],
+    ['Custo Real', fmtMoney(a.custoReal), null, `Custo Realizado (${fmtMoney(a.totalCustoRealizado)}) − Saldo Disponível nos contratos de fornecedores (${fmtMoney(a.saldoContratos)}). Desconta do custo lançado o que ainda resta de saldo contratual em aberto (não comprometido/pago).`],
+    ['Margem Real', fmtMoney(a.margemReal), a.margemReal<0?'bad':'good', `Medido BM (${fmtMoney(a.totalMedidoBM)}) − Custo Real (${fmtMoney(a.custoReal)}).`],
   ];
   strip.innerHTML = items.map(([l,v,cls,tip])=>`<div class="kpi-mini"${tip?` title="${escapeHtml(tip)}"`:''}><div class="l">${l}</div><div class="v${cls?(' '+cls):''}">${v}</div></div>`).join('');
 }
