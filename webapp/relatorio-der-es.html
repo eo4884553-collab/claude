@@ -144,6 +144,24 @@ td.valcell{ text-align:right; font-weight:700; color:var(--blue-900); }
   background:var(--blue-50); border:1px dashed var(--blue-500); border-radius:20px; padding:4px 10px; margin-bottom:16px;
 }
 
+#report-type-card{ border-color:var(--blue-700); }
+.report-type-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.report-type-opt{
+  display:flex; gap:10px; align-items:flex-start; cursor:pointer; padding:12px 14px;
+  border:1px solid var(--line); border-radius:8px; background:var(--blue-50);
+}
+.report-type-opt:has(input:checked){ border-color:var(--blue-700); background:var(--blue-100); }
+.report-type-opt input{ margin-top:3px; flex:none; width:16px; height:16px; }
+.report-type-opt strong{ display:block; font-family:var(--font-display); font-size:14px; color:var(--blue-900); }
+.report-type-opt small{ display:block; font-weight:500; color:var(--ink); opacity:.8; margin-top:2px; font-size:11.5px; }
+.report-type-note{ font-size:12px; color:var(--blue-500); margin:14px 0 0; }
+.rmaa-badge{
+  display:inline-block; font-size:10px; font-weight:800; letter-spacing:.4px; color:#fff;
+  background:var(--blue-700); border-radius:4px; padding:1px 7px; margin-left:8px; vertical-align:middle;
+}
+.subtable-title{ font-family:var(--font-display); font-weight:700; font-size:13px; color:var(--blue-900); margin:16px 0 8px; }
+.subtable-title:first-child{ margin-top:0; }
+
 .total-bar{
   position:sticky; bottom:0; z-index:5; margin-top:8px;
   display:flex; align-items:center; gap:18px; flex-wrap:wrap;
@@ -173,6 +191,21 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
   <span class="example-tag">✎ Formulário pré-preenchido com dados de exemplo — edite os campos com os dados reais da sua medição</span>
 
   <form id="report-form">
+
+    <section class="card" id="report-type-card">
+      <div class="sec-head"><h2>Quais modelos gerar?</h2></div>
+      <div class="report-type-grid">
+        <label class="report-type-opt">
+          <input type="checkbox" id="gerar-tecnico" checked />
+          <span><strong>Relatório Técnico</strong><small>Capa + medição dos serviços executados, no padrão de medição do DER-ES.</small></span>
+        </label>
+        <label class="report-type-opt">
+          <input type="checkbox" id="gerar-rmaa" checked />
+          <span><strong>RMAA</strong><small>Relatório Mensal de Andamento das Atividades — equipe, cronograma, ensaios e correspondências.</small></span>
+        </label>
+      </div>
+      <p class="report-type-note">Os dados abaixo (contrato, medição, itens, curva S, segurança e responsável técnico) são compartilhados pelos dois modelos. As seções exclusivas do RMAA aparecem mais abaixo quando ele estiver marcado.</p>
+    </section>
 
     <section class="card">
       <div class="sec-head"><span class="num">1</span><h2>Dados do Contrato</h2></div>
@@ -304,9 +337,95 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
       </div>
     </section>
 
+    <div id="rmaa-sections">
+
+      <section class="card">
+        <div class="sec-head"><span class="num">9</span><h2>Apresentação<span class="rmaa-badge">RMAA</span></h2></div>
+        <label class="field">
+          <textarea name="rmaa_apresentacao" rows="3"></textarea>
+          <small>Em branco = texto padrão gerado a partir dos dados do contrato.</small>
+        </label>
+      </section>
+
+      <section class="card">
+        <div class="sec-head"><span class="num">10</span><h2>Relação da Equipe<span class="rmaa-badge">RMAA</span></h2></div>
+
+        <p class="subtable-title">10.1 Equipe da Contratada</p>
+        <div class="table-wrap">
+          <table id="equipe-contratada-table">
+            <thead><tr><th>Nome</th><th>Função</th><th>CBO</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <button type="button" class="btn" id="add-equipe-contratada">+ Adicionar membro</button>
+
+        <p class="subtable-title">10.2 Equipe da Fiscalização</p>
+        <div class="table-wrap">
+          <table id="equipe-fiscalizacao-table">
+            <thead><tr><th>Nome</th><th>Função</th><th>Empresa</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <button type="button" class="btn" id="add-equipe-fiscalizacao">+ Adicionar membro</button>
+
+        <p class="subtable-title">10.3 Equipe Subcontratada</p>
+        <div class="table-wrap">
+          <table id="equipe-subcontratada-table">
+            <thead><tr><th>Nome</th><th>Função</th><th>Empresa</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <button type="button" class="btn" id="add-equipe-subcontratada">+ Adicionar membro</button>
+      </section>
+
+      <section class="card">
+        <div class="sec-head"><span class="num">11</span><h2>Atividades Programadas<span class="rmaa-badge">RMAA</span></h2></div>
+
+        <p class="subtable-title">11.1 Atividades programadas no mês de referência</p>
+        <div class="table-wrap">
+          <table id="atividades-table">
+            <thead><tr><th>Atividade</th><th>Principais Equipamentos</th><th>Principais Materiais</th><th>Caminho Crítico</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <button type="button" class="btn" id="add-atividade">+ Adicionar atividade</button>
+
+        <p class="subtable-title">11.2 Justificativa do atraso das atividades programadas</p>
+        <label class="field"><textarea name="rmaa_justificativa_atraso" rows="2"></textarea></label>
+
+        <p class="subtable-title">11.3 Atividades programadas para os próximos três meses</p>
+        <label class="field"><textarea name="rmaa_atividades_futuras" rows="3"></textarea></label>
+      </section>
+
+      <section class="card">
+        <div class="sec-head"><span class="num">12</span><h2>Cronogramas e Previsão de Desembolso<span class="rmaa-badge">RMAA</span></h2></div>
+        <p class="subtable-title">12.1 Gráfico Previsto x Executado — reaproveita a Curva S informada acima</p>
+        <p class="subtable-title">12.2 Previsão de desembolso</p>
+        <div class="table-wrap">
+          <table id="desembolso-table">
+            <thead><tr><th>Referência</th><th>Valor (R$)</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <button type="button" class="btn" id="add-desembolso">+ Adicionar referência</button>
+      </section>
+
+      <section class="card">
+        <div class="sec-head"><span class="num">13</span><h2>Ensaios e Correspondências<span class="rmaa-badge">RMAA</span></h2></div>
+        <label class="field">Ensaios Realizados
+          <textarea name="rmaa_ensaios" rows="3"></textarea>
+        </label>
+        <label class="field" style="margin-top:14px">Principais Correspondências do Mês de Referência
+          <textarea name="rmaa_correspondencias" rows="3"></textarea>
+          <small>Uma correspondência por linha — cada linha vira um item da lista no relatório.</small>
+        </label>
+      </section>
+
+    </div>
+
     <div class="total-bar">
       <div class="amount"><span>Total previsto da medição</span><span id="total-preview" class="tabular">R$ 0,00</span></div>
-      <button type="submit" class="btn primary">⬇ Gerar Relatório em Word (.docx)</button>
+      <button type="submit" class="btn primary">⬇ Gerar Relatório(s) em Word (.docx)</button>
       <span id="status-msg"></span>
     </div>
   </form>
@@ -341,7 +460,30 @@ const EXEMPLO = {
   resp_cargo: "Engenheiro Civil",
   resp_crea: "228041-D/MG",
   observacoes: "Os serviços seguem dentro do cronograma previsto.\nNenhuma pendência identificada nesta medição.",
+  rmaa_justificativa_atraso: "Não há atrasos registrados na execução das atividades programadas para o período de referência desta medição.",
+  rmaa_atividades_futuras: "Nos próximos três meses estão previstas as atividades de lavagem e preparo de superfícies, instalação de chapim em granito, construção das bases dos equipamentos de climatização, montagem do abrigo do QGBT, instalação e fabricação de dutos de ar-condicionado e instalação dos quadros elétricos QDAC.",
+  rmaa_ensaios: "Na 5ª Medição (Julho/2026) não foram executados serviços aos quais foram necessários ensaios dos materiais aplicados. Os ensaios de controle tecnológico previstos são: determinação da consistência pelo abatimento de tronco de cone (slump test – ABNT NBR 16889) e moldagem de corpos de prova para resistência à compressão (ABNT NBR 5738).",
+  rmaa_correspondencias: "Resposta do DER para subempreitar o serviço de execução dos projetos metálicos dos telhados\nResposta do DER para solução técnica para área da cobertura com desnível, não contemplada em projeto\nResposta do DER para retirada do material da biblioteca do 2º pavimento para execução dos trabalhos internos destinados ao local",
 };
+const EXEMPLO_EQUIPE_CONTRATADA = [
+  { nome: "Emanuel Alef de Oliveira", funcao: "Engenheiro Civil", cbo: "214205" },
+  { nome: "Isailton Reis da Silva", funcao: "Encarregado Geral de Obras", cbo: "710315" },
+  { nome: "Raufer Rodrigues Vieira", funcao: "Oficial Polivalente", cbo: "715210" },
+];
+const EXEMPLO_EQUIPE_FISCALIZACAO = [
+  { nome: "Luis Claudio Soares Bastos", funcao: "Gestor do Contrato", empresa: "DER-ES / SECULT" },
+  { nome: "Marconi Pereira Fardin", funcao: "Fiscal do Contrato", empresa: "DER-ES / SECULT" },
+  { nome: "Lucas Guimarães do Amaral", funcao: "Fiscal do Contrato", empresa: "DER-ES / SECULT" },
+];
+const EXEMPLO_ATIVIDADES = [
+  { atividade: "Serviços Preliminares – Demolições e Retiradas", equipamentos: "Ferramentas elétricas manuais", materiais: "EPI", caminho_critico: "Não" },
+  { atividade: "Estruturas – Superestruturas", equipamentos: "Ferramentas elétricas manuais", materiais: "EPI", caminho_critico: "Sim" },
+];
+const EXEMPLO_DESEMBOLSO = [
+  { referencia: "Julho/2026 (mês atual)", valor: 435565.08 },
+  { referencia: "Agosto/2026 (mês +1)", valor: 480784.10 },
+  { referencia: "Setembro/2026 (mês +2)", valor: 521834.13 },
+];
 const EXEMPLO_ITENS = [
   { item: "01.01", descricao: "Remoção de forro de gesso", unidade: "m²", qtd_contratada: 1346.88, qtd_anterior: 0, qtd_atual: 670.37, preco_unitario: 12.50 },
   { item: "01.02", descricao: "Aplicação de Lona Plástica Preta 80 Micras", unidade: "m²", qtd_contratada: 1960.05, qtd_anterior: 400, qtd_atual: 800, preco_unitario: 3.20 },
@@ -424,10 +566,71 @@ document.getElementById("toggle-curva").addEventListener("change", (e) => {
   document.getElementById("curva-fields").classList.toggle("hidden", !e.target.checked);
   redrawCurva();
 });
+document.getElementById("gerar-rmaa").addEventListener("change", (e) => {
+  document.getElementById("rmaa-sections").classList.toggle("hidden", !e.target.checked);
+});
 
 EXEMPLO_ITENS.forEach(addItemRow);
 EXEMPLO_CURVA.forEach((c) => addCurvaRow({ mes: c.mes, previsto: c.previsto, executado: c.executado }));
 redrawCurva();
+
+/* ---------------------------------------------------------------------
+   Tabelas dinâmicas simples e genéricas (equipe, atividades, desembolso)
+--------------------------------------------------------------------- */
+function makeRowTable(tbody, fields) {
+  function addRow(values = {}) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = fields.map((f) =>
+      `<td><input type="${f.type || "text"}" ${f.step ? `step="${f.step}"` : ""} class="${f.cls}" value="${values[f.key] ?? ""}" /></td>`
+    ).join("") + `<td><button type="button" class="iconbtn">×</button></td>`;
+    tbody.appendChild(tr);
+    tr.querySelector(".iconbtn").addEventListener("click", () => tr.remove());
+    return tr;
+  }
+  function collect() {
+    const rows = [];
+    tbody.querySelectorAll("tr").forEach((tr) => {
+      const obj = {};
+      let hasAny = false;
+      fields.forEach((f) => {
+        const v = tr.querySelector("." + f.cls).value.trim();
+        if (v) hasAny = true;
+        obj[f.key] = v;
+      });
+      if (hasAny) rows.push(obj);
+    });
+    return rows;
+  }
+  return { addRow, collect };
+}
+
+const equipeContratadaMgr = makeRowTable(document.querySelector("#equipe-contratada-table tbody"), [
+  { key: "nome", cls: "ec-nome" }, { key: "funcao", cls: "ec-funcao" }, { key: "cbo", cls: "ec-cbo" },
+]);
+const equipeFiscalizacaoMgr = makeRowTable(document.querySelector("#equipe-fiscalizacao-table tbody"), [
+  { key: "nome", cls: "ef-nome" }, { key: "funcao", cls: "ef-funcao" }, { key: "empresa", cls: "ef-empresa" },
+]);
+const equipeSubcontratadaMgr = makeRowTable(document.querySelector("#equipe-subcontratada-table tbody"), [
+  { key: "nome", cls: "es-nome" }, { key: "funcao", cls: "es-funcao" }, { key: "empresa", cls: "es-empresa" },
+]);
+const atividadesMgr = makeRowTable(document.querySelector("#atividades-table tbody"), [
+  { key: "atividade", cls: "at-atividade" }, { key: "equipamentos", cls: "at-equip" },
+  { key: "materiais", cls: "at-mat" }, { key: "caminho_critico", cls: "at-cc" },
+]);
+const desembolsoMgr = makeRowTable(document.querySelector("#desembolso-table tbody"), [
+  { key: "referencia", cls: "de-ref" }, { key: "valor", cls: "de-valor", type: "number", step: "0.01" },
+]);
+
+document.getElementById("add-equipe-contratada").addEventListener("click", () => equipeContratadaMgr.addRow());
+document.getElementById("add-equipe-fiscalizacao").addEventListener("click", () => equipeFiscalizacaoMgr.addRow());
+document.getElementById("add-equipe-subcontratada").addEventListener("click", () => equipeSubcontratadaMgr.addRow());
+document.getElementById("add-atividade").addEventListener("click", () => atividadesMgr.addRow());
+document.getElementById("add-desembolso").addEventListener("click", () => desembolsoMgr.addRow());
+
+EXEMPLO_EQUIPE_CONTRATADA.forEach((r) => equipeContratadaMgr.addRow(r));
+EXEMPLO_EQUIPE_FISCALIZACAO.forEach((r) => equipeFiscalizacaoMgr.addRow(r));
+EXEMPLO_ATIVIDADES.forEach((r) => atividadesMgr.addRow(r));
+EXEMPLO_DESEMBOLSO.forEach((r) => desembolsoMgr.addRow(r));
 
 /* ---------------------------------------------------------------------
    Curva S — gráfico ao vivo (Chart.js) reaproveitado como fonte da
@@ -772,6 +975,198 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
   return doc;
 }
 
+function simpleTable(headers, rows, widthsCm, emptyMessage) {
+  if (!rows.length) {
+    return new Paragraph({ children: [new TextRun({ text: emptyMessage, italics: true, size: 20, font: FONT })] });
+  }
+  const widthsDxa = widthsCm.map(cm);
+  const totalWidth = widthsDxa.reduce((a, b) => a + b, 0);
+  const headerRow = new TableRow({
+    tableHeader: true,
+    children: headers.map((h, i) => cell(h, { fill: DARK_BLUE, bold: true, color: WHITE, size: 16, widthDxa: widthsDxa[i] })),
+  });
+  const bodyRows = rows.map((r, i) => {
+    const fill = i % 2 === 0 ? LIGHT_1 : LIGHT_2;
+    return new TableRow({
+      children: r.map((v, j) => cell(v, { fill, size: 16, align: j === 0 ? AlignmentType.LEFT : AlignmentType.CENTER, widthDxa: widthsDxa[j] })),
+    });
+  });
+  return new Table({ width: { size: totalWidth, type: WidthType.DXA }, columnWidths: widthsDxa, rows: [headerRow, ...bodyRows] });
+}
+
+function labelValueParagraph(label, value) {
+  return new Paragraph({
+    spacing: { after: 80 },
+    children: [
+      new TextRun({ text: `${label}: `, bold: true, size: 20, color: TEXT_BLUE, font: FONT }),
+      new TextRun({ text: String(value ?? "-"), size: 20, font: FONT }),
+    ],
+  });
+}
+
+async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png", assinaturaType = "png") {
+  const pageW = cm(27.94), pageH = cm(21.59); // Letter paisagem, como no modelo de referência
+  const marginTop = cm(3.0), marginBottom = cm(3.0), marginLeft = cm(2.5), marginRight = cm(2.5);
+  const logoDims = await fitImage(logoBuf, 150, 55);
+  const assinaturaDims = assinaturaBuf ? await fitImage(assinaturaBuf, 220, 110) : null;
+
+  const footerText = `${data.contrato.contratada} · Contrato ${data.contrato.contrato} · RELATÓRIO MENSAL DE ANDAMENTO DAS ATIVIDADES – RMAA – ${data.medicao.numero}ª Medição · ${data.medicao.periodo_faturamento}`;
+
+  const header = new Header({
+    children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new ImageRun({ data: logoBuf, type: logoType, transformation: logoDims })] })],
+  });
+  const footer = new Footer({
+    children: [
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        border: { top: { style: BorderStyle.SINGLE, size: 4, color: BORDER_BLUE, space: 4 } },
+        children: [new TextRun({ text: footerText, size: 15, color: TEXT_BLUE, font: FONT })],
+      }),
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [
+          new TextRun({ text: "Página ", size: 15, color: TEXT_BLUE, font: FONT }),
+          new TextRun({ children: [PageNumber.CURRENT], size: 15, color: TEXT_BLUE, font: FONT }),
+          new TextRun({ text: " de ", size: 15, color: TEXT_BLUE, font: FONT }),
+          new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 15, color: TEXT_BLUE, font: FONT }),
+        ],
+      }),
+    ],
+  });
+
+  const children = [];
+  children.push(new Paragraph({
+    alignment: AlignmentType.CENTER, spacing: { after: 40 },
+    children: [new TextRun({ text: "RELATÓRIO MENSAL DE ANDAMENTO DAS ATIVIDADES", bold: true, size: 36, color: DARK_BLUE, font: FONT })],
+  }));
+  children.push(new Paragraph({
+    alignment: AlignmentType.CENTER, spacing: { after: 200 },
+    children: [new TextRun({ text: `RMAA – ${data.medicao.numero}ª Medição – ${data.medicao.periodo_faturamento}`, italics: true, size: 24, color: TEXT_BLUE, font: FONT })],
+  }));
+  children.push(infoTable([
+    ["OBJETO", data.contrato.objeto], ["CONTRATADA", data.contrato.contratada], ["CONTRATO", data.contrato.contrato],
+    ["ORDEM DE SERVIÇO", data.contrato.os], ["VALOR CONTRATUAL", fmtMoney(data.contrato.valor_contratual)],
+    ["INÍCIO DOS SERVIÇOS", fmtDateBR(data.contrato.inicio)], ["TÉRMINO PREVISTO", fmtDateBR(data.contrato.termino)],
+    ["PRAZO DE EXECUÇÃO", data.contrato.prazo],
+  ]));
+  children.push(new Paragraph({ spacing: { before: 160, after: 160 }, children: [] }));
+  children.push(infoTable([
+    ["MEDIÇÃO", `${data.medicao.numero}ª Medição`], ["VALOR DA MEDIÇÃO", fmtMoney(data.medicao.valor_medicao)],
+    ["PERÍODO (FATURAMENTO)", data.medicao.periodo_faturamento], ["PERÍODO (DOCUMENTAÇÃO)", data.medicao.periodo_documentacao],
+  ]));
+  children.push(new Paragraph({ spacing: { before: 160, after: 160 }, children: [] }));
+  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `Fiscalização: ${data.contrato.fiscalizacao}`, bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `${data.contrato.contratada} · Contrato ${data.contrato.contrato} · Vitória/ES · ${data.medicao.periodo_faturamento}`, size: 18, color: TEXT_BLUE, font: FONT })] }));
+  children.push(new Paragraph({ children: [new PageBreak()] }));
+
+  const r = data.rmaa || {};
+
+  children.push(sectionHeading("1. APRESENTAÇÃO"));
+  const apresentacao = (r.apresentacao && r.apresentacao.trim()) || (
+    `O presente documento cumpre atender à cláusula contratual que determina a elaboração do Relatório Mensal de Andamento das Atividades – RMAA, referente ao Contrato n° ${data.contrato.contrato}, Ordem de Serviço n° ${data.contrato.os}, tendo como objeto ${data.contrato.objeto}.`
+  );
+  children.push(new Paragraph({ spacing: { after: 160 }, children: [new TextRun({ text: apresentacao, size: 21, font: FONT })] }));
+
+  children.push(sectionHeading("2. INFORMAÇÕES CONTRATUAIS"));
+  children.push(labelValueParagraph("Objeto", data.contrato.objeto));
+  children.push(labelValueParagraph("Contratada", data.contrato.contratada));
+  children.push(labelValueParagraph("Contrato", data.contrato.contrato));
+  children.push(labelValueParagraph("Vigência", fmtDateBR(data.contrato.termino)));
+  children.push(labelValueParagraph("Prazo de Vigência (dias)", data.contrato.prazo));
+  children.push(labelValueParagraph("Ordem de Serviço", data.contrato.os));
+  children.push(labelValueParagraph("Valor Contratual", fmtMoney(data.contrato.valor_contratual)));
+  children.push(labelValueParagraph("Data Início dos Serviços", fmtDateBR(data.contrato.inicio)));
+  children.push(labelValueParagraph("Data Prevista para Término", fmtDateBR(data.contrato.termino)));
+  children.push(labelValueParagraph("Prazo de Execução (dias)", data.contrato.prazo));
+
+  children.push(sectionHeading("3. INFORMAÇÕES DO FATURAMENTO E DAS MEDIÇÕES"));
+  children.push(labelValueParagraph("Medição", `${data.medicao.numero}ª Medição`));
+  children.push(labelValueParagraph("Valor da medição", fmtMoney(data.medicao.valor_medicao)));
+  children.push(labelValueParagraph("Período de Referência do Faturamento", data.medicao.periodo_faturamento));
+  children.push(labelValueParagraph("Período de Referência da Documentação", data.medicao.periodo_documentacao));
+  if (data.itens.length) {
+    children.push(new Paragraph({ spacing: { before: 120 }, children: [new TextRun({ text: "Itens medidos nesta medição:", bold: true, size: 20, color: TEXT_BLUE, font: FONT })] }));
+    children.push(itemsTable(data.itens).table);
+  }
+
+  children.push(sectionHeading("4. RELAÇÃO DA EQUIPE"));
+  children.push(new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: "4.1 Relação da Equipe da Contratada", bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  children.push(simpleTable(["Nº", "Nome", "Função", "CBO"],
+    r.equipe_contratada.map((m, i) => [String(i + 1), m.nome, m.funcao, m.cbo]),
+    [1.2, 5.5, 4.5, 2.5], "Nenhum membro informado."));
+  children.push(new Paragraph({ spacing: { before: 200, after: 80 }, children: [new TextRun({ text: "4.2 Relação da Equipe da Fiscalização", bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  children.push(simpleTable(["Nº", "Nome", "Função", "Empresa"],
+    r.equipe_fiscalizacao.map((m, i) => [String(i + 1), m.nome, m.funcao, m.empresa]),
+    [1.2, 5.5, 4.5, 2.5], "Nenhum membro informado."));
+  children.push(new Paragraph({ spacing: { before: 200, after: 80 }, children: [new TextRun({ text: "4.3 Relação da Equipe Subcontratada", bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  children.push(simpleTable(["Nº", "Nome", "Função", "Empresa"],
+    r.equipe_subcontratada.map((m, i) => [String(i + 1), m.nome, m.funcao, m.empresa]),
+    [1.2, 5.5, 4.5, 2.5], "Nenhum membro subcontratado nesta medição."));
+
+  children.push(new Paragraph({ children: [new PageBreak()] }));
+
+  children.push(sectionHeading("5. ATIVIDADES PROGRAMADAS"));
+  children.push(new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: "5.1 Atividades programadas no mês de referência", bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  children.push(simpleTable(["Atividade", "Principais Equipamentos", "Principais Materiais", "Caminho Crítico"],
+    r.atividades.map((a) => [a.atividade, a.equipamentos, a.materiais, a.caminho_critico]),
+    [4.5, 4.5, 4.0, 2.7], "Nenhuma atividade informada."));
+  children.push(new Paragraph({ spacing: { before: 200, after: 80 }, children: [new TextRun({ text: "5.2 Justificativa do atraso das atividades programadas", bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  children.push(new Paragraph({ spacing: { after: 160 }, children: [new TextRun({ text: r.justificativa_atraso || "Não há atrasos registrados.", size: 20, font: FONT })] }));
+  children.push(new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: "5.3 Atividades programadas para os próximos três meses", bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  children.push(new Paragraph({ children: [new TextRun({ text: r.atividades_futuras || "-", size: 20, font: FONT })] }));
+
+  children.push(sectionHeading("6. CRONOGRAMAS E GRÁFICO FÍSICOS E FINANCEIROS"));
+  children.push(new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: "6.1 Gráfico Avaliação Previsto x Executado", bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  if (data.curvaChartBuf) {
+    children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new ImageRun({ data: data.curvaChartBuf, type: "png", transformation: { width: data.curvaChartWidth, height: data.curvaChartHeight } })] }));
+  } else {
+    children.push(new Paragraph({ children: [new TextRun({ text: "Curva S não informada nesta medição.", italics: true, size: 20, font: FONT })] }));
+  }
+  children.push(new Paragraph({ spacing: { before: 200, after: 80 }, children: [new TextRun({ text: "6.2 Previsão de Desembolso", bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  children.push(simpleTable(["Referência", "Valor (R$)"],
+    r.desembolso.map((d) => [d.referencia, fmtMoney(d.valor)]),
+    [8.0, 6.0], "Nenhuma previsão informada."));
+
+  children.push(sectionHeading("7. ENSAIOS REALIZADOS"));
+  children.push(new Paragraph({ children: [new TextRun({ text: r.ensaios || "Nenhum ensaio realizado neste período.", size: 20, font: FONT })] }));
+
+  children.push(sectionHeading("8. ESTATÍSTICA DE ACIDENTE"));
+  if (data.seguranca) {
+    children.push(segurancaTable(data.seguranca));
+  } else {
+    children.push(new Paragraph({ children: [new TextRun({ text: "Nenhum acidente de trabalho registrado no período de referência.", size: 20, font: FONT })] }));
+  }
+
+  children.push(sectionHeading("9. PRINCIPAIS CORRESPONDÊNCIAS DO MÊS DE REFERÊNCIA"));
+  const correspList = (r.correspondencias || "").split("\n").map((l) => l.trim()).filter(Boolean);
+  if (correspList.length) {
+    correspList.forEach((linha) => {
+      children.push(new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: `•  ${linha}`, size: 20, font: FONT })] }));
+    });
+  } else {
+    children.push(new Paragraph({ children: [new TextRun({ text: "Nenhuma correspondência relevante no período.", italics: true, size: 20, font: FONT })] }));
+  }
+
+  children.push(new Paragraph({ spacing: { before: 400 }, children: [] }));
+  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: "Responsável pela elaboração:", size: 20, color: TEXT_BLUE, font: FONT })] }));
+  if (assinaturaBuf) {
+    children.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 100 }, children: [new ImageRun({ data: assinaturaBuf, type: assinaturaType, transformation: assinaturaDims })] }));
+  } else {
+    children.push(new Paragraph({ spacing: { before: 200 }, alignment: AlignmentType.CENTER, children: [new TextRun({ text: "_".repeat(40), font: FONT })] }));
+  }
+  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: data.responsavel.nome, bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: [data.responsavel.cargo, data.responsavel.crea].filter(Boolean).join(" · "), size: 19, color: TEXT_BLUE, font: FONT })] }));
+
+  return new Document({
+    sections: [{
+      properties: { page: { size: { width: pageW, height: pageH }, margin: { top: marginTop, bottom: marginBottom, left: marginLeft, right: marginRight, header: cm(1.2), footer: cm(1.2) } } },
+      headers: { default: header },
+      footers: { default: footer },
+      children,
+    }],
+  });
+}
+
 /* ---------------------------------------------------------------------
    Coleta do formulário e submissão
 --------------------------------------------------------------------- */
@@ -820,6 +1215,18 @@ function collectPayload() {
     medicao: { numero: f.get("medicao_numero"), valor_medicao: valorMedicao, periodo_faturamento: f.get("periodo_faturamento"), periodo_documentacao },
     itens, curva_s, seguranca, observacoes: f.get("observacoes"),
     responsavel: { nome: f.get("resp_nome"), cargo: f.get("resp_cargo"), crea: f.get("resp_crea") },
+    rmaa: {
+      apresentacao: f.get("rmaa_apresentacao"),
+      equipe_contratada: equipeContratadaMgr.collect(),
+      equipe_fiscalizacao: equipeFiscalizacaoMgr.collect(),
+      equipe_subcontratada: equipeSubcontratadaMgr.collect(),
+      atividades: atividadesMgr.collect(),
+      justificativa_atraso: f.get("rmaa_justificativa_atraso"),
+      atividades_futuras: f.get("rmaa_atividades_futuras"),
+      desembolso: desembolsoMgr.collect(),
+      ensaios: f.get("rmaa_ensaios"),
+      correspondencias: f.get("rmaa_correspondencias"),
+    },
   };
 }
 
@@ -830,9 +1237,32 @@ function slugify(s) {
 const statusMsg = document.getElementById("status-msg");
 const submitBtn = form.querySelector(".btn.primary");
 
+async function saveBlob(blob, filename) {
+  const downloads = (typeof claude !== "undefined" && claude.use) ? await claude.use("downloads") : null;
+  if (downloads) {
+    const result = await downloads.save({ filename, data: blob });
+    return result.status === "saved" ? "salvo" : "enviado";
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  return "gerado";
+}
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
-  statusMsg.textContent = "Gerando relatório...";
+
+  const wantTecnico = document.getElementById("gerar-tecnico").checked;
+  const wantRmaa = document.getElementById("gerar-rmaa").checked;
+  if (!wantTecnico && !wantRmaa) {
+    statusMsg.textContent = "Marque ao menos um modelo de relatório para gerar.";
+    statusMsg.className = "error";
+    return;
+  }
+
+  statusMsg.textContent = "Gerando relatório(s)...";
   statusMsg.className = "";
   submitBtn.disabled = true;
   try {
@@ -857,25 +1287,28 @@ form.addEventListener("submit", async (e) => {
       data.curvaChartHeight = Math.round(targetWidth * (canvas.height / canvas.width));
     }
 
-    const doc = await buildDocument(data, logoBuf, assinaturaBuf, logoType, assinaturaType);
-    const blob = await Packer.toBlob(doc);
+    const gerados = [];
 
-    const filename = `Relatorio_Tecnico_Med${data.medicao.numero}_${slugify(data.contrato.contrato)}.docx`;
-
-    const downloads = (typeof claude !== "undefined" && claude.use) ? await claude.use("downloads") : null;
-    if (downloads) {
-      const result = await downloads.save({ filename, data: blob });
-      statusMsg.textContent = result.status === "saved" ? "Relatório salvo com sucesso!" : "Relatório enviado.";
-      statusMsg.className = "ok";
-    } else {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = filename;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-      statusMsg.textContent = "Relatório gerado com sucesso!";
-      statusMsg.className = "ok";
+    if (wantTecnico) {
+      statusMsg.textContent = "Gerando Relatório Técnico...";
+      const doc = await buildDocument(data, logoBuf, assinaturaBuf, logoType, assinaturaType);
+      const blob = await Packer.toBlob(doc);
+      const filename = `Relatorio_Tecnico_Med${data.medicao.numero}_${slugify(data.contrato.contrato)}.docx`;
+      await saveBlob(blob, filename);
+      gerados.push("Relatório Técnico");
     }
+
+    if (wantRmaa) {
+      statusMsg.textContent = "Gerando RMAA...";
+      const doc = await buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType, assinaturaType);
+      const blob = await Packer.toBlob(doc);
+      const filename = `RMAA_Med${data.medicao.numero}_${slugify(data.contrato.contrato)}.docx`;
+      await saveBlob(blob, filename);
+      gerados.push("RMAA");
+    }
+
+    statusMsg.textContent = `Gerado(s) com sucesso: ${gerados.join(" e ")}.`;
+    statusMsg.className = "ok";
   } catch (err) {
     console.error(err);
     if (err && err.code === "declined") {
