@@ -1,5 +1,10 @@
 # Gerador de Relatórios Técnicos de Medição — AIR MINAS / DER-ES
 
+> **Uso rápido sem instalar nada:** existe uma versão 100% client-side deste
+> app (formulário + geração do .docx rodando direto no navegador, sem
+> servidor) em [`webapp/relatorio-der-es.html`](webapp/relatorio-der-es.html)
+> — é o mesmo código publicado como página web para uso imediato.
+
 Aplicativo web que monta automaticamente o **Relatório Técnico de Medição**
 da AIR MINAS AR CONDICIONADO LTDA no padrão exigido pelo **DER-ES**, a
 partir apenas dos dados da medição informados em um formulário. O
