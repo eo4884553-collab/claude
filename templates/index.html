@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Gerador de Relatórios Técnicos de Medição — AIR MINAS</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+<header class="topbar">
+  <img src="{{ url_for('static', filename='img/air_minas_logo.png') }}" alt="AIR MINAS" class="logo" />
+  <div class="topbar-text">
+    <h1>Gerador de Relatórios Técnicos de Medição</h1>
+    <p>Padrão DER-ES · AIR MINAS AR CONDICIONADO LTDA</p>
+  </div>
+</header>
+
+<main>
+  <form id="report-form">
+
+    <section class="card">
+      <h2>1. Dados do Contrato</h2>
+      <div class="grid">
+        <label class="span-2">Objeto
+          <textarea name="objeto" rows="2" required placeholder="Ex.: Reforma do Sistema de Climatização e Adequação da Cobertura da Biblioteca Pública Estadual – BPES, Município de Vitória/ES"></textarea>
+        </label>
+        <label>Contratada
+          <input type="text" name="contratada" value="AIR MINAS AR CONDICIONADO LTDA" required />
+        </label>
+        <label>Fiscalização
+          <input type="text" name="fiscalizacao" value="DER-ES" required />
+        </label>
+        <label>Contrato nº
+          <input type="text" name="contrato" placeholder="089/2025-SECULT" required />
+        </label>
+        <label>Ordem de Serviço nº
+          <input type="text" name="os" placeholder="003/2026" />
+        </label>
+        <label>Valor Contratual (R$)
+          <input type="number" step="0.01" name="valor_contratual" placeholder="2460000.00" required />
+        </label>
+        <label>Prazo de Execução
+          <input type="text" name="prazo" placeholder="360 dias" />
+        </label>
+        <label>Início dos Serviços
+          <input type="date" name="inicio" />
+        </label>
+        <label>Término Previsto
+          <input type="date" name="termino" />
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2. Dados da Medição</h2>
+      <div class="grid">
+        <label>Número da Medição
+          <input type="number" min="1" name="medicao_numero" placeholder="5" required />
+        </label>
+        <label>Valor da Medição (R$)
+          <input type="number" step="0.01" name="valor_medicao" id="valor_medicao" placeholder="Calculado automaticamente pelos itens" />
+          <small>Deixe em branco para calcular automaticamente pela soma dos itens medidos.</small>
+        </label>
+        <label>Período (Faturamento)
+          <input type="text" name="periodo_faturamento" placeholder="Julho /2026" required />
+        </label>
+        <label>Período (Documentação) — início
+          <input type="date" name="periodo_doc_inicio" />
+        </label>
+        <label>Período (Documentação) — fim
+          <input type="date" name="periodo_doc_fim" />
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>3. Itens Medidos Nesta Medição</h2>
+      <div class="table-wrap">
+        <table id="itens-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Descrição</th>
+              <th>Und.</th>
+              <th>Qtd. Contratada</th>
+              <th>Qtd. Acum. Anterior</th>
+              <th>Qtd. Medição Atual</th>
+              <th>Preço Unit. (R$)</th>
+              <th>Valor (R$)</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <button type="button" class="btn-secondary" id="add-item">+ Adicionar item</button>
+      <p class="total-preview">Total previsto desta medição: <strong id="total-preview">R$ 0,00</strong></p>
+    </section>
+
+    <section class="card collapsible">
+      <h2><label><input type="checkbox" id="toggle-seguranca" /> 4. Segurança do Trabalho (opcional)</label></h2>
+      <div class="grid hidden" id="seguranca-fields">
+        <label>Acidentes com afastamento<input type="number" name="seg_com_afastamento" value="0" /></label>
+        <label>Acidentes sem afastamento<input type="number" name="seg_sem_afastamento" value="0" /></label>
+        <label>Acidente típico<input type="number" name="seg_tipo_tipico" value="0" /></label>
+        <label>Acidente de trajeto<input type="number" name="seg_tipo_trajeto" value="0" /></label>
+        <label>Doença profissional<input type="number" name="seg_tipo_doenca" value="0" /></label>
+        <label>HHT (Homens-Hora Trabalhadas)<input type="number" name="seg_hht" value="0" /></label>
+        <label>Taxa de Gravidade<input type="number" step="0.01" name="seg_taxa_gravidade" value="0" /></label>
+      </div>
+    </section>
+
+    <section class="card collapsible">
+      <h2><label><input type="checkbox" id="toggle-curva" /> 5. Curva S — Previsto x Executado (opcional)</label></h2>
+      <div class="hidden" id="curva-fields">
+        <div class="table-wrap">
+          <table id="curva-table">
+            <thead><tr><th>Mês</th><th>Previsto Acumulado (R$)</th><th>Executado Acumulado (R$)</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <button type="button" class="btn-secondary" id="add-curva">+ Adicionar mês</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>6. Observações e Considerações Finais</h2>
+      <label>
+        <textarea name="observacoes" rows="4" placeholder="Texto livre — cada linha vira um parágrafo no relatório."></textarea>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>7. Responsável Técnico</h2>
+      <div class="grid">
+        <label>Nome<input type="text" name="resp_nome" placeholder="Nome completo" required /></label>
+        <label>Cargo<input type="text" name="resp_cargo" placeholder="Engenheiro Civil" /></label>
+        <label>CREA<input type="text" name="resp_crea" placeholder="000000-D/MG" /></label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>8. Personalização (opcional)</h2>
+      <div class="grid">
+        <label>Logotipo da empresa (substitui o padrão AIR MINAS)
+          <input type="file" name="logo" accept="image/png,image/jpeg" />
+        </label>
+        <label>Imagem da assinatura/carimbo
+          <input type="file" name="assinatura" accept="image/png,image/jpeg" />
+        </label>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button type="submit" class="btn-primary">Gerar Relatório em Word (.docx)</button>
+      <span id="status-msg"></span>
+    </div>
+  </form>
+</main>
+
+<footer>
+  <p>AIR MINAS AR CONDICIONADO LTDA · Ferramenta interna de geração de relatórios de medição</p>
+</footer>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
