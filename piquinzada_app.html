@@ -62,7 +62,7 @@ nav.groups{padding:14px 10px 20px; flex:1;}
 .navitem.active{background:var(--accent-soft); color:var(--accent-strong); font-weight:600;}
 .navitem .ic{width:16px; text-align:center; opacity:.85; font-size:13px;}
 #sidebar .foot{padding:14px 20px 18px; border-top:1px solid var(--border-soft); font-size:11px; color:var(--text-faint);}
-#sidebar .foot button{
+#sidebar .foot > button{
   display:block; width:100%; font-family:inherit; font-size:11px; color:var(--text-dim); background:var(--surface-2); border:1px solid var(--border);
   border-radius:6px; padding:6px 9px; cursor:pointer; margin-top:8px; text-align:left;
 }
@@ -70,6 +70,19 @@ nav.groups{padding:14px 10px 20px; flex:1;}
 #sidebar .foot #exportBtn:hover{background:var(--accent); color:var(--accent-ink);}
 #sidebar .foot #resetBtn:hover{color:var(--bad);}
 #sidebar .foot button[disabled]{opacity:.6; cursor:default;}
+.save-row{display:flex; align-items:center; gap:8px;}
+.save-icon-btn{
+  flex:0 0 auto; width:26px; height:26px; display:flex; align-items:center; justify-content:center;
+  border-radius:6px; border:1px solid var(--border); background:var(--surface-2); color:var(--text-dim);
+  cursor:pointer; font-size:13px; padding:0; margin:0; line-height:1; transition:background .15s, color .15s, border-color .15s;
+}
+.save-icon-btn:hover{background:var(--accent-soft); color:var(--accent-strong); border-color:var(--accent);}
+.save-icon-btn.pulse{ animation:save-pop .5s ease; }
+@keyframes save-pop{ 0%{transform:scale(1);} 45%{transform:scale(1.28);} 100%{transform:scale(1);} }
+.save-status{flex:1 1 auto; min-width:0;}
+.save-status .save-text{display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:color .2s;}
+.save-status[data-state="saved"] .save-text{color:var(--good);}
+.save-status[data-state="error"] .save-text{color:var(--bad);}
 
 #main{flex:1; min-width:0; padding:28px 36px 80px; max-width:1360px;}
 .topline{display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:22px; flex-wrap:wrap;}
@@ -193,8 +206,11 @@ h1 .info-ic, h2 .info-ic{ top:-3px; }
     </div>
     <nav class="groups" id="navgroups"></nav>
     <div class="foot">
-      Dados salvos automaticamente neste navegador.
-      <button id="exportBtn" type="button">⭳ Exportar HTML</button>
+      <div class="save-row">
+        <button id="saveIconBtn" type="button" class="save-icon-btn" title="Salvar agora neste navegador">💾</button>
+        <div id="saveStatus" class="save-status" data-state="saved"><span class="save-text">Pronto</span></div>
+      </div>
+      <button id="exportBtn" type="button" title="Baixa um .html independente com os dados desta tela no instante do clique">⭳ Exportar HTML (dados atuais)</button>
       <button id="resetBtn" type="button">Restaurar exemplo</button>
     </div>
   </aside>
@@ -461,12 +477,15 @@ function freshState(){
   };
 }
 const STORAGE_KEY = 'piquinzada2027_pmo_v2';
+let stateSource = 'fresh'; // 'seed' (arquivo exportado) | 'storage' (salvamento automatico) | 'fresh'
 let state = loadState();
+initSaveStatusText();
 function loadState(){
   try{
     const fresh = freshState();
     // arquivo exportado (ver exportSnapshot): abre direto com os dados daquele instante
     if(window.__PIQUINZADA_STATE__){
+      stateSource = 'seed';
       const seeded = window.__PIQUINZADA_STATE__;
       Object.keys(fresh).forEach(k=>{ if(!(k in seeded)) seeded[k] = fresh[k]; });
       return seeded;
@@ -474,12 +493,46 @@ function loadState(){
     const raw = localStorage.getItem(STORAGE_KEY);
     if(!raw) return fresh;
     const parsed = JSON.parse(raw);
+    stateSource = 'storage';
     Object.keys(fresh).forEach(k=>{ if(!(k in parsed)) parsed[k] = fresh[k]; });
     return parsed;
   }catch(e){ return freshState(); }
 }
+function pad2(n){ return String(n).padStart(2,'0'); }
+function nowHHMMSS(){
+  const d = new Date();
+  return pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds());
+}
+// mostra na barra lateral que o salvamento e automatico e sempre atual — sem exigir clique em nada
+function markSaveStatus(kind){
+  const statusEl = document.getElementById('saveStatus');
+  const iconBtn = document.getElementById('saveIconBtn');
+  if(statusEl){
+    const textEl = statusEl.querySelector('.save-text');
+    statusEl.dataset.state = kind;
+    if(textEl){
+      textEl.textContent = kind==='error'
+        ? 'Falha ao salvar neste navegador'
+        : ('Salvo automaticamente às ' + nowHHMMSS());
+    }
+  }
+  if(iconBtn){
+    iconBtn.classList.remove('pulse');
+    void iconBtn.offsetWidth; // reinicia a animacao mesmo em cliques seguidos
+    iconBtn.classList.add('pulse');
+  }
+}
+function initSaveStatusText(){
+  const statusEl = document.getElementById('saveStatus');
+  const textEl = statusEl && statusEl.querySelector('.save-text');
+  if(!textEl) return;
+  if(stateSource==='seed') textEl.textContent = 'Arquivo exportado às ' + nowHHMMSS() + ' — editando uma cópia local';
+  else if(stateSource==='storage') textEl.textContent = 'Carregado do salvamento automático deste navegador';
+  else textEl.textContent = 'Pronto — toda alteração salva sozinha aqui';
+}
 function saveState(){
-  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); markSaveStatus('saved'); }
+  catch(e){ markSaveStatus('error'); }
 }
 
 /* ---------------- compute engine (espelha as formulas da planilha) ---------------- */
@@ -1801,11 +1854,15 @@ $('#resetBtn').addEventListener('click', ()=>{
   if(confirm('Isso vai apagar os dados salvos neste navegador e restaurar os valores de exemplo. Continuar?')){
     localStorage.removeItem(STORAGE_KEY);
     state = freshState();
+    stateSource = 'fresh';
     saveState();
     currentView = 'dashboard';
     render();
   }
 });
+// salvamento ja e automatico a cada alteracao (ver saveState); este botao so confirma
+// visualmente que os dados atuais ja estao gravados neste navegador, para quem quiser ter certeza
+$('#saveIconBtn').addEventListener('click', ()=>{ saveState(); });
 
 /* ---------------- exportar snapshot .html (com os dados atuais embutidos) ---------------- */
 function buildExportHtml(){
