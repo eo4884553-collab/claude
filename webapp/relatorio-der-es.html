@@ -1423,7 +1423,7 @@ form.addEventListener("change", () => {
 const {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, Header, Footer,
   ImageRun, AlignmentType, WidthType, BorderStyle, ShadingType, VerticalAlign,
-  PageNumber, PageBreak, TabStopType,
+  PageNumber, PageBreak, TabStopType, HeadingLevel, TableOfContents,
 } = docx;
 
 const DARK_BLUE = "1F6EB1", TEXT_BLUE = "0E4D79", LIGHT_1 = "E9F4FB", LIGHT_2 = "D8EBF6",
@@ -1473,13 +1473,24 @@ function fmtDateBR(iso) {
   const [y, m, d] = iso.split("-");
   return `${d}/${m}/${y}`;
 }
+// Réplica da style "Título 1" dos documentos de referência da AIR MINAS:
+// Arial 10pt negrito na cor 0E4D79, sem decoração extra.
 function sectionHeading(text) {
   return new Paragraph({
-    spacing: { before: 260, after: 140 },
-    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: BORDER_BLUE, space: 2 } },
-    children: [new TextRun({ text, bold: true, color: DARK_BLUE, size: 26, font: FONT })],
+    heading: HeadingLevel.HEADING_1,
+    children: [new TextRun({ text, bold: true, color: TEXT_BLUE, size: 20, font: FONT })],
   });
 }
+
+const DOC_STYLES = {
+  default: {
+    document: { run: { font: FONT, size: 20 } },
+    heading1: {
+      run: { font: FONT, size: 20, bold: true, color: TEXT_BLUE },
+      paragraph: { spacing: { before: 260, after: 140 } },
+    },
+  },
+};
 
 function base64ToArrayBuffer(base64) {
   const binary = atob(base64);
@@ -1611,12 +1622,12 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
     spacing: { after: 40 },
-    children: [new TextRun({ text: "RELATÓRIO TÉCNICO", bold: true, size: 40, color: DARK_BLUE, font: FONT })],
+    children: [new TextRun({ text: "RELATÓRIO TÉCNICO", bold: true, size: 20, color: TEXT_BLUE, font: FONT })],
   }));
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
     spacing: { after: 200 },
-    children: [new TextRun({ text: `${data.medicao.numero}ª Medição – ${data.medicao.periodo_faturamento}`, italics: true, size: 24, color: TEXT_BLUE, font: FONT })],
+    children: [new TextRun({ text: `${data.medicao.numero}ª Medição – ${data.medicao.periodo_faturamento}`, italics: true, size: 18, color: TEXT_BLUE, font: FONT })],
   }));
 
   children.push(infoTable([
@@ -1717,6 +1728,7 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
   }));
 
   const doc = new Document({
+    styles: DOC_STYLES,
     sections: [{
       properties: { page: { size: { width: pageW, height: pageH }, margin: { top: marginTop, bottom: marginBottom, left: marginLeft, right: marginRight, header: cm(1.2), footer: cm(1.2) } } },
       headers: { default: header },
@@ -1788,12 +1800,16 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
 
   const children = [];
   children.push(new Paragraph({
-    alignment: AlignmentType.CENTER, spacing: { after: 40 },
-    children: [new TextRun({ text: "RELATÓRIO MENSAL DE ANDAMENTO DAS ATIVIDADES", bold: true, size: 36, color: DARK_BLUE, font: FONT })],
+    alignment: AlignmentType.CENTER, spacing: { after: 60 },
+    children: [new TextRun({ text: "RELATÓRIO MENSAL DE ANDAMENTO DAS ATIVIDADES", bold: true, size: 20, color: TEXT_BLUE, font: FONT })],
+  }));
+  children.push(new Paragraph({
+    alignment: AlignmentType.CENTER, spacing: { after: 60 },
+    children: [new TextRun({ text: "RMAA", bold: true, size: 20, color: DARK_BLUE, font: FONT })],
   }));
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER, spacing: { after: 200 },
-    children: [new TextRun({ text: `RMAA – ${data.medicao.numero}ª Medição – ${data.medicao.periodo_faturamento}`, italics: true, size: 24, color: TEXT_BLUE, font: FONT })],
+    children: [new TextRun({ text: `${data.medicao.numero}ª Medição – ${data.medicao.periodo_faturamento}`, italics: true, size: 18, color: TEXT_BLUE, font: FONT })],
   }));
   children.push(infoTable([
     ["OBJETO", data.contrato.objeto], ["CONTRATADA", data.contrato.contratada], ["CONTRATO", data.contrato.contrato],
@@ -1809,6 +1825,13 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
   children.push(new Paragraph({ spacing: { before: 160, after: 160 }, children: [] }));
   children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `Fiscalização: ${data.contrato.fiscalizacao}`, bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
   children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `${data.contrato.contratada} · Contrato ${data.contrato.contrato} · Vitória/ES · ${data.medicao.periodo_faturamento}`, size: 18, color: TEXT_BLUE, font: FONT })] }));
+  children.push(new Paragraph({ children: [new PageBreak()] }));
+
+  children.push(new Paragraph({
+    spacing: { after: 200 },
+    children: [new TextRun({ text: "Sumário", bold: true, size: 24, color: TEXT_BLUE, font: FONT })],
+  }));
+  children.push(new TableOfContents("Sumário", { hyperlink: true, headingStyleRange: "1-1" }));
   children.push(new Paragraph({ children: [new PageBreak()] }));
 
   const r = data.rmaa || {};
@@ -1921,6 +1944,7 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
   children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: [data.responsavel.cargo, data.responsavel.crea].filter(Boolean).join(" · "), size: 19, color: TEXT_BLUE, font: FONT })] }));
 
   return new Document({
+    styles: DOC_STYLES,
     sections: [{
       properties: { page: { size: { width: pageW, height: pageH }, margin: { top: marginTop, bottom: marginBottom, left: marginLeft, right: marginRight, header: cm(1.2), footer: cm(1.2) } } },
       headers: { default: header },
