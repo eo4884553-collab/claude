@@ -371,11 +371,13 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
       <div class="grid hidden" id="seguranca-fields">
         <label class="field">Acidentes com afastamento<input type="number" name="seg_com_afastamento" value="0" /></label>
         <label class="field">Acidentes sem afastamento<input type="number" name="seg_sem_afastamento" value="0" /></label>
+        <label class="field">Dias perdidos<input type="number" name="seg_dias_perdidos" value="0" /></label>
+        <label class="field">Dias debitados<input type="number" name="seg_dias_debitados" value="0" /></label>
         <label class="field">Acidente típico<input type="number" name="seg_tipo_tipico" value="0" /></label>
         <label class="field">Acidente de trajeto<input type="number" name="seg_tipo_trajeto" value="0" /></label>
         <label class="field">Doença profissional<input type="number" name="seg_tipo_doenca" value="0" /></label>
         <label class="field">HHT (Homens-Hora Trabalhadas)<input type="number" name="seg_hht" value="0" /></label>
-        <label class="field">Taxa de Gravidade<input type="number" step="0.01" name="seg_taxa_gravidade" value="0" /></label>
+        <label class="field">Taxa de Gravidade <small>(0 = calcular automaticamente pela NBR 14280)</small><input type="number" step="0.01" name="seg_taxa_gravidade" value="0" /></label>
       </div>
     </section>
 
@@ -1458,7 +1460,27 @@ function infoTable(pairs, widthsCm = [4.5, 9.0]) {
       ],
     });
   });
-  return new Table({ width: { size: w1 + w2, type: WidthType.DXA }, columnWidths: [w1, w2], rows });
+  return new Table({ width: { size: w1 + w2, type: WidthType.DXA }, columnWidths: [w1, w2], rows, alignment: AlignmentType.CENTER });
+}
+// Legendas e notas de fonte no padrão ABNT (NBR 14724): "Tabela N – Título"
+// centralizada acima da tabela e "Fonte: ..." centralizada e em itálico abaixo.
+function makeCaptioner() {
+  let n = 0;
+  return (title) => {
+    n += 1;
+    return new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 200, after: 80 },
+      children: [new TextRun({ text: `Tabela ${n} – ${title}`, bold: true, size: 18, color: TEXT_BLUE, font: FONT })],
+    });
+  };
+}
+function tableSource(text) {
+  return new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { before: 60, after: 160 },
+    children: [new TextRun({ text: `Fonte: ${text}`, italics: true, size: 16, font: FONT })],
+  });
 }
 function fmtMoney(v) {
   const n = Number(v) || 0;
@@ -1529,7 +1551,7 @@ async function fitImage(buf, maxW, maxH) {
 
 function itemsTable(itens) {
   const headers = ["Item", "Descrição", "Und.", "Qtd.\nContratada", "Qtd.\nAcum. Anterior", "Qtd.\nMedição Atual", "Qtd.\nAcum. Atual", "Preço Unit. (R$)", "Valor Medido (R$)"];
-  const widthsCm = [1.4, 4.7, 1.1, 1.8, 1.8, 1.8, 1.8, 2.1, 2.3];
+  const widthsCm = [1.3, 4.3, 1.0, 1.7, 1.7, 1.7, 1.7, 2.0, 2.2];
   const widthsDxa = widthsCm.map(cm);
   const totalWidth = widthsDxa.reduce((a, b) => a + b, 0);
 
@@ -1548,8 +1570,11 @@ function itemsTable(itens) {
     totalValor += valor;
     const fill = i % 2 === 0 ? LIGHT_1 : LIGHT_2;
     const vals = [it.item, it.descricao, it.unidade, fmtNum(it.qtd_contratada), fmtNum(qtdAnterior), fmtNum(qtdAtual), fmtNum(acumAtual), fmtNum(preco), fmtNum(valor)];
+    // Alinhamento no padrão ABNT para tabelas técnicas: texto à esquerda,
+    // códigos/unidades centralizados, valores numéricos à direita.
+    const aligns = [AlignmentType.CENTER, AlignmentType.LEFT, AlignmentType.CENTER, AlignmentType.RIGHT, AlignmentType.RIGHT, AlignmentType.RIGHT, AlignmentType.RIGHT, AlignmentType.RIGHT, AlignmentType.RIGHT];
     return new TableRow({
-      children: vals.map((v, j) => cell(v, { fill, bold: j === 0, size: 16, align: j === 1 ? AlignmentType.LEFT : AlignmentType.CENTER, widthDxa: widthsDxa[j] })),
+      children: vals.map((v, j) => cell(v, { fill, bold: j === 0, size: 16, align: aligns[j], widthDxa: widthsDxa[j] })),
     });
   });
 
@@ -1557,25 +1582,48 @@ function itemsTable(itens) {
     children: [
       cell("TOTAL", { fill: DARK_BLUE, bold: true, color: WHITE, size: 18, align: AlignmentType.LEFT, widthDxa: widthsDxa[0] }),
       ...Array.from({ length: 7 }, (_, j) => cell("", { fill: DARK_BLUE, color: WHITE, widthDxa: widthsDxa[j + 1] })),
-      cell(fmtNum(totalValor), { fill: DARK_BLUE, bold: true, color: WHITE, size: 18, widthDxa: widthsDxa[8] }),
+      cell(fmtNum(totalValor), { fill: DARK_BLUE, bold: true, color: WHITE, size: 18, align: AlignmentType.RIGHT, widthDxa: widthsDxa[8] }),
     ],
   });
 
-  const table = new Table({ width: { size: totalWidth, type: WidthType.DXA }, columnWidths: widthsDxa, rows: [headerRow, ...rows, totalRow] });
+  const table = new Table({ width: { size: totalWidth, type: WidthType.DXA }, columnWidths: widthsDxa, rows: [headerRow, ...rows, totalRow], alignment: AlignmentType.CENTER });
   return { table, totalValor };
 }
 
+// Reproduz a estrutura do "Controle Estatístico de Acidentes" (planilha de
+// Índices de Segurança), com as taxas de frequência/gravidade calculadas
+// conforme a NBR 14280 quando não informadas manualmente.
 function segurancaTable(seg) {
-  const pairs = [
-    ["Acidentes com afastamento", seg.com_afastamento],
-    ["Acidentes sem afastamento", seg.sem_afastamento],
-    ["Acidente típico", seg.tipo_tipico],
-    ["Acidente de trajeto", seg.tipo_trajeto],
-    ["Doença profissional", seg.tipo_doenca],
-    ["HHT (Homens-Hora Trabalhadas)", seg.hht],
-    ["Taxa de Gravidade", seg.taxa_gravidade],
+  const hht = Number(seg.hht) || 0;
+  const comAf = Number(seg.com_afastamento) || 0;
+  const semAf = Number(seg.sem_afastamento) || 0;
+  const diasPerdidos = Number(seg.dias_perdidos) || 0;
+  const diasDebitados = Number(seg.dias_debitados) || 0;
+  const tfComAf = hht > 0 ? (comAf * 1000000) / hht : 0;
+  const tfSemAf = hht > 0 ? (semAf * 1000000) / hht : 0;
+  const tgManual = Number(seg.taxa_gravidade) || 0;
+  const taxaGravidade = tgManual > 0 ? tgManual : (hht > 0 ? ((diasPerdidos + diasDebitados) * 1000000) / hht : 0);
+
+  const headers = ["HHT", "Acid. c/\nAfastam.", "Acid. s/\nAfastam.", "Dias\nPerdidos", "Dias\nDebitados", "Típico", "Trajeto", "Doença\nProfiss.", "Tx. Freq.\nc/ Afastam.", "Tx. Freq.\ns/ Afastam.", "Taxa de\nGravidade"];
+  const widthsCm = [1.7, 1.7, 1.7, 1.5, 1.5, 1.3, 1.3, 1.7, 1.8, 1.8, 1.6];
+  const widthsDxa = widthsCm.map(cm);
+  const totalWidth = widthsDxa.reduce((a, b) => a + b, 0);
+
+  const headerRow = new TableRow({
+    tableHeader: true,
+    children: headers.map((h, i) => cell(h, { fill: DARK_BLUE, bold: true, color: WHITE, size: 15, widthDxa: widthsDxa[i] })),
+  });
+  const vals = [
+    fmtNum(hht, 0), fmtNum(comAf, 0), fmtNum(semAf, 0), fmtNum(diasPerdidos, 0), fmtNum(diasDebitados, 0),
+    fmtNum(seg.tipo_tipico, 0), fmtNum(seg.tipo_trajeto, 0), fmtNum(seg.tipo_doenca, 0),
+    fmtNum(tfComAf, 2), fmtNum(tfSemAf, 2), fmtNum(taxaGravidade, 2),
   ];
-  return infoTable(pairs, [7.0, 6.5]);
+  const dataRow = new TableRow({
+    children: vals.map((v, j) => cell(v, { fill: LIGHT_1, size: 17, align: AlignmentType.RIGHT, widthDxa: widthsDxa[j] })),
+  });
+
+  const table = new Table({ width: { size: totalWidth, type: WidthType.DXA }, columnWidths: widthsDxa, rows: [headerRow, dataRow], alignment: AlignmentType.CENTER });
+  return table;
 }
 
 /* ---------------------------------------------------------------------
@@ -1585,7 +1633,9 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
   const logoDims = await fitImage(logoBuf, 150, 55);
   const assinaturaDims = assinaturaBuf ? await fitImage(assinaturaBuf, 220, 110) : null;
   const pageW = cm(21.0), pageH = cm(29.7);
-  const marginTop = cm(2.5), marginBottom = cm(2.0), marginLeft = cm(1.9), marginRight = cm(1.5);
+  // Margens idênticas às do documento de referência (Relatorio_Tecnico.docx):
+  // topo 2,5cm, base 2,0cm, esquerda 1,5cm, direita 1,0cm.
+  const marginTop = cm(2.5), marginBottom = cm(2.0), marginLeft = cm(1.5), marginRight = cm(1.0);
 
   const footerText = `${data.contrato.contratada} · Contrato ${data.contrato.contrato} · RELATÓRIO TÉCNICO – ${data.medicao.numero}ª Medição · ${data.medicao.periodo_faturamento}`;
 
@@ -1618,6 +1668,7 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
   });
 
   const children = [];
+  const caption = makeCaptioner();
 
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
@@ -1664,8 +1715,10 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
   children.push(sectionHeading("1. MEDIÇÃO DOS SERVIÇOS EXECUTADOS"));
   let totalValor = 0;
   if (data.itens.length) {
+    children.push(caption("Itens medidos nesta medição"));
     const built = itemsTable(data.itens);
     children.push(built.table);
+    children.push(tableSource("Boletim de medição da Contratada, conferido pela Fiscalização."));
     totalValor = built.totalValor;
   } else {
     children.push(new Paragraph({ children: [new TextRun({ text: "Nenhum item informado para esta medição.", italics: true, size: 20, font: FONT })] }));
@@ -1687,7 +1740,9 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
   if (data.seguranca) {
     n += 1;
     children.push(sectionHeading(`${n}. SEGURANÇA DO TRABALHO`));
+    children.push(caption("Indicadores de segurança do trabalho no período"));
     children.push(segurancaTable(data.seguranca));
+    children.push(tableSource("Controle estatístico de acidentes da Contratada."));
   }
   if (data.observacoes && data.observacoes.trim()) {
     n += 1;
@@ -1739,12 +1794,13 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
   return doc;
 }
 
-function simpleTable(headers, rows, widthsCm, emptyMessage) {
+function simpleTable(headers, rows, widthsCm, emptyMessage, aligns) {
   if (!rows.length) {
     return new Paragraph({ children: [new TextRun({ text: emptyMessage, italics: true, size: 20, font: FONT })] });
   }
   const widthsDxa = widthsCm.map(cm);
   const totalWidth = widthsDxa.reduce((a, b) => a + b, 0);
+  const colAligns = aligns || headers.map((_, j) => (j === 0 ? AlignmentType.CENTER : AlignmentType.LEFT));
   const headerRow = new TableRow({
     tableHeader: true,
     children: headers.map((h, i) => cell(h, { fill: DARK_BLUE, bold: true, color: WHITE, size: 16, widthDxa: widthsDxa[i] })),
@@ -1752,10 +1808,10 @@ function simpleTable(headers, rows, widthsCm, emptyMessage) {
   const bodyRows = rows.map((r, i) => {
     const fill = i % 2 === 0 ? LIGHT_1 : LIGHT_2;
     return new TableRow({
-      children: r.map((v, j) => cell(v, { fill, size: 16, align: j === 0 ? AlignmentType.LEFT : AlignmentType.CENTER, widthDxa: widthsDxa[j] })),
+      children: r.map((v, j) => cell(v, { fill, size: 16, align: colAligns[j], widthDxa: widthsDxa[j] })),
     });
   });
-  return new Table({ width: { size: totalWidth, type: WidthType.DXA }, columnWidths: widthsDxa, rows: [headerRow, ...bodyRows] });
+  return new Table({ width: { size: totalWidth, type: WidthType.DXA }, columnWidths: widthsDxa, rows: [headerRow, ...bodyRows], alignment: AlignmentType.CENTER });
 }
 
 function labelValueParagraph(label, value) {
@@ -1799,6 +1855,7 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
   });
 
   const children = [];
+  const caption = makeCaptioner();
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER, spacing: { after: 60 },
     children: [new TextRun({ text: "RELATÓRIO MENSAL DE ANDAMENTO DAS ATIVIDADES", bold: true, size: 20, color: TEXT_BLUE, font: FONT })],
@@ -1861,19 +1918,24 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
   children.push(labelValueParagraph("Período de Referência da Documentação", data.medicao.periodo_documentacao));
   if (data.itens.length) {
     children.push(new Paragraph({ spacing: { before: 120 }, children: [new TextRun({ text: "Itens medidos nesta medição:", bold: true, size: 20, color: TEXT_BLUE, font: FONT })] }));
+    children.push(caption("Itens medidos nesta medição"));
     children.push(itemsTable(data.itens).table);
+    children.push(tableSource("Boletim de medição da Contratada, conferido pela Fiscalização."));
   }
 
   children.push(sectionHeading("4. RELAÇÃO DA EQUIPE"));
   children.push(new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: "4.1 Relação da Equipe da Contratada", bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  if (r.equipe_contratada.length) children.push(caption("Equipe da Contratada"));
   children.push(simpleTable(["Nº", "Nome", "Função", "CBO"],
     r.equipe_contratada.map((m, i) => [String(i + 1), m.nome, m.funcao, m.cbo]),
     [1.2, 5.5, 4.5, 2.5], "Nenhum membro informado."));
   children.push(new Paragraph({ spacing: { before: 200, after: 80 }, children: [new TextRun({ text: "4.2 Relação da Equipe da Fiscalização", bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  if (r.equipe_fiscalizacao.length) children.push(caption("Equipe da Fiscalização"));
   children.push(simpleTable(["Nº", "Nome", "Função", "Empresa"],
     r.equipe_fiscalizacao.map((m, i) => [String(i + 1), m.nome, m.funcao, m.empresa]),
     [1.2, 5.5, 4.5, 2.5], "Nenhum membro informado."));
   children.push(new Paragraph({ spacing: { before: 200, after: 80 }, children: [new TextRun({ text: "4.3 Relação da Equipe Subcontratada", bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  if (r.equipe_subcontratada.length) children.push(caption("Equipe Subcontratada"));
   children.push(simpleTable(["Nº", "Nome", "Função", "Empresa"],
     r.equipe_subcontratada.map((m, i) => [String(i + 1), m.nome, m.funcao, m.empresa]),
     [1.2, 5.5, 4.5, 2.5], "Nenhum membro subcontratado nesta medição."));
@@ -1882,6 +1944,7 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
 
   children.push(sectionHeading("5. ATIVIDADES PROGRAMADAS"));
   children.push(new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: "5.1 Atividades programadas no mês de referência", bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  if (r.atividades.length) children.push(caption("Atividades programadas no mês de referência"));
   children.push(simpleTable(["Atividade", "Principais Equipamentos", "Principais Materiais", "Caminho Crítico"],
     r.atividades.map((a) => [a.atividade, a.equipamentos, a.materiais, a.caminho_critico]),
     [4.5, 4.5, 4.0, 2.7], "Nenhuma atividade informada."));
@@ -1896,6 +1959,7 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
   ];
   futGroups.forEach(([label, rows], gi) => {
     children.push(new Paragraph({ spacing: { before: gi === 0 ? 0 : 160, after: 60 }, children: [new TextRun({ text: label, bold: true, italics: true, size: 20, color: TEXT_BLUE, font: FONT })] }));
+    if (rows.length) children.push(caption(`Atividades programadas – ${label}`));
     children.push(simpleTable(["Atividade", "Principais Equipamentos", "Principais Materiais", "Caminho Crítico"],
       rows.map((a) => [a.atividade, a.equipamentos, a.materiais, a.caminho_critico]),
       [4.5, 4.5, 4.0, 2.7], "Nenhuma atividade informada."));
@@ -1909,16 +1973,19 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
     children.push(new Paragraph({ children: [new TextRun({ text: "Curva S não informada nesta medição.", italics: true, size: 20, font: FONT })] }));
   }
   children.push(new Paragraph({ spacing: { before: 200, after: 80 }, children: [new TextRun({ text: "6.2 Previsão de Desembolso", bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+  if (r.desembolso.length) children.push(caption("Previsão de desembolso"));
   children.push(simpleTable(["Referência", "Valor (R$)"],
     r.desembolso.map((d) => [d.referencia, fmtMoney(d.valor)]),
-    [8.0, 6.0], "Nenhuma previsão informada."));
+    [8.0, 6.0], "Nenhuma previsão informada.", [AlignmentType.LEFT, AlignmentType.RIGHT]));
 
   children.push(sectionHeading("7. ENSAIOS REALIZADOS"));
   children.push(new Paragraph({ children: [new TextRun({ text: r.ensaios || "Nenhum ensaio realizado neste período.", size: 20, font: FONT })] }));
 
   children.push(sectionHeading("8. ESTATÍSTICA DE ACIDENTE"));
   if (data.seguranca) {
+    children.push(caption("Indicadores de segurança do trabalho no período"));
     children.push(segurancaTable(data.seguranca));
+    children.push(tableSource("Controle estatístico de acidentes da Contratada."));
   } else {
     children.push(new Paragraph({ children: [new TextRun({ text: "Nenhum acidente de trabalho registrado no período de referência.", size: 20, font: FONT })] }));
   }
@@ -1983,6 +2050,7 @@ function collectPayload() {
   if (document.getElementById("toggle-seguranca").checked) {
     seguranca = {
       com_afastamento: f.get("seg_com_afastamento") || 0, sem_afastamento: f.get("seg_sem_afastamento") || 0,
+      dias_perdidos: f.get("seg_dias_perdidos") || 0, dias_debitados: f.get("seg_dias_debitados") || 0,
       tipo_tipico: f.get("seg_tipo_tipico") || 0, tipo_trajeto: f.get("seg_tipo_trajeto") || 0,
       tipo_doenca: f.get("seg_tipo_doenca") || 0, hht: f.get("seg_hht") || 0, taxa_gravidade: f.get("seg_taxa_gravidade") || 0,
     };
