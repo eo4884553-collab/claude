@@ -5,6 +5,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.1/xlsx.full.min.js"></script>
 
 <style>
 :root{
@@ -173,6 +174,11 @@ td.valcell{ text-align:right; font-weight:700; color:var(--blue-900); }
   border:1px solid var(--red); background:transparent; color:var(--red); border-radius:5px; padding:6px 12px; cursor:pointer;
 }
 .alert-box button:hover{ background:var(--red); color:#fff; }
+.bm-upload{ display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+.bm-upload label.btn{ margin:0; display:inline-block; }
+#bm-upload-status{ font-size:12.5px; font-weight:600; color:var(--blue-500); }
+#bm-upload-status.ok{ color:var(--green); }
+#bm-upload-status.error{ color:var(--red); }
 .person-row select.person-select{ margin-bottom:0; }
 .person-custom{ margin-top:4px; }
 .person-custom.hidden{ display:none; }
@@ -285,6 +291,13 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
     <section class="card">
       <div class="sec-head"><span class="num">3</span><h2>Itens Medidos Nesta Medição</h2></div>
       <p class="report-type-note" style="margin:-8px 0 12px">Digite apenas o <strong>código do item (BM)</strong> — descrição, unidade, quantidade contratada, quantidade acumulada anterior e preço unitário são preenchidos automaticamente a partir da memória de medição. Você só precisa lançar a <strong>quantidade medida nesta medição</strong>.</p>
+
+      <div class="bm-upload">
+        <label class="btn" for="bm-file-input">📎 Anexar planilha do BM (Memória de Medição)</label>
+        <input type="file" id="bm-file-input" accept=".xlsx,.xls,.xlsm" class="hidden" />
+        <span id="bm-upload-status"></span>
+      </div>
+
       <div class="table-wrap">
         <table id="itens-table">
           <thead><tr>
@@ -573,13 +586,17 @@ function fmtBRL(v) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+const DYNAMIC_ITEMS_DB = {};
+
 function lookupItem(rawCode) {
   const digits = String(rawCode || "").replace(/\D/g, "");
   if (!digits) return null;
+  if (DYNAMIC_ITEMS_DB[digits]) return DYNAMIC_ITEMS_DB[digits];
   if (ITEMS_DB[digits]) return ITEMS_DB[digits];
   for (const len of [2, 4, 6, 8]) {
     if (digits.length < len) {
       const padded = digits.padStart(len, "0");
+      if (DYNAMIC_ITEMS_DB[padded]) return DYNAMIC_ITEMS_DB[padded];
       if (ITEMS_DB[padded]) return ITEMS_DB[padded];
     }
   }
@@ -620,6 +637,160 @@ function addItemRow(values = {}) {
 
   recalcTotal();
 }
+
+/* ---------------------------------------------------------------------
+   Importação da planilha do BM (Memória de Medição) — lê o .xlsx/.xlsm
+   anexado no navegador (SheetJS) e localiza sozinha a aba e as colunas
+   de Item / Descrição / Und. / Quant. Contratada, mais as linhas-resumo
+   "Medido até a Última Medição" e "Total Medido Nesta Medição".
+--------------------------------------------------------------------- */
+function normHeaderText(s) {
+  return String(s ?? "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toLowerCase().trim();
+}
+
+function findBMHeaderCols(rows) {
+  const limit = Math.min(rows.length, 40);
+  for (let r = 0; r < limit; r++) {
+    const row = rows[r] || [];
+    let itemCol = -1, descCol = -1, undCol = -1, qtdCol = -1;
+    row.forEach((cell, c) => {
+      const h = normHeaderText(cell);
+      if (h === "item") itemCol = c;
+      else if (h.startsWith("descri")) descCol = c;
+      else if (h.startsWith("und")) undCol = c;
+      else if (h.startsWith("quant") && h.includes("contrat")) qtdCol = c;
+    });
+    if (itemCol >= 0 && descCol >= 0 && undCol >= 0 && qtdCol >= 0) {
+      return { headerRow: r, itemCol, descCol, undCol, qtdCol };
+    }
+  }
+  return null;
+}
+
+function firstNumberInRow(row) {
+  for (const v of row || []) {
+    if (typeof v === "number" && !Number.isNaN(v)) return v;
+  }
+  return null;
+}
+
+function parseBMSheetItems(rows, cols) {
+  const items = [];
+  for (let r = cols.headerRow + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const codeRaw = row[cols.itemCol];
+    const desc = row[cols.descCol];
+    const und = row[cols.undCol];
+    const qtd = row[cols.qtdCol];
+    if (codeRaw == null || String(codeRaw).trim() === "") continue;
+    if (desc == null || und == null || typeof qtd !== "number") continue;
+
+    const codigo = String(codeRaw).replace(/^'/, "").trim();
+    let qtdAnterior = 0;
+    let qtdAtual = null;
+    const scanLimit = Math.min(r + 80, rows.length);
+    for (let s = r + 1; s < scanLimit; s++) {
+      const srow = rows[s] || [];
+      const label = normHeaderText(srow[0]);
+      if (label.includes("medido ate a")) {
+        qtdAnterior = firstNumberInRow(srow) ?? 0;
+      } else if (label.includes("total medido nesta")) {
+        qtdAtual = firstNumberInRow(srow) ?? 0;
+        break;
+      } else if (srow[cols.itemCol] != null && srow[cols.undCol] != null && typeof srow[cols.qtdCol] === "number") {
+        break; // chegou no próximo item — não achou os resumos deste
+      }
+    }
+    items.push({
+      codigo, descricao: String(desc).trim(), unidade: String(und).trim(),
+      qtd_contratada: qtd, qtd_acumulada_anterior: qtdAnterior, qtd_atual: qtdAtual ?? 0,
+    });
+  }
+  return items;
+}
+
+function guessMedicaoNumero(sheetName) {
+  const m = normHeaderText(sheetName).match(/med\.?\s*n?[ºo°]?\.?\s*0*(\d+)/);
+  return m ? parseInt(m[1], 10) : -1;
+}
+
+function importarItensDaAba(candidate, statusEl) {
+  itensBody.innerHTML = "";
+  candidate.items.forEach((it) => {
+    const known = ITEMS_DB[it.codigo] || DYNAMIC_ITEMS_DB[it.codigo];
+    const preco = known ? known.preco_unitario : 0;
+    DYNAMIC_ITEMS_DB[it.codigo] = {
+      descricao: it.descricao, unidade: it.unidade, qtd_contratada: it.qtd_contratada,
+      qtd_acumulada_anterior: it.qtd_acumulada_anterior, preco_unitario: preco,
+    };
+    addItemRow({
+      item: it.codigo, descricao: it.descricao, unidade: it.unidade,
+      qtd_contratada: it.qtd_contratada, qtd_anterior: it.qtd_acumulada_anterior,
+      qtd_atual: it.qtd_atual, preco_unitario: preco,
+    });
+  });
+  statusEl.innerHTML = "";
+  statusEl.textContent = `${candidate.items.length} itens importados da aba "${candidate.sheetName}". Confira o preço unitário (não vem do BM) e a quantidade desta medição.`;
+  statusEl.className = "ok";
+}
+
+document.getElementById("bm-file-input").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  const statusEl = document.getElementById("bm-upload-status");
+  if (!file) return;
+  statusEl.textContent = "Lendo planilha...";
+  statusEl.className = "";
+  try {
+    if (typeof XLSX === "undefined") throw new Error("biblioteca de leitura de planilhas não carregou");
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array" });
+
+    const candidates = [];
+    for (const sheetName of wb.SheetNames) {
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
+      const cols = findBMHeaderCols(rows);
+      if (!cols) continue;
+      const items = parseBMSheetItems(rows, cols);
+      if (items.length) candidates.push({ sheetName, items });
+    }
+
+    if (!candidates.length) {
+      statusEl.textContent = "Não encontrei itens nessa planilha. Procure a aba de memória de medição, com colunas Item / Descrição / Und. / Quant. Contratada.";
+      statusEl.className = "error";
+      return;
+    }
+
+    if (candidates.length === 1) {
+      importarItensDaAba(candidates[0], statusEl);
+      return;
+    }
+
+    // várias abas com itens (comum em planilhas com uma "Memória" por medição) —
+    // pedir para o usuário confirmar de qual aba importar, com um palpite pré-selecionado.
+    candidates.sort((a, b) => guessMedicaoNumero(b.sheetName) - guessMedicaoNumero(a.sheetName));
+    statusEl.className = "";
+    statusEl.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span>Essa planilha tem várias abas com itens — escolha qual usar:</span>
+        <select id="bm-sheet-choice">
+          ${candidates.map((c, i) => `<option value="${i}">${escAttr(c.sheetName)} (${c.items.length} itens)</option>`).join("")}
+        </select>
+        <button type="button" class="btn" id="bm-sheet-confirm">Importar desta aba</button>
+      </div>`;
+    document.getElementById("bm-sheet-confirm").addEventListener("click", () => {
+      const idx = Number(document.getElementById("bm-sheet-choice").value);
+      importarItensDaAba(candidates[idx], statusEl);
+    });
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "Erro ao ler o arquivo: " + (err && err.message ? err.message : err);
+    statusEl.className = "error";
+  } finally {
+    e.target.value = "";
+  }
+});
 
 function addCurvaRow(values = {}) {
   const tr = document.createElement("tr");
