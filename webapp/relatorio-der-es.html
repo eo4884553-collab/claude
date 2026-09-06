@@ -669,15 +669,22 @@ function findBMHeaderCols(rows) {
   return null;
 }
 
-function firstNumberInRow(row) {
-  for (const v of row || []) {
-    if (typeof v === "number" && !Number.isNaN(v)) return v;
-  }
-  return null;
+function colLetter(idx) {
+  let n = idx + 1, s = "";
+  while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+  return s;
 }
 
-function parseBMSheetItems(rows, cols) {
-  const items = [];
+function guessMedicaoNumero(sheetName) {
+  const m = normHeaderText(sheetName).match(/med\.?\s*n?[ºo°]?\.?\s*0*(\d+)/);
+  return m ? parseInt(m[1], 10) : -1;
+}
+
+// Varre a aba e monta, para cada item, as linhas-resumo brutas (sem
+// resolver ainda em qual coluna está o valor) — permite depois perguntar
+// ao usuário qual coluna usar e só então extrair os números.
+function scanItemBlocks(rows, cols) {
+  const blocks = [];
   for (let r = cols.headerRow + 1; r < rows.length; r++) {
     const row = rows[r] || [];
     const codeRaw = row[cols.itemCol];
@@ -688,37 +695,60 @@ function parseBMSheetItems(rows, cols) {
     if (desc == null || und == null || typeof qtd !== "number") continue;
 
     const codigo = String(codeRaw).replace(/^'/, "").trim();
-    let qtdAnterior = 0;
-    let qtdAtual = null;
+    let medidoAteRow = null, totalMedidoRow = null;
     const scanLimit = Math.min(r + 80, rows.length);
     for (let s = r + 1; s < scanLimit; s++) {
       const srow = rows[s] || [];
       const label = normHeaderText(srow[0]);
-      if (label.includes("medido ate a")) {
-        qtdAnterior = firstNumberInRow(srow) ?? 0;
-      } else if (label.includes("total medido nesta")) {
-        qtdAtual = firstNumberInRow(srow) ?? 0;
-        break;
-      } else if (srow[cols.itemCol] != null && srow[cols.undCol] != null && typeof srow[cols.qtdCol] === "number") {
-        break; // chegou no próximo item — não achou os resumos deste
-      }
+      if (label.includes("medido ate a")) medidoAteRow = srow;
+      else if (label.includes("total medido nesta")) { totalMedidoRow = srow; break; }
+      else if (srow[cols.itemCol] != null && srow[cols.undCol] != null && typeof srow[cols.qtdCol] === "number") break;
     }
-    items.push({
-      codigo, descricao: String(desc).trim(), unidade: String(und).trim(),
-      qtd_contratada: qtd, qtd_acumulada_anterior: qtdAnterior, qtd_atual: qtdAtual ?? 0,
-    });
+    blocks.push({ codigo, descricao: String(desc).trim(), unidade: String(und).trim(), qtd_contratada: qtd, itemRow: row, medidoAteRow, totalMedidoRow });
   }
+  return blocks;
+}
+
+// Colunas candidatas: onde a linha "Total Medido Nesta Medição" tem número,
+// contadas em quantos itens aparecem — a mais frequente é a certa.
+function columnCandidatesFromBlocks(blocks) {
+  const freq = {};
+  blocks.forEach((b) => {
+    if (b.totalMedidoRow) {
+      b.totalMedidoRow.forEach((v, c) => { if (c > 0 && typeof v === "number") freq[c] = (freq[c] || 0) + 1; });
+    }
+  });
+  return Object.entries(freq).map(([c, n]) => ({ col: Number(c), count: n })).sort((a, b) => b.count - a.count);
+}
+
+function resolveItemsFromSummaryRows(blocks, col) {
+  const items = [];
+  blocks.forEach((b) => {
+    const anterior = b.medidoAteRow && typeof b.medidoAteRow[col] === "number" ? b.medidoAteRow[col] : 0;
+    const atual = b.totalMedidoRow && typeof b.totalMedidoRow[col] === "number" ? b.totalMedidoRow[col] : null;
+    if (atual != null && atual !== 0) {
+      items.push({ codigo: b.codigo, descricao: b.descricao, unidade: b.unidade, qtd_contratada: b.qtd_contratada, qtd_acumulada_anterior: anterior, qtd_atual: atual });
+    }
+  });
   return items;
 }
 
-function guessMedicaoNumero(sheetName) {
-  const m = normHeaderText(sheetName).match(/med\.?\s*n?[ºo°]?\.?\s*0*(\d+)/);
-  return m ? parseInt(m[1], 10) : -1;
+// Aba sem linhas-resumo "Total Medido Nesta Medição" — modo alternativo:
+// lê o valor direto na própria linha do item, na coluna escolhida.
+function resolveItemsFromItemRow(blocks, col) {
+  const items = [];
+  blocks.forEach((b) => {
+    const atual = typeof b.itemRow[col] === "number" ? b.itemRow[col] : null;
+    if (atual != null && atual !== 0) {
+      items.push({ codigo: b.codigo, descricao: b.descricao, unidade: b.unidade, qtd_contratada: b.qtd_contratada, qtd_acumulada_anterior: 0, qtd_atual: atual });
+    }
+  });
+  return items;
 }
 
-function importarItensDaAba(candidate, statusEl) {
+function importarItens(items, sheetName, totalBlocos, statusEl) {
   itensBody.innerHTML = "";
-  candidate.items.forEach((it) => {
+  items.forEach((it) => {
     const known = ITEMS_DB[it.codigo] || DYNAMIC_ITEMS_DB[it.codigo];
     const preco = known ? known.preco_unitario : 0;
     DYNAMIC_ITEMS_DB[it.codigo] = {
@@ -732,8 +762,38 @@ function importarItensDaAba(candidate, statusEl) {
     });
   });
   statusEl.innerHTML = "";
-  statusEl.textContent = `${candidate.items.length} itens importados da aba "${candidate.sheetName}". Confira o preço unitário (não vem do BM) e a quantidade desta medição.`;
-  statusEl.className = "ok";
+  if (items.length) {
+    statusEl.textContent = `${items.length} itens com lançamento nesta medição importados da aba "${sheetName}" (de ${totalBlocos} itens no total da planilha). Confira o preço unitário — ele não vem do BM.`;
+    statusEl.className = "ok";
+  } else {
+    statusEl.textContent = `Nenhum item tem valor lançado nessa coluna, na aba "${sheetName}". Tente escolher outra coluna.`;
+    statusEl.className = "error";
+  }
+}
+
+function showColumnPicker(blocks, sheetName, statusEl) {
+  const candidates = columnCandidatesFromBlocks(blocks);
+  const usingSummaryRows = candidates.length > 0;
+  const options = usingSummaryRows
+    ? candidates.map((c) => ({ col: c.col, label: `Coluna ${colLetter(c.col)} — usada em ${c.count} de ${blocks.length} itens` }))
+    : Array.from({ length: Math.max(...blocks.map((b) => b.itemRow.length), 10) }, (_, c) => ({ col: c, label: `Coluna ${colLetter(c)}` }));
+
+  statusEl.className = "";
+  statusEl.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span>Qual coluna tem a <strong>quantidade medida nesta medição</strong>?</span>
+      <select id="bm-col-choice">
+        ${options.map((o, i) => `<option value="${o.col}">${escAttr(o.label)}</option>`).join("")}
+      </select>
+      <button type="button" class="btn" id="bm-col-confirm">Importar</button>
+    </div>
+    ${!usingSummaryRows ? `<div style="margin-top:6px;font-size:11.5px">Não encontrei as linhas-resumo "Total Medido Nesta Medição" nessa aba — o valor será lido direto na linha de cada item.</div>` : ""}`;
+
+  document.getElementById("bm-col-confirm").addEventListener("click", () => {
+    const col = Number(document.getElementById("bm-col-choice").value);
+    const items = usingSummaryRows ? resolveItemsFromSummaryRows(blocks, col) : resolveItemsFromItemRow(blocks, col);
+    importarItens(items, sheetName, blocks.length, statusEl);
+  });
 }
 
 document.getElementById("bm-file-input").addEventListener("change", async (e) => {
@@ -752,8 +812,8 @@ document.getElementById("bm-file-input").addEventListener("change", async (e) =>
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
       const cols = findBMHeaderCols(rows);
       if (!cols) continue;
-      const items = parseBMSheetItems(rows, cols);
-      if (items.length) candidates.push({ sheetName, items });
+      const blocks = scanItemBlocks(rows, cols);
+      if (blocks.length) candidates.push({ sheetName, blocks });
     }
 
     if (!candidates.length) {
@@ -763,7 +823,7 @@ document.getElementById("bm-file-input").addEventListener("change", async (e) =>
     }
 
     if (candidates.length === 1) {
-      importarItensDaAba(candidates[0], statusEl);
+      showColumnPicker(candidates[0].blocks, candidates[0].sheetName, statusEl);
       return;
     }
 
@@ -775,13 +835,13 @@ document.getElementById("bm-file-input").addEventListener("change", async (e) =>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span>Essa planilha tem várias abas com itens — escolha qual usar:</span>
         <select id="bm-sheet-choice">
-          ${candidates.map((c, i) => `<option value="${i}">${escAttr(c.sheetName)} (${c.items.length} itens)</option>`).join("")}
+          ${candidates.map((c, i) => `<option value="${i}">${escAttr(c.sheetName)} (${c.blocks.length} itens)</option>`).join("")}
         </select>
-        <button type="button" class="btn" id="bm-sheet-confirm">Importar desta aba</button>
+        <button type="button" class="btn" id="bm-sheet-confirm">Continuar</button>
       </div>`;
     document.getElementById("bm-sheet-confirm").addEventListener("click", () => {
       const idx = Number(document.getElementById("bm-sheet-choice").value);
-      importarItensDaAba(candidates[idx], statusEl);
+      showColumnPicker(candidates[idx].blocks, candidates[idx].sheetName, statusEl);
     });
   } catch (err) {
     console.error(err);
