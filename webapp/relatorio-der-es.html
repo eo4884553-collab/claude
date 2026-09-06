@@ -290,7 +290,7 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
 
     <section class="card">
       <div class="sec-head"><span class="num">3</span><h2>Itens Medidos Nesta Medição</h2></div>
-      <p class="report-type-note" style="margin:-8px 0 12px">Digite apenas o <strong>código do item (BM)</strong> — descrição, unidade, quantidade contratada, quantidade acumulada anterior e preço unitário são preenchidos automaticamente a partir da memória de medição. Você só precisa lançar a <strong>quantidade medida nesta medição</strong>.</p>
+      <p class="report-type-note" style="margin:-8px 0 12px">Comece a digitar no campo <strong>Item</strong> para filtrar entre os itens do BM — ao escolher um, descrição, unidade, quantidade contratada, quantidade acumulada anterior e preço unitário são preenchidos automaticamente. Você só precisa lançar a <strong>quantidade medida nesta medição</strong>.</p>
 
       <div class="bm-upload">
         <label class="btn" for="bm-file-input">📎 Anexar planilha do BM (Memória de Medição)</label>
@@ -589,8 +589,13 @@ function fmtBRL(v) {
 const DYNAMIC_ITEMS_DB = {};
 
 function lookupItem(rawCode) {
-  const digits = String(rawCode || "").replace(/\D/g, "");
-  if (!digits) return null;
+  // Aceita tanto o código puro ("010101") quanto uma opção escolhida no
+  // filtro/autocomplete ("010101 — Remoção de forro de gesso") — usa só
+  // os dígitos do INÍCIO da string, nunca todos os dígitos do texto,
+  // senão números dentro da própria descrição contaminariam o código.
+  const m = String(rawCode || "").trim().match(/^\d+/);
+  if (!m) return null;
+  const digits = m[0];
   if (DYNAMIC_ITEMS_DB[digits]) return DYNAMIC_ITEMS_DB[digits];
   if (ITEMS_DB[digits]) return ITEMS_DB[digits];
   for (const len of [2, 4, 6, 8]) {
@@ -603,10 +608,22 @@ function lookupItem(rawCode) {
   return null;
 }
 
+function refreshItemsDatalist() {
+  let datalist = document.getElementById("bm-items-list");
+  if (!datalist) {
+    datalist = document.createElement("datalist");
+    datalist.id = "bm-items-list";
+    document.body.appendChild(datalist);
+  }
+  const all = { ...ITEMS_DB, ...DYNAMIC_ITEMS_DB };
+  const codes = Object.keys(all).sort();
+  datalist.innerHTML = codes.map((code) => `<option value="${escAttr(code)} — ${escAttr(all[code].descricao)}">`).join("");
+}
+
 function addItemRow(values = {}) {
   const tr = document.createElement("tr");
   tr.innerHTML = `
-    <td><input type="text" class="f-item" value="${escAttr(values.item)}" placeholder="código BM" /></td>
+    <td><input type="text" class="f-item" value="${escAttr(values.item)}" placeholder="código BM" list="bm-items-list" autocomplete="off" /></td>
     <td><input type="text" class="f-descricao" value="${escAttr(values.descricao)}" /></td>
     <td><input type="text" class="f-unidade" value="${escAttr(values.unidade)}" /></td>
     <td><input type="number" step="0.0001" class="f-qtd-contratada" value="${values.qtd_contratada ?? ""}" /></td>
@@ -627,6 +644,8 @@ function addItemRow(values = {}) {
       if (itemInput.value.trim()) itemInput.style.borderColor = "var(--red)";
       return;
     }
+    const codigo = itemInput.value.trim().match(/^\d+/)[0];
+    itemInput.value = codigo; // limpa a descrição do filtro, deixa só o código
     tr.querySelector(".f-descricao").value = found.descricao;
     tr.querySelector(".f-unidade").value = found.unidade;
     tr.querySelector(".f-qtd-contratada").value = found.qtd_contratada;
@@ -646,7 +665,7 @@ function addItemRow(values = {}) {
 --------------------------------------------------------------------- */
 function normHeaderText(s) {
   return String(s ?? "")
-    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase().trim();
 }
 
@@ -761,6 +780,7 @@ function importarItens(items, sheetName, totalBlocos, statusEl) {
       qtd_atual: it.qtd_atual, preco_unitario: preco,
     });
   });
+  refreshItemsDatalist();
   statusEl.innerHTML = "";
   if (items.length) {
     statusEl.textContent = `${items.length} itens com lançamento nesta medição importados da aba "${sheetName}" (de ${totalBlocos} itens no total da planilha). Confira o preço unitário — ele não vem do BM.`;
@@ -878,6 +898,49 @@ function recalcTotal() {
 }
 valorMedicaoInput.addEventListener("input", () => { valorMedicaoInput.dataset.userEdited = "1"; });
 
+/* ---------------------------------------------------------------------
+   Curva S — gráfico ao vivo (Chart.js) reaproveitado como fonte da
+   imagem embutida no Word
+--------------------------------------------------------------------- */
+let curvaChart = null;
+function coletarCurva() {
+  const rows = [];
+  curvaBody.querySelectorAll("tr").forEach((tr) => {
+    const mes = tr.querySelector(".c-mes").value.trim();
+    if (!mes) return;
+    rows.push({
+      mes,
+      previsto: parseFloat(tr.querySelector(".c-previsto").value) || 0,
+      executado: parseFloat(tr.querySelector(".c-executado").value) || 0,
+    });
+  });
+  return rows;
+}
+function redrawCurva() {
+  const rows = coletarCurva();
+  const ctx = document.getElementById("curva-canvas").getContext("2d");
+  const cfg = {
+    type: "line",
+    data: {
+      labels: rows.map((r) => r.mes),
+      datasets: [
+        { label: "Previsto Acumulado", data: rows.map((r) => r.previsto), borderColor: "#1F6EB1", backgroundColor: "#1F6EB1", tension: .25, pointRadius: 3 },
+        { label: "Executado Acumulado", data: rows.map((r) => r.executado), borderColor: "#B5443D", backgroundColor: "#B5443D", tension: .25, pointRadius: 3 },
+      ],
+    },
+    options: {
+      responsive: true, animation: false,
+      plugins: { legend: { position: "top", labels: { color: "#0E4D79", font: { size: 11 } } }, title: { display: true, text: "Curva S – Previsto x Executado", color: "#0E4D79", font: { size: 13, weight: "bold" } } },
+      scales: {
+        x: { ticks: { color: "#0E4D79", font: { size: 10 } }, grid: { color: "#D8EBF6" } },
+        y: { ticks: { color: "#0E4D79", font: { size: 10 } }, grid: { color: "#D8EBF6" } },
+      },
+    },
+  };
+  if (curvaChart) { curvaChart.data = cfg.data; curvaChart.update(); }
+  else { curvaChart = new Chart(ctx, cfg); }
+}
+
 document.getElementById("add-item").addEventListener("click", () => addItemRow());
 document.getElementById("add-curva").addEventListener("click", () => { addCurvaRow(); redrawCurva(); });
 
@@ -892,6 +955,7 @@ document.getElementById("gerar-rmaa").addEventListener("change", (e) => {
   document.getElementById("rmaa-sections").classList.toggle("hidden", !e.target.checked);
 });
 
+refreshItemsDatalist();
 EXEMPLO_ITENS.forEach(addItemRow);
 EXEMPLO_CURVA.forEach((c) => addCurvaRow({ mes: c.mes, previsto: c.previsto, executado: c.executado }));
 redrawCurva();
@@ -1117,49 +1181,6 @@ valorMedicaoInput.addEventListener("input", () => {
 atualizarLabelsFuturos();
 atualizarDesembolsoAutomatico();
 atualizarDescompasso();
-
-/* ---------------------------------------------------------------------
-   Curva S — gráfico ao vivo (Chart.js) reaproveitado como fonte da
-   imagem embutida no Word
---------------------------------------------------------------------- */
-let curvaChart = null;
-function coletarCurva() {
-  const rows = [];
-  curvaBody.querySelectorAll("tr").forEach((tr) => {
-    const mes = tr.querySelector(".c-mes").value.trim();
-    if (!mes) return;
-    rows.push({
-      mes,
-      previsto: parseFloat(tr.querySelector(".c-previsto").value) || 0,
-      executado: parseFloat(tr.querySelector(".c-executado").value) || 0,
-    });
-  });
-  return rows;
-}
-function redrawCurva() {
-  const rows = coletarCurva();
-  const ctx = document.getElementById("curva-canvas").getContext("2d");
-  const cfg = {
-    type: "line",
-    data: {
-      labels: rows.map((r) => r.mes),
-      datasets: [
-        { label: "Previsto Acumulado", data: rows.map((r) => r.previsto), borderColor: "#1F6EB1", backgroundColor: "#1F6EB1", tension: .25, pointRadius: 3 },
-        { label: "Executado Acumulado", data: rows.map((r) => r.executado), borderColor: "#B5443D", backgroundColor: "#B5443D", tension: .25, pointRadius: 3 },
-      ],
-    },
-    options: {
-      responsive: true, animation: false,
-      plugins: { legend: { position: "top", labels: { color: "#0E4D79", font: { size: 11 } } }, title: { display: true, text: "Curva S – Previsto x Executado", color: "#0E4D79", font: { size: 13, weight: "bold" } } },
-      scales: {
-        x: { ticks: { color: "#0E4D79", font: { size: 10 } }, grid: { color: "#D8EBF6" } },
-        y: { ticks: { color: "#0E4D79", font: { size: 10 } }, grid: { color: "#D8EBF6" } },
-      },
-    },
-  };
-  if (curvaChart) { curvaChart.data = cfg.data; curvaChart.update(); }
-  else { curvaChart = new Chart(ctx, cfg); }
-}
 
 /* ---------------------------------------------------------------------
    Helpers OOXML (biblioteca docx-js)
@@ -1731,7 +1752,7 @@ function collectPayload() {
 }
 
 function slugify(s) {
-  return (s || "documento").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_");
+  return (s || "documento").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_");
 }
 
 const statusMsg = document.getElementById("status-msg");
