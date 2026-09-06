@@ -174,6 +174,33 @@ td.valcell{ text-align:right; font-weight:700; color:var(--blue-900); }
   border:1px solid var(--red); background:transparent; color:var(--red); border-radius:5px; padding:6px 12px; cursor:pointer;
 }
 .alert-box button:hover{ background:var(--red); color:#fff; }
+
+.draft-banner{
+  margin-bottom:16px; padding:14px 18px; border-radius:10px; font-size:13px; line-height:1.5;
+  background:var(--blue-50); border:1px solid var(--blue-700); color:var(--blue-900);
+}
+.draft-banner strong{ display:block; margin-bottom:2px; font-family:var(--font-display); }
+.draft-banner-actions{ display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
+
+#save-draft-fab{
+  position:fixed; bottom:24px; right:24px; z-index:60;
+  width:56px; height:56px; border-radius:50%; border:none;
+  background:var(--blue-700); color:#fff; font-size:24px; cursor:pointer;
+  box-shadow:var(--shadow); display:flex; align-items:center; justify-content:center;
+  transition:transform .15s, background .15s;
+}
+#save-draft-fab:hover{ background:var(--blue-900); }
+#save-draft-fab:active{ transform:scale(.92); }
+#save-draft-fab.pulse{ animation:save-pulse .5s ease; }
+@keyframes save-pulse{ 0%{ box-shadow:0 0 0 0 rgba(30,125,70,.55);} 100%{ box-shadow:0 0 0 16px rgba(30,125,70,0);} }
+#save-draft-info{
+  position:fixed; bottom:88px; right:24px; z-index:60;
+  background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px 12px;
+  font-size:11.5px; font-weight:700; color:var(--green); box-shadow:var(--shadow);
+  opacity:0; pointer-events:none; transition:opacity .3s; max-width:220px; text-align:right;
+}
+#save-draft-info.show{ opacity:1; }
+#save-draft-info.error{ color:var(--red); }
 .bm-upload{ display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
 .bm-upload label.btn{ margin:0; display:inline-block; }
 #bm-upload-status{ font-size:12.5px; font-weight:600; color:var(--blue-500); }
@@ -210,6 +237,15 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
 
 <main>
   <span class="example-tag">✎ Formulário pré-preenchido com dados de exemplo — edite os campos com os dados reais da sua medição</span>
+
+  <div id="draft-banner" class="draft-banner hidden">
+    <strong>💾 Rascunho salvo encontrado</strong>
+    <span id="draft-banner-text"></span>
+    <div class="draft-banner-actions">
+      <button type="button" class="btn primary" id="draft-restore-btn">Restaurar rascunho</button>
+      <button type="button" class="btn ghost" id="draft-discard-btn">Descartar e usar exemplo</button>
+    </div>
+  </div>
 
   <form id="report-form">
 
@@ -490,6 +526,9 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
     </div>
   </form>
 </main>
+
+<button type="button" id="save-draft-fab" title="Salvar rascunho agora neste navegador" aria-label="Salvar rascunho agora">💾</button>
+<div id="save-draft-info"></div>
 
 <footer class="pagefoot">AIR MINAS AR CONDICIONADO LTDA · Gerador interno de Relatórios de Medição · Gerado inteiramente no seu navegador</footer>
 
@@ -1088,7 +1127,12 @@ document.getElementById("add-atividade").addEventListener("click", () => ativida
 document.getElementById("add-atividade-fut1").addEventListener("click", () => atividadesFut1Mgr.addRow());
 document.getElementById("add-atividade-fut2").addEventListener("click", () => atividadesFut2Mgr.addRow());
 document.getElementById("add-atividade-fut3").addEventListener("click", () => atividadesFut3Mgr.addRow());
-document.getElementById("add-desembolso").addEventListener("click", () => desembolsoMgr.addRow());
+let desembolsoTouched = false;
+document.getElementById("add-desembolso").addEventListener("click", () => { desembolsoTouched = true; desembolsoMgr.addRow(); });
+document.querySelector("#desembolso-table").addEventListener("input", () => { desembolsoTouched = true; });
+document.querySelector("#desembolso-table").addEventListener("click", (e) => {
+  if (e.target.matches(".iconbtn")) desembolsoTouched = true;
+});
 
 EQUIPE_CONTRATADA_KNOWN.forEach((p) => equipeContratadaMgr.addRow(p));
 EQUIPE_FISCALIZACAO_KNOWN.forEach((p) => equipeFiscalizacaoMgr.addRow(p));
@@ -1128,18 +1172,29 @@ function atualizarLabelsFuturos() {
   document.getElementById("fut3-label").textContent = `Mês +3 — ${l3}`;
 }
 
-function atualizarDesembolsoAutomatico() {
+function atualizarDesembolsoAutomatico(forceRebuild) {
   const idx = mesIndex(mesReferenciaSelect.value);
   if (idx < 0) return;
   const mesAtual = CRONOGRAMA_MESES[idx];
   const valorMedicao = parseFloat(valorMedicaoInput.value) || 0;
-  const rows = [{ referencia: `${mesAtual.mes_full} (mês atual)`, valor: valorMedicao }];
-  for (const off of [1, 2]) {
-    const m = CRONOGRAMA_MESES[idx + off];
-    if (m) rows.push({ referencia: `${m.mes_full} (mês +${off})`, valor: m.previsto_acumulado });
+  const tbody = document.querySelector("#desembolso-table tbody");
+  const existingRows = tbody.querySelectorAll("tr");
+
+  if (forceRebuild || existingRows.length === 0 || !desembolsoTouched) {
+    tbody.innerHTML = "";
+    const rows = [{ referencia: `${mesAtual.mes_full} (mês atual)`, valor: valorMedicao }];
+    for (const off of [1, 2]) {
+      const m = CRONOGRAMA_MESES[idx + off];
+      if (m) rows.push({ referencia: `${m.mes_full} (mês +${off})`, valor: m.previsto_acumulado });
+    }
+    rows.forEach((r) => desembolsoMgr.addRow(r));
+  } else {
+    // Só atualiza a 1ª linha (mês atual) com o novo valor — preserva
+    // linhas que o usuário tenha editado ou adicionado manualmente.
+    const first = existingRows[0];
+    first.querySelector(".de-ref").value = `${mesAtual.mes_full} (mês atual)`;
+    first.querySelector(".de-valor").value = valorMedicao;
   }
-  document.querySelector("#desembolso-table tbody").innerHTML = "";
-  rows.forEach((r) => desembolsoMgr.addRow(r));
 }
 
 function atualizarDescompasso() {
@@ -1179,8 +1234,188 @@ valorMedicaoInput.addEventListener("input", () => {
 });
 
 atualizarLabelsFuturos();
-atualizarDesembolsoAutomatico();
+atualizarDesembolsoAutomatico(true);
 atualizarDescompasso();
+
+/* ---------------------------------------------------------------------
+   Rascunho local — salva os itens e demais campos já lançados no
+   navegador (localStorage), para não perder nada em caso de fechar a
+   aba, queda de conexão ou travamento antes de gerar o relatório.
+--------------------------------------------------------------------- */
+const DRAFT_STORAGE_KEY = "relatorioDERES_draft_v1";
+
+function captureItensRaw() {
+  const rows = [];
+  itensBody.querySelectorAll("tr").forEach((tr) => {
+    const item = tr.querySelector(".f-item").value;
+    const descricao = tr.querySelector(".f-descricao").value;
+    if (!item.trim() && !descricao.trim()) return;
+    rows.push({
+      item, descricao,
+      unidade: tr.querySelector(".f-unidade").value,
+      qtd_contratada: tr.querySelector(".f-qtd-contratada").value,
+      qtd_anterior: tr.querySelector(".f-qtd-anterior").value,
+      qtd_atual: tr.querySelector(".f-qtd-atual").value,
+      preco_unitario: tr.querySelector(".f-preco").value,
+    });
+  });
+  return rows;
+}
+
+function captureDraft() {
+  const f = new FormData(form);
+  const fields = {};
+  for (const [k, v] of f.entries()) {
+    if (v instanceof File) continue; // arquivos (logo/assinatura) não são salvos
+    fields[k] = v;
+  }
+  return {
+    savedAt: new Date().toISOString(),
+    fields,
+    checks: {
+      gerarTecnico: document.getElementById("gerar-tecnico").checked,
+      gerarRmaa: document.getElementById("gerar-rmaa").checked,
+      toggleCurva: document.getElementById("toggle-curva").checked,
+      toggleSeguranca: document.getElementById("toggle-seguranca").checked,
+    },
+    mesReferencia: mesReferenciaSelect.value,
+    valorMedicaoUserEdited: !!valorMedicaoInput.dataset.userEdited,
+    itens: captureItensRaw(),
+    curva: coletarCurva(),
+    equipeContratada: equipeContratadaMgr.collect(),
+    equipeFiscalizacao: equipeFiscalizacaoMgr.collect(),
+    equipeSubcontratada: equipeSubcontratadaMgr.collect(),
+    atividades: atividadesMgr.collect(),
+    atividadesFut1: atividadesFut1Mgr.collect(),
+    atividadesFut2: atividadesFut2Mgr.collect(),
+    atividadesFut3: atividadesFut3Mgr.collect(),
+    desembolso: desembolsoMgr.collect(),
+  };
+}
+
+function restoreDraft(snap) {
+  for (const [k, v] of Object.entries(snap.fields || {})) {
+    const el = form.elements[k];
+    if (el) el.value = v;
+  }
+  const setChecked = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val != null) { el.checked = val; el.dispatchEvent(new Event("change")); }
+  };
+  if (snap.checks) {
+    setChecked("gerar-tecnico", snap.checks.gerarTecnico);
+    setChecked("gerar-rmaa", snap.checks.gerarRmaa);
+    setChecked("toggle-curva", snap.checks.toggleCurva);
+    setChecked("toggle-seguranca", snap.checks.toggleSeguranca);
+  }
+
+  itensBody.innerHTML = "";
+  (snap.itens || []).forEach((it) => addItemRow(it));
+
+  curvaBody.innerHTML = "";
+  (snap.curva || []).forEach((c) => addCurvaRow(c));
+
+  document.querySelector("#equipe-contratada-table tbody").innerHTML = "";
+  (snap.equipeContratada || []).forEach((p) => equipeContratadaMgr.addRow(p));
+  document.querySelector("#equipe-fiscalizacao-table tbody").innerHTML = "";
+  (snap.equipeFiscalizacao || []).forEach((p) => equipeFiscalizacaoMgr.addRow(p));
+  document.querySelector("#equipe-subcontratada-table tbody").innerHTML = "";
+  (snap.equipeSubcontratada || []).forEach((p) => equipeSubcontratadaMgr.addRow(p));
+
+  document.querySelector("#atividades-table tbody").innerHTML = "";
+  (snap.atividades || []).forEach((a) => atividadesMgr.addRow(a));
+  document.querySelector("#atividades-fut1-table tbody").innerHTML = "";
+  (snap.atividadesFut1 || []).forEach((a) => atividadesFut1Mgr.addRow(a));
+  document.querySelector("#atividades-fut2-table tbody").innerHTML = "";
+  (snap.atividadesFut2 || []).forEach((a) => atividadesFut2Mgr.addRow(a));
+  document.querySelector("#atividades-fut3-table tbody").innerHTML = "";
+  (snap.atividadesFut3 || []).forEach((a) => atividadesFut3Mgr.addRow(a));
+
+  document.querySelector("#desembolso-table tbody").innerHTML = "";
+  (snap.desembolso || []).forEach((d) => desembolsoMgr.addRow(d));
+
+  if (snap.mesReferencia) mesReferenciaSelect.value = snap.mesReferencia;
+  if (snap.valorMedicaoUserEdited) valorMedicaoInput.dataset.userEdited = "1";
+  else delete valorMedicaoInput.dataset.userEdited;
+
+  recalcTotal();
+  redrawCurva();
+  atualizarLabelsFuturos();
+  desembolsoTouched = true; // preserva as linhas restauradas — só sincroniza a 1ª
+  atualizarDesembolsoAutomatico();
+  atualizarDescompasso();
+  refreshItemsDatalist();
+}
+
+function fmtSavedAt(iso) {
+  try {
+    return new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  } catch { return ""; }
+}
+
+const saveInfoEl = document.getElementById("save-draft-info");
+const saveFabEl = document.getElementById("save-draft-fab");
+
+function saveDraftNow(pulse) {
+  try {
+    const snap = captureDraft();
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(snap));
+    saveInfoEl.textContent = `Rascunho salvo às ${fmtSavedAt(snap.savedAt)}`;
+    saveInfoEl.classList.remove("error");
+    saveInfoEl.classList.add("show");
+    if (pulse) {
+      saveFabEl.classList.remove("pulse");
+      void saveFabEl.offsetWidth; // reinicia a animação
+      saveFabEl.classList.add("pulse");
+      clearTimeout(saveInfoEl._hideT);
+      saveInfoEl._hideT = setTimeout(() => saveInfoEl.classList.remove("show"), 3500);
+    }
+  } catch (err) {
+    console.error(err);
+    saveInfoEl.textContent = "Não foi possível salvar o rascunho neste navegador.";
+    saveInfoEl.classList.add("show", "error");
+  }
+}
+
+saveFabEl.addEventListener("click", () => saveDraftNow(true));
+
+let autoSaveTimer = null;
+form.addEventListener("input", () => {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => saveDraftNow(false), 1500);
+});
+form.addEventListener("change", () => {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => saveDraftNow(false), 300);
+});
+
+// Ao abrir a página, se houver um rascunho salvo, oferece para restaurar
+// em vez de sobrescrever silenciosamente os dados de exemplo.
+(function checkSavedDraft() {
+  let saved;
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return;
+    saved = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  const banner = document.getElementById("draft-banner");
+  document.getElementById("draft-banner-text").textContent = ` — salvo em ${fmtSavedAt(saved.savedAt)}. Deseja continuar de onde parou?`;
+  banner.classList.remove("hidden");
+  document.getElementById("draft-restore-btn").addEventListener("click", () => {
+    try {
+      restoreDraft(saved);
+      banner.classList.add("hidden");
+    } catch (err) {
+      console.error(err);
+      alert("Não foi possível restaurar o rascunho salvo.");
+    }
+  });
+  document.getElementById("draft-discard-btn").addEventListener("click", () => {
+    banner.classList.add("hidden");
+  });
+})();
 
 /* ---------------------------------------------------------------------
    Helpers OOXML (biblioteca docx-js)
