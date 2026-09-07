@@ -283,7 +283,7 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
           <input type="text" name="os" />
         </label>
         <label class="field">Valor Contratual (R$)
-          <input type="number" step="0.01" name="valor_contratual" required />
+          <input type="number" step="any" name="valor_contratual" required />
         </label>
         <label class="field">Prazo de Execução
           <input type="text" name="prazo" />
@@ -308,7 +308,7 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
           <small>Usado para conferir o previsto do cronograma anexado e pré-preencher a previsão de desembolso.</small>
         </label>
         <label class="field">Valor da Medição (R$)
-          <input type="number" step="0.01" name="valor_medicao" id="valor_medicao" />
+          <input type="number" step="any" name="valor_medicao" id="valor_medicao" />
           <small>Em branco = soma automática dos itens medidos.</small>
         </label>
         <label class="field">Período (Faturamento)
@@ -398,10 +398,10 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
           <span id="rec-upload-status"></span>
         </div>
         <div class="grid">
-          <label class="field">Valor Medido no Período (R$)<input type="number" step="0.01" name="rec_valor_medido_periodo" /></label>
-          <label class="field">Valor Previsto no Período (R$)<input type="number" step="0.01" name="rec_valor_previsto_periodo" /></label>
-          <label class="field">Valor Medido Acumulado (R$)<input type="number" step="0.01" name="rec_valor_medido_acumulado" /></label>
-          <label class="field">Valor Previsto Acumulado (R$)<input type="number" step="0.01" name="rec_valor_previsto_acumulado" /></label>
+          <label class="field">Valor Medido no Período (R$)<input type="number" step="any" name="rec_valor_medido_periodo" /></label>
+          <label class="field">Valor Previsto no Período (R$)<input type="number" step="any" name="rec_valor_previsto_periodo" /></label>
+          <label class="field">Valor Medido Acumulado (R$)<input type="number" step="any" name="rec_valor_medido_acumulado" /></label>
+          <label class="field">Valor Previsto Acumulado (R$)<input type="number" step="any" name="rec_valor_previsto_acumulado" /></label>
         </div>
         <label class="field" style="margin-top:14px">Etapas Macro Previstas para o Período<textarea name="rec_etapas_previstas" rows="3"></textarea></label>
         <label class="field" style="margin-top:14px">Etapas Macro Executadas no Período<textarea name="rec_etapas_executadas" rows="3"></textarea></label>
@@ -433,7 +433,7 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
         <label class="field">Acidente de trajeto<input type="number" name="seg_tipo_trajeto" value="0" /></label>
         <label class="field">Doença profissional<input type="number" name="seg_tipo_doenca" value="0" /></label>
         <label class="field">HHT (Homens-Hora Trabalhadas)<input type="number" name="seg_hht" value="0" /></label>
-        <label class="field">Taxa de Gravidade <small>(0 = calcular automaticamente pela NBR 14280)</small><input type="number" step="0.01" name="seg_taxa_gravidade" value="0" /></label>
+        <label class="field">Taxa de Gravidade <small>(0 = calcular automaticamente pela NBR 14280)</small><input type="number" step="any" name="seg_taxa_gravidade" value="0" /></label>
       </div>
     </section>
 
@@ -742,10 +742,10 @@ function addItemRow(values = {}) {
     <td><input type="text" class="f-item" value="${escAttr(values.item)}" placeholder="código BM" list="bm-items-list" autocomplete="off" /></td>
     <td><input type="text" class="f-descricao" value="${escAttr(values.descricao)}" /></td>
     <td><input type="text" class="f-unidade" value="${escAttr(values.unidade)}" /></td>
-    <td><input type="number" step="0.0001" class="f-qtd-contratada" value="${values.qtd_contratada ?? ""}" /></td>
-    <td><input type="number" step="0.0001" class="f-qtd-anterior" value="${values.qtd_anterior ?? 0}" /></td>
-    <td><input type="number" step="0.0001" class="f-qtd-atual" value="${values.qtd_atual ?? 0}" /></td>
-    <td><input type="number" step="0.01" class="f-preco" value="${values.preco_unitario ?? ""}" /></td>
+    <td><input type="number" step="any" class="f-qtd-contratada" value="${values.qtd_contratada ?? ""}" /></td>
+    <td><input type="number" step="any" class="f-qtd-anterior" value="${values.qtd_anterior ?? 0}" /></td>
+    <td><input type="number" step="any" class="f-qtd-atual" value="${values.qtd_atual ?? 0}" /></td>
+    <td><input type="number" step="any" class="f-preco" value="${values.preco_unitario ?? ""}" /></td>
     <td class="valcell tabular">R$ 0,00</td>
     <td><button type="button" class="iconbtn">×</button></td>`;
   itensBody.appendChild(tr);
@@ -1141,8 +1141,8 @@ function addCurvaRow(values = {}) {
   const tr = document.createElement("tr");
   tr.innerHTML = `
     <td><input type="text" class="c-mes" value="${escAttr(values.mes)}" /></td>
-    <td><input type="number" step="0.01" class="c-previsto" value="${values.previsto ?? ""}" /></td>
-    <td><input type="number" step="0.01" class="c-executado" value="${values.executado ?? ""}" /></td>
+    <td><input type="number" step="any" class="c-previsto" value="${values.previsto ?? ""}" /></td>
+    <td><input type="number" step="any" class="c-executado" value="${values.executado ?? ""}" /></td>
     <td><button type="button" class="iconbtn">×</button></td>`;
   curvaBody.appendChild(tr);
   tr.querySelector(".iconbtn").addEventListener("click", () => { tr.remove(); redrawCurva(); });
@@ -1343,14 +1343,14 @@ const atividadesFut3Mgr = makeRowTable(document.querySelector("#atividades-fut3-
   { key: "materiais", cls: "f3-mat" }, { key: "caminho_critico", cls: "f3-cc" },
 ]);
 const desembolsoMgr = makeRowTable(document.querySelector("#desembolso-table tbody"), [
-  { key: "referencia", cls: "de-ref" }, { key: "valor", cls: "de-valor", type: "number", step: "0.01" },
+  { key: "referencia", cls: "de-ref" }, { key: "valor", cls: "de-valor", type: "number", step: "any" },
 ]);
 const raoMgr = makeRowTable(document.querySelector("#rao-table tbody"), [
   { key: "ate_dia", cls: "rao-ate", type: "date" },
-  { key: "valor_contratual", cls: "rao-valor", type: "number", step: "0.01" },
+  { key: "valor_contratual", cls: "rao-valor", type: "number", step: "any" },
   { key: "prazo_dias", cls: "rao-prazo", type: "number" },
-  { key: "previsto_pct", cls: "rao-previsto", type: "number", step: "0.01" },
-  { key: "executado_pct", cls: "rao-executado", type: "number", step: "0.01" },
+  { key: "previsto_pct", cls: "rao-previsto", type: "number", step: "any" },
+  { key: "executado_pct", cls: "rao-executado", type: "number", step: "any" },
   { key: "status", cls: "rao-status" },
 ]);
 
@@ -2474,6 +2474,17 @@ async function saveBlob(blob, filename) {
   URL.revokeObjectURL(url);
   return "gerado";
 }
+
+// Se o navegador bloquear o envio por validação nativa (campo obrigatório
+// vazio, número fora do formato etc.), o evento "submit" nem chega a
+// disparar — sem isto, o clique em "Gerar" pareceria simplesmente não
+// fazer nada. Avisa qual campo está inválido em vez de falhar em silêncio.
+form.addEventListener("invalid", (e) => {
+  const el = e.target;
+  const label = el.closest("label.field")?.childNodes[0]?.textContent?.trim() || el.name || el.id || "campo";
+  statusMsg.textContent = `Corrija o campo "${label}" antes de gerar o relatório: ${el.validationMessage}`;
+  statusMsg.className = "error";
+}, true);
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
