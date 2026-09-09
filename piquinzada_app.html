@@ -131,6 +131,12 @@ tfoot td{font-weight:700; border-top:1px solid var(--border); border-bottom:none
 .gridN{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px;}
 @media (max-width:1000px){.grid3{grid-template-columns:1fr;} .grid2{grid-template-columns:1fr;}}
 
+.costitems{display:flex; flex-direction:column; gap:6px;}
+.costitem-row{display:flex; align-items:center; gap:8px;}
+.costitem-row .costitem-name{flex:1 1 auto; min-width:0;}
+.costitem-row .costitem-val{flex:0 0 132px; text-align:right;}
+.costitem-row .costitem-lock{flex:0 0 auto; padding:2px 6px; font-size:13px; color:var(--text-faint); cursor:default;}
+
 .kpi{padding:14px 16px; border-radius:var(--radius); border:1px solid var(--border); background:var(--surface);}
 .kpi .lbl{font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.05em;}
 .kpi .kpi-value{font-size:20px; font-weight:600; margin-top:3px;}
@@ -341,6 +347,17 @@ const OXR_GROUP = {
   'outros.custoTaxaIngressos':'Produção', 'outros.openBar':'Produção',
 };
 const OXR_CATS = ['Atrações','Estrutura','Produção','Segurança','Marketing','Logística','Licenças','Administrativo','Contingência'];
+// categoria de Orçamento x Real usada para itens que o usuário cria depois (fora do mapeamento fixo acima)
+const GROUP_DEFAULT_OXR_CAT = {atracoes:'Atrações', estrutura:'Estrutura', operacao:'Produção', marketing:'Marketing', logistica:'Logística'};
+// itens usados diretamente pelas fórmulas do modelo (break-even, gates, dashboard) — não podem ser excluídos
+const PROTECTED_COST_KEYS = {atracoes:['cachePrincipal']};
+// catálogo (chave + nome) de cada item de custo, por categoria — ponto de partida editável pelo usuário
+// (inserir/excluir/renomear itens em "Entradas PMO > Custos por categoria" mexe só aqui, nunca nos valores já lançados)
+function defaultItemCatalog(){
+  const cat = {};
+  COST_GROUPS.forEach(g=>{ cat[g.key] = g.items.map(([key,label])=>({key,label})); });
+  return cat;
+}
 
 function entradaDefaults(idx, scen){
   const o = {
@@ -449,6 +466,7 @@ function freshState(){
   SCEN.forEach((s,i)=>{ entradas[s]=entradaDefaults(i,s); vendas[s]=vendaDefaults(s); patrocinios[s]=patrocinioDefaults(s); });
   return {
     entradas, vendas, patrocinios,
+    itemCatalog: defaultItemCatalog(),
     stageProb: Object.assign({}, DEFAULT_STAGE_PROB),
     custos: custosDefaults(),
     riscos: RISCOS_DEFAULT.map(r=>Object.assign({},r)),
@@ -669,7 +687,7 @@ function computedCostValue(c){
 function computeOxR(){
   const cs = computeCustosSummary();
   return OXR_CATS.map(cat=>{
-    const rows = cs.rows.filter(r=> OXR_GROUP[r.path.join('.')] === cat);
+    const rows = cs.rows.filter(r=> (OXR_GROUP[r.path.join('.')] || GROUP_DEFAULT_OXR_CAT[r.path[0]]) === cat);
     const orcInicial = sum(rows.map(r=>r.orcInicial));
     const orcRevisado = sum(rows.map(r=>r.orcAprovado));
     const contratado = sum(rows.map(r=>r.contratado));
@@ -925,6 +943,12 @@ function onGenericBind(e){
   if(kind==='number') val = val===''?0:Number(val);
   else if(kind==='pct') val = val===''?0:Number(val)/100;
   setPath(state, path, val);
+  // renomear um item do catalogo de custos tambem atualiza o nome espelhado no registro PMO (aba Custos)
+  if(path[0]==='itemCatalog'){
+    const gk = path[1], idx = Number(path[2]);
+    const item = state.itemCatalog[gk] && state.itemCatalog[gk][idx];
+    if(item) state.custos.forEach(c=>{ if(c.path[0]===gk && c.path[1]===item.key) c.subcategoria = item.label; });
+  }
   saveState();
   if(el.dataset.norerender) return;
   const preserveFocus = el.id || null;
@@ -1198,16 +1222,31 @@ VIEWS.dashboard = function(){
 function readonlyRow(label, value){
   return `<div class="kv"><span class="k">${label}</span><span class="v mono">${value}</span></div>`;
 }
+function costItemRow(scen, groupKey, idx, item){
+  const locked = (PROTECTED_COST_KEYS[groupKey]||[]).includes(item.key);
+  const nameId = mkId(`itemCatalog.${groupKey}.${idx}.label`);
+  const valPath = `entradas.${scen}.${groupKey}.${item.key}`;
+  const val = state.entradas[scen][groupKey][item.key] ?? 0;
+  return `<div class="costitem-row">
+    <input id="${nameId}" type="text" class="costitem-name" data-bind="itemCatalog.${groupKey}.${idx}.label" value="${esc(item.label)}">
+    ${tblInput(valPath, val, {type:'number', cls:'costitem-val'})}
+    ${locked
+      ? `<span class="costitem-lock" title="Item usado pelas fórmulas do modelo — não pode ser removido">🔒</span>`
+      : `<button class="rm" data-action="rmCostItem:${groupKey}:${idx}" title="Remover item">✕</button>`}
+  </div>`;
+}
 function costGroupBlock(scen, group){
+  const catalog = state.itemCatalog[group.key];
   const total = sumObj(state.entradas[scen][group.key]);
   return `<div class="card" style="padding:16px 18px; margin-bottom:14px;">
     <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px;">
       <h3 style="margin:0; font-size:14.5px;">${group.label}</h3>
       <span class="mono" style="font-weight:700; color:var(--accent-strong);">${fmtCur(total)}</span>
     </div>
-    <div class="gridN">
-      ${group.items.map(([key,label])=> fld(label, `entradas.${scen}.${group.key}.${key}`, {kind:'currency'})).join('')}
+    <div class="costitems">
+      ${catalog.map((item,idx)=> costItemRow(scen, group.key, idx, item)).join('')}
     </div>
+    <button class="btn small" style="margin-top:10px;" data-action="addCostItem:${group.key}">+ Adicionar item em ${group.label}</button>
   </div>`;
 }
 VIEWS.entradas = function(){
@@ -1284,7 +1323,8 @@ VIEWS.entradas = function(){
       </div>
     </div>`;
   } else if(sec==='custos'){
-    body = COST_GROUPS.map(g=>costGroupBlock(scen,g)).join('');
+    body = `<div class="hint" style="margin-bottom:12px;">Clique no nome de um item para renomeá-lo, use "+ Adicionar item" para criar uma nova linha, ou ✕ para excluir — vale para os 3 cenários e não altera nenhum valor já lançado nos demais itens.</div>
+      ${COST_GROUPS.map(g=>costGroupBlock(scen,g)).join('')}`;
   } else if(sec==='outros'){
     body = `<div class="grid2">
       <div class="card" style="padding:16px 18px;">
@@ -1320,6 +1360,35 @@ VIEWS.entradas = function(){
   ${body}`;
 };
 ACTIONS.setEntradasSection = (id)=>{ state.ui.entradasSection = id; saveState(); render(); };
+// insere um novo item de custo no catalogo (afeta os 3 cenarios, com valor 0 — nao mexe no que ja foi lancado)
+ACTIONS.addCostItem = (groupKey)=>{
+  const group = COST_GROUPS.find(g=>g.key===groupKey);
+  if(!group) return;
+  const key = 'item_'+uid();
+  state.itemCatalog[groupKey].push({key, label:'Novo item'});
+  SCEN.forEach(s=>{ state.entradas[s][groupKey][key] = 0; });
+  state.custos.push({
+    id:uid(), grupo:group.label, path:[groupKey,key], subcategoria:'Novo item', computed:false,
+    fornecedor:'', descricao:'',
+    orcamentoAprovado:null, valorContratado:0, valorPago:0,
+    dataPrevista:'', dataPagamento:'', status:'Não iniciado',
+    responsavel: groupKey==='marketing' ? 'Marketing' : 'Produção', obs:'',
+  });
+  saveState(); render();
+};
+ACTIONS.rmCostItem = (groupKey, idx)=>{
+  const item = state.itemCatalog[groupKey] && state.itemCatalog[groupKey][Number(idx)];
+  if(!item) return;
+  if((PROTECTED_COST_KEYS[groupKey]||[]).includes(item.key)){
+    alert('Este item é usado pelas fórmulas do modelo (cachê principal) e não pode ser removido.');
+    return;
+  }
+  if(!confirm(`Remover "${item.label}" dos 3 cenários? Os valores já lançados para esse item serão apagados e não podem ser desfeitos.`)) return;
+  state.itemCatalog[groupKey].splice(Number(idx),1);
+  SCEN.forEach(s=>{ delete state.entradas[s][groupKey][item.key]; });
+  state.custos = state.custos.filter(c=> !(c.path[0]===groupKey && c.path[1]===item.key));
+  saveState(); render();
+};
 
 /* ================= VENDAS ================= */
 VIEWS.vendas = function(){
