@@ -69,6 +69,7 @@ nav.groups{padding:14px 10px 20px; flex:1;}
 #sidebar .foot #exportBtn{color:var(--accent-strong); border-color:var(--accent); background:var(--accent-soft);}
 #sidebar .foot #exportBtn:hover{background:var(--accent); color:var(--accent-ink);}
 #sidebar .foot #resetBtn:hover{color:var(--bad);}
+#sidebar .foot #resetBtn.confirm-armed-full{background:var(--bad); border-color:var(--bad); color:#fff; font-weight:700;}
 #sidebar .foot button[disabled]{opacity:.6; cursor:default;}
 .save-row{display:flex; align-items:center; gap:8px;}
 .save-icon-btn{
@@ -136,6 +137,12 @@ tfoot td{font-weight:700; border-top:1px solid var(--border); border-bottom:none
 .costitem-row .costitem-name{flex:1 1 auto; min-width:0;}
 .costitem-row .costitem-val{flex:0 0 132px; text-align:right;}
 .costitem-row .costitem-lock{flex:0 0 auto; padding:2px 6px; font-size:13px; color:var(--text-faint); cursor:default;}
+.costitem-row-op{display:grid; grid-template-columns:1fr 90px 120px 120px 26px; gap:8px; align-items:center;}
+.costitem-row-op .costitem-val{width:100%; text-align:right;}
+.costitem-row-op .costitem-total{text-align:right; font-weight:700; color:var(--accent-strong);}
+.costitem-head{font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); padding:0 0 2px;}
+.costitem-head span:nth-child(2), .costitem-head span:nth-child(3), .costitem-head span:nth-child(4){text-align:right;}
+@media (max-width:640px){.costitem-row-op{grid-template-columns:1fr; }}
 
 .kpi{padding:14px 16px; border-radius:var(--radius); border:1px solid var(--border); background:var(--surface);}
 .kpi .lbl{font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.05em;}
@@ -174,6 +181,7 @@ button.btn.danger{color:var(--bad);}
 button.btn.small{padding:5px 9px; font-size:11.5px;}
 button.rm{border:none; background:transparent; color:var(--text-faint); cursor:pointer; font-size:15px; padding:2px 6px;}
 button.rm:hover{color:var(--bad);}
+button.rm.confirm-armed{color:#fff; background:var(--bad); border-radius:5px; font-size:10.5px; font-weight:700; padding:3px 7px; white-space:nowrap;}
 
 .divider{height:1px; background:var(--border); margin:22px 0;}
 .sticky-note{font-size:11.5px; color:var(--text-faint); font-style:italic;}
@@ -249,6 +257,13 @@ const $ = (sel, el) => (el||document).querySelector(sel);
 const $$ = (sel, el) => Array.from((el||document).querySelectorAll(sel));
 const sum = arr => arr.reduce((a,b)=>a+(Number(b)||0),0);
 const sumObj = obj => sum(Object.values(obj));
+// itens da categoria Operação guardam {qty, unitCost} (para custo por pessoa); os demais grupos
+// de custo continuam um numero simples — esta funcao le o total em qualquer um dos dois formatos
+function opItemTotal(item){
+  if(item && typeof item==='object') return (Number(item.qty)||0)*(Number(item.unitCost)||0);
+  return Number(item)||0;
+}
+const sumOperacao = obj => sum(Object.values(obj).map(opItemTotal));
 const clamp = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
 const fmtCur = v => (isFinite(v)?v:0).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0});
 const fmtCur2 = v => (isFinite(v)?v:0).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:2});
@@ -376,15 +391,18 @@ function entradaDefaults(idx, scen){
   };
   ATRACOES_ITEMS.forEach(([k,,vals])=> o.atracoes[k]=vals[idx]);
   ESTRUTURA_ITEMS.forEach(([k,,vals])=> o.estrutura[k]=vals[idx]);
-  OPERACAO_ITEMS.forEach(([k,,vals])=> o.operacao[k]=vals[idx]);
+  // itens de Operação guardam quantidade x custo unitário (para custo por pessoa); qty=1 preserva o valor original
+  OPERACAO_ITEMS.forEach(([k,,vals])=> o.operacao[k]={qty:1, unitCost:vals[idx]});
   MARKETING_ITEMS.forEach(([k,,vals])=> o.marketing[k]=vals[idx]);
   LOGISTICA_ITEMS.forEach(([k,,vals])=> o.logistica[k]=vals[idx]);
   return o;
 }
-function round4(x){ return Math.round(x*10000)/10000; }
 
 function vendaDefaults(scen){
-  return LOT_DEFAULTS[scen].map(([preco,qtd],i)=>({id:uid(), lote:LOT_LABELS[i], preco, qtd}));
+  const defs = LOT_DEFAULTS[scen];
+  const totalQtd = sum(defs.map(([,qtd])=>qtd));
+  // guarda a proporcao exata (sem arredondar) para o ticket medio ponderado nao sofrer desvio de casas decimais
+  return defs.map(([preco,qtd],i)=>({id:uid(), lote:LOT_LABELS[i], preco, pctMix: totalQtd ? qtd/totalQtd : 1/defs.length}));
 }
 function patrocinioDefaults(scen){
   return TIERS.map(([cota,valor,qtd,prob,contra,perfil],i)=>({
@@ -497,7 +515,33 @@ function freshState(){
 const STORAGE_KEY = 'piquinzada2027_pmo_v2';
 let stateSource = 'fresh'; // 'seed' (arquivo exportado) | 'storage' (salvamento automatico) | 'fresh'
 let state = loadState();
+migrateState();
 initSaveStatusText();
+// ajusta o FORMATO de dados antigos para o novo formato, sem apagar nem recalcular nada que
+// o usuario ja lancou — cada campo migrado preserva o valor/total que ja estava la
+function migrateState(){
+  SCEN.forEach(scen=>{
+    // Vendas: lotes antigos guardavam "qtd" solta; agora a quantidade e sempre derivada do
+    // "% mix" x pagantes (aba Entradas PMO). Migra a proporcao que cada lote já tinha, para o
+    // total continuar batendo com o que estava lançado até aqui.
+    const lots = state.vendas && state.vendas[scen];
+    if(lots && lots.length && lots.some(l=> l.pctMix===undefined)){
+      const totalQtd = sum(lots.map(l=> Number(l.qtd)||0));
+      lots.forEach(l=>{
+        if(l.pctMix===undefined) l.pctMix = totalQtd>0 ? (Number(l.qtd)||0)/totalQtd : 1/lots.length;
+        delete l.qtd; // agora e sempre derivado (ver computeVendas) — nao guardamos mais um valor solto
+      });
+    }
+    // Entradas PMO > Operação: itens antigos guardavam um numero simples; agora guardam
+    // {qty, unitCost} para dar o custo por pessoa. qty=1 preserva o total ja lançado.
+    const op = state.entradas && state.entradas[scen] && state.entradas[scen].operacao;
+    if(op){
+      Object.keys(op).forEach(k=>{
+        if(op[k]==null || typeof op[k] !== 'object') op[k] = {qty:1, unitCost:Number(op[k])||0};
+      });
+    }
+  });
+}
 function loadState(){
   try{
     const fresh = freshState();
@@ -554,15 +598,31 @@ function saveState(){
 }
 
 /* ---------------- compute engine (espelha as formulas da planilha) ---------------- */
+// pagantes "base" (sem os fatores de simulador do break-even) — usado tambem pela aba Vendas
+// para travar a soma dos lotes na mesma quantidade de pagantes da aba Entradas PMO
+function pagantesBase(scen){
+  const e = state.entradas[scen];
+  return e.capMax * e.conversaoPct;
+}
 function computeVendas(scen){
-  const lots = state.vendas[scen];
+  const rawLots = state.vendas[scen];
+  const totalPagantes = pagantesBase(scen);
+  const totalPctRaw = sum(rawLots.map(l=> Number(l.pctMix)||0));
+  // a quantidade de cada lote e sempre derivada do % mix (normalizado) x o total de pagantes —
+  // assim a soma das quantidades bate exatamente com Entradas PMO mesmo que os % digitados nao somem 100%
+  const lots = rawLots.map(l=>{
+    const pctRaw = Number(l.pctMix)||0;
+    const mix = totalPctRaw>0 ? pctRaw/totalPctRaw : (rawLots.length ? 1/rawLots.length : 0);
+    const qtd = mix*totalPagantes;
+    return Object.assign({}, l, {mix, qtd});
+  });
   const qtd = sum(lots.map(l=>l.qtd));
   const receitaBruta = sum(lots.map(l=>l.preco*l.qtd));
   const e = state.entradas[scen];
   const taxaTotal = e.taxaPlataforma + e.taxaCartao + e.tributosIngressos;
   const receitaLiquida = receitaBruta * (1 - taxaTotal);
   const ticketMedio = qtd ? receitaBruta/qtd : 0;
-  return {qtd, receitaBruta, receitaLiquida, ticketMedio};
+  return {lots, qtd, totalPctRaw, receitaBruta, receitaLiquida, ticketMedio};
 }
 function computePatrocinio(scen){
   const tiers = state.patrocinios[scen];
@@ -579,7 +639,7 @@ function computePatrocinio(scen){
 }
 function computeCustoGroups(scen){
   const e = state.entradas[scen];
-  const subAtracoes = sumObj(e.atracoes), subEstrutura = sumObj(e.estrutura), subOperacao = sumObj(e.operacao),
+  const subAtracoes = sumObj(e.atracoes), subEstrutura = sumObj(e.estrutura), subOperacao = sumOperacao(e.operacao),
         subMarketing = sumObj(e.marketing), subLogistica = sumObj(e.logistica);
   // custo direto "fixo": nao inclui taxa sobre ingressos nem open bar (ver computeScenario)
   const custoDiretos = subAtracoes+subEstrutura+subOperacao+subMarketing+subLogistica+e.outros.despesasAdm;
@@ -601,8 +661,9 @@ function computeScenario(scen, overrides){
   const custoTotalFactor = ov.custoTotalFactor ?? 1;
 
   // pagantes = capacidade x conversao da capacidade (igual ao modelo original: Premissas!D4*D6),
-  // e nao a soma bruta dos lotes de venda — o plano de lotes define o TICKET MEDIO, a conversao define o volume
-  const pagantes = e.capMax * e.conversaoPct * pagantesFactor;
+  // e nao a soma bruta dos lotes de venda — o plano de lotes (aba Vendas) usa essa mesma quantidade
+  // como total travado e so define o TICKET MEDIO (% mix por lote)
+  const pagantes = pagantesBase(scen) * pagantesFactor;
   const publicoTotal = pagantes + e.cortesias;
   const ocupacao = e.capMax ? publicoTotal/e.capMax : 0;
   const taxaTotal = e.taxaPlataforma + e.taxaCartao + e.tributosIngressos;
@@ -662,7 +723,9 @@ function allScenarios(){ const r={}; SCEN.forEach(s=> r[s]=computeScenario(s)); 
 
 function computeCustosSummary(){
   const rows = state.custos.map(c=>{
-    const orcInicial = c.computed ? computedCostValue(c) : getPath(state.entradas.base, c.path);
+    const orcInicial = c.computed ? computedCostValue(c)
+      : c.path[0]==='operacao' ? opItemTotal(getPath(state.entradas.base, c.path))
+      : getPath(state.entradas.base, c.path);
     const orcAprovado = (c.orcamentoAprovado==null) ? orcInicial : Number(c.orcamentoAprovado);
     const contratado = Number(c.valorContratado)||0;
     const pago = Number(c.valorPago)||0;
@@ -958,9 +1021,21 @@ function onGenericBind(e){
 function onEnterCommit(e){
   if(e.key==='Enter'){ e.preventDefault(); e.target.blur(); }
 }
+// botoes com data-confirm exigem 2 cliques antes de executar a acao — sem usar confirm()/alert()
+// nativos, que o navegador BLOQUEIA silenciosamente dentro do iframe do Artifact (o clique parecia
+// "não fazer nada" porque a caixa de dialogo nunca aparecia e a funcao nunca era chamada)
 function onAction(e){
   const el = e.currentTarget || e.target.closest('[data-action]');
   const [action, ...args] = el.dataset.action.split(':');
+  if(el.dataset.confirm && el.dataset.armed!=='1'){
+    el.dataset.armed = '1';
+    el.dataset.origLabel = el.textContent;
+    el.textContent = el.dataset.confirm;
+    el.classList.add('confirm-armed');
+    clearTimeout(el._armTimer);
+    el._armTimer = setTimeout(()=>{ el.dataset.armed=''; el.textContent = el.dataset.origLabel; el.classList.remove('confirm-armed'); }, 3000);
+    return;
+  }
   ACTIONS[action] && ACTIONS[action](...args);
 }
 const ACTIONS = {};
@@ -1232,20 +1307,38 @@ function costItemRow(scen, groupKey, idx, item){
     ${tblInput(valPath, val, {type:'number', cls:'costitem-val'})}
     ${locked
       ? `<span class="costitem-lock" title="Item usado pelas fórmulas do modelo — não pode ser removido">🔒</span>`
-      : `<button class="rm" data-action="rmCostItem:${groupKey}:${idx}" title="Remover item">✕</button>`}
+      : `<button class="rm" data-action="rmCostItem:${groupKey}:${idx}" data-confirm="Confirmar ✕" title="Remover item (clique 2x para confirmar)">✕</button>`}
+  </div>`;
+}
+// Operação tem 3 colunas (quantidade x custo unitário = total) para dar o custo por pessoa de cada linha
+function costItemRowOperacao(scen, idx, item){
+  const key = item.key;
+  const raw = state.entradas[scen].operacao[key];
+  const obj = (raw && typeof raw==='object') ? raw : {qty:1, unitCost:Number(raw)||0};
+  const total = opItemTotal(obj);
+  const nameId = mkId(`itemCatalog.operacao.${idx}.label`);
+  return `<div class="costitem-row costitem-row-op">
+    <input id="${nameId}" type="text" class="costitem-name" data-bind="itemCatalog.operacao.${idx}.label" value="${esc(item.label)}">
+    ${tblInput(`entradas.${scen}.operacao.${key}.qty`, obj.qty, {type:'number', cls:'costitem-val', step:'1'})}
+    ${tblInput(`entradas.${scen}.operacao.${key}.unitCost`, obj.unitCost, {type:'number', cls:'costitem-val'})}
+    <span class="costitem-total mono">${fmtCur(total)}</span>
+    <button class="rm" data-action="rmCostItem:operacao:${idx}" data-confirm="Confirmar ✕" title="Remover item (clique 2x para confirmar)">✕</button>
   </div>`;
 }
 function costGroupBlock(scen, group){
   const catalog = state.itemCatalog[group.key];
-  const total = sumObj(state.entradas[scen][group.key]);
+  const isOp = group.key==='operacao';
+  const total = isOp ? sumOperacao(state.entradas[scen].operacao) : sumObj(state.entradas[scen][group.key]);
+  const header = isOp ? `<div class="costitem-row costitem-row-op costitem-head">
+      <span>Item</span><span>Quantidade</span><span>Custo unitário</span><span>Total</span><span></span>
+    </div>` : '';
+  const rows = catalog.map((item,idx)=> isOp ? costItemRowOperacao(scen,idx,item) : costItemRow(scen, group.key, idx, item)).join('');
   return `<div class="card" style="padding:16px 18px; margin-bottom:14px;">
     <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px;">
       <h3 style="margin:0; font-size:14.5px;">${group.label}</h3>
       <span class="mono" style="font-weight:700; color:var(--accent-strong);">${fmtCur(total)}</span>
     </div>
-    <div class="costitems">
-      ${catalog.map((item,idx)=> costItemRow(scen, group.key, idx, item)).join('')}
-    </div>
+    <div class="costitems">${header}${rows}</div>
     <button class="btn small" style="margin-top:10px;" data-action="addCostItem:${group.key}">+ Adicionar item em ${group.label}</button>
   </div>`;
 }
@@ -1366,7 +1459,7 @@ ACTIONS.addCostItem = (groupKey)=>{
   if(!group) return;
   const key = 'item_'+uid();
   state.itemCatalog[groupKey].push({key, label:'Novo item'});
-  SCEN.forEach(s=>{ state.entradas[s][groupKey][key] = 0; });
+  SCEN.forEach(s=>{ state.entradas[s][groupKey][key] = (groupKey==='operacao') ? {qty:1, unitCost:0} : 0; });
   state.custos.push({
     id:uid(), grupo:group.label, path:[groupKey,key], subcategoria:'Novo item', computed:false,
     fornecedor:'', descricao:'',
@@ -1376,14 +1469,10 @@ ACTIONS.addCostItem = (groupKey)=>{
   });
   saveState(); render();
 };
+// protegido = nao tem botao de remover na tela (ver costItemRow); guarda aqui so por seguranca
 ACTIONS.rmCostItem = (groupKey, idx)=>{
   const item = state.itemCatalog[groupKey] && state.itemCatalog[groupKey][Number(idx)];
-  if(!item) return;
-  if((PROTECTED_COST_KEYS[groupKey]||[]).includes(item.key)){
-    alert('Este item é usado pelas fórmulas do modelo (cachê principal) e não pode ser removido.');
-    return;
-  }
-  if(!confirm(`Remover "${item.label}" dos 3 cenários? Os valores já lançados para esse item serão apagados e não podem ser desfeitos.`)) return;
+  if(!item || (PROTECTED_COST_KEYS[groupKey]||[]).includes(item.key)) return;
   state.itemCatalog[groupKey].splice(Number(idx),1);
   SCEN.forEach(s=>{ delete state.entradas[s][groupKey][item.key]; });
   state.custos = state.custos.filter(c=> !(c.path[0]===groupKey && c.path[1]===item.key));
@@ -1393,35 +1482,40 @@ ACTIONS.rmCostItem = (groupKey, idx)=>{
 /* ================= VENDAS ================= */
 VIEWS.vendas = function(){
   const scen = state.ui.scenTab.vendas;
-  const lots = state.vendas[scen];
   const v = computeVendas(scen);
   const trk = computeVendaTracking();
-  const rows = lots.map((l,i)=>{
+  const totalPagantes = pagantesBase(scen);
+  const pctSum = v.totalPctRaw;
+  const rows = v.lots.map((l,i)=>{
     const bruta = l.preco*l.qtd;
-    const mix = v.qtd ? l.qtd/v.qtd : 0;
     return `<tr>
       <td>${tblInput(`vendas.${scen}.${i}.lote`, l.lote)}</td>
       <td class="num">${tblInput(`vendas.${scen}.${i}.preco`, l.preco, {type:'number', cls:'num'})}</td>
-      <td class="num">${tblInput(`vendas.${scen}.${i}.qtd`, l.qtd, {type:'number', cls:'num'})}</td>
-      <td class="num mono">${fmtPct(mix)}</td>
+      <td class="num">${tblInput(`vendas.${scen}.${i}.pctMix`, Math.round((Number(l.pctMix)||0)*1000)/10, {type:'number', step:'0.1', cls:'num', kind:'pct'})}</td>
+      <td class="num mono">${fmtInt(l.qtd)}</td>
       <td class="num mono">${fmtCur(bruta)}</td>
       <td><button class="rm" data-action="rmLot:${scen}:${i}" title="Remover lote">✕</button></td>
     </tr>`;
   }).join('');
+  const pctWarn = Math.abs(pctSum-1)>0.005
+    ? `<div class="hint" style="color:var(--warn); margin-top:6px;">Os % mix somam ${fmtPct(pctSum)} — a quantidade de cada lote é normalizada automaticamente para o total continuar batendo com os pagantes (${fmtInt(totalPagantes)}), mas o ideal é ajustar os % até somarem 100%.</div>`
+    : '';
 
   return `
-  <div class="topline"><div><h1>Vendas de ingressos${infoIcon('Cadastre os lotes de venda (preço e quantidade planejada) de cada cenário. Mais abaixo, registre quantos ingressos já foram vendidos de verdade — isso alimenta a projeção de público final e os Gates PMO.')}</h1><div class="desc">Fonte única dos lotes de ingresso por cenário, mais o acompanhamento de vendas realizadas.</div></div></div>
+  <div class="topline"><div><h1>Vendas de ingressos${infoIcon('Cadastre os lotes de venda de cada cenário. A quantidade total já vem travada nos pagantes calculados em Entradas PMO (capacidade × conversão) — aqui você só define o preço e o % mix de cada lote, e a quantidade de ingressos é gerada automaticamente. Mais abaixo, registre quantos ingressos já foram vendidos de verdade.')}</h1><div class="desc">Fonte única dos lotes de ingresso por cenário, mais o acompanhamento de vendas realizadas.</div></div></div>
   ${scenPills('ui.scenTab.vendas', scen)}
 
   <div class="section">
     <h2>Plano de lotes — ${SCEN_LABEL[scen]}</h2>
-    <div class="tablewrap">
+    <div class="hint">Quantidade total travada em <strong>${fmtInt(totalPagantes)} pagantes</strong> (Entradas PMO › capacidade × conversão do cenário ${SCEN_LABEL[scen]}). Edite o preço e o % mix — a quantidade de cada lote é calculada automaticamente.</div>
+    <div class="tablewrap" style="margin-top:8px;">
       <table>
-        <thead><tr><th>Lote</th><th class="num">Preço (R$)</th><th class="num">Qtd. planejada</th><th class="num">% mix</th><th class="num">Receita bruta</th><th></th></tr></thead>
+        <thead><tr><th>Lote</th><th class="num">Preço (R$)</th><th class="num">% mix</th><th class="num">Qtd. planejada</th><th class="num">Receita bruta</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
-        <tfoot><tr><td>Total</td><td></td><td class="num mono">${fmtInt(v.qtd)}</td><td></td><td class="num mono">${fmtCur(v.receitaBruta)}</td><td></td></tr></tfoot>
+        <tfoot><tr><td>Total</td><td></td><td class="num mono">${fmtPct(pctSum)}</td><td class="num mono">${fmtInt(v.qtd)}</td><td class="num mono">${fmtCur(v.receitaBruta)}</td><td></td></tr></tfoot>
       </table>
     </div>
+    ${pctWarn}
     <button class="btn small" style="margin-top:10px;" data-action="addLot:${scen}">+ Adicionar lote</button>
     <div class="gridN" style="margin-top:16px;">
       <div class="kpi"><div class="lbl">Ingressos planejados</div><div class="kpi-value">${fmtInt(v.qtd)}</div></div>
@@ -1454,7 +1548,7 @@ VIEWS.vendas = function(){
     </div>
   </div>`;
 };
-ACTIONS.addLot = (scen)=>{ state.vendas[scen].push({id:uid(), lote:'Novo lote', preco:100, qtd:0}); saveState(); render(); };
+ACTIONS.addLot = (scen)=>{ state.vendas[scen].push({id:uid(), lote:'Novo lote', preco:100, pctMix:0}); saveState(); render(); };
 ACTIONS.rmLot = (scen,i)=>{ state.vendas[scen].splice(Number(i),1); saveState(); render(); };
 
 /* ================= PATROCINIOS ================= */
@@ -1919,16 +2013,31 @@ $('#navgroups').addEventListener('click', (e)=>{
   const btn = e.target.closest('[data-nav]');
   if(btn) goTo(btn.dataset.nav);
 });
-$('#resetBtn').addEventListener('click', ()=>{
-  if(confirm('Isso vai apagar os dados salvos neste navegador e restaurar os valores de exemplo. Continuar?')){
+// mesmo esquema de "confirmar com 2 cliques" do onAction (ver acima) — sem confirm() nativo,
+// que fica bloqueado dentro do iframe do Artifact e faria este botao nao fazer nada
+(function(){
+  const btn = $('#resetBtn');
+  const original = btn.textContent;
+  let armed = false, timer = null;
+  btn.addEventListener('click', ()=>{
+    if(!armed){
+      armed = true;
+      btn.textContent = 'Confirmar — apaga tudo';
+      btn.classList.add('confirm-armed-full');
+      clearTimeout(timer);
+      timer = setTimeout(()=>{ armed=false; btn.textContent = original; btn.classList.remove('confirm-armed-full'); }, 3000);
+      return;
+    }
+    clearTimeout(timer);
+    armed = false; btn.textContent = original; btn.classList.remove('confirm-armed-full');
     localStorage.removeItem(STORAGE_KEY);
     state = freshState();
     stateSource = 'fresh';
     saveState();
     currentView = 'dashboard';
     render();
-  }
-});
+  });
+})();
 // salvamento ja e automatico a cada alteracao (ver saveState); este botao so confirma
 // visualmente que os dados atuais ja estao gravados neste navegador, para quem quiser ter certeza
 $('#saveIconBtn').addEventListener('click', ()=>{ saveState(); });
