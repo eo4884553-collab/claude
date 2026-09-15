@@ -9,7 +9,7 @@ faturamento e controle físico-financeiro de obras. Basta abrir `index.html` em 
 
 Abas: **Importar** · **Controle Master** (Dashboard Executivo, Lançar BM & Base de Dados, Controle
 de Supressão, Total do Projeto) · **Físico-Financeiro** (Dashboard, Análise por Disciplina, Base
-de Dados) · **Lançar Custos** · **Contratos** · **Histórico**.
+de Dados) · **Lançar Custos** · **Contratos** · **Análise** · **Histórico**.
 
 Recursos principais:
 - Importação da planilha de **MEDIÇÃO** (formato com colunas de BM em pares
@@ -47,18 +47,24 @@ Recursos principais:
   faturamentos por contrato e controle de saldo (valor total, medido, aprovado e saldo
   disponível), com alerta de contratos vencidos/vencendo.
 - Barra fixa no topo (sempre visível, em qualquer aba) com Total Contrato, Medido, Aprovado,
-  Avanço Físico, Meta de Custo, Custo Realizado, Margem e também **Custo Real** e **Margem
-  Real** — custo/margem considerando não só a Meta de Custo (orçamento distribuído nas linhas
-  de mão de obra) mas o custo efetivamente medido nos contratos de fornecedores, subindo
-  conforme mais medições de fornecedores são lançadas.
-- Interface enxuta: as explicações de cada seção ficam ocultas atrás de um ícone **"i"** ao
-  lado do título (passe o mouse ou toque para ver), em vez de parágrafos fixos ocupando a tela.
+  Avanço Físico, Meta de Custo, Custo Realizado, Margem e também **Custo Real** (Custo
+  Realizado − Saldo Disponível nos contratos de fornecedores) e **Margem Real** (Medido BM −
+  Custo Real).
+- Interface enxuta: as explicações de cada seção e de cada indicador ficam ocultas atrás de um
+  ícone **"i"** ao lado do título (passe o mouse ou toque para ver a instrução/fórmula de como
+  aquele valor foi calculado), em vez de parágrafos fixos ocupando a tela.
+- Aba **Análise**: verificação automática de possíveis inconsistências nos dados já lançados —
+  medido acima do contratado, quantidade acima da contratada, valor unitário zerado, item sem
+  disciplina, status de faturamento desalinhado com o valor aprovado, BM com quantidade sem
+  valor (ou vice-versa), custo realizado acima da meta por item, e contratos vencidos ou com
+  saldo negativo. Cada ocorrência lista os itens afetados com um botão "Ajustar" que leva
+  direto ao local do lançamento (filtro já aplicado) para corrigir.
 
 O app já é carregado com os dados reais do contrato 90005/2025 (AIR MINAS AR CONDICIONADO LTDA —
 reforma do sistema de climatização e adequação da cobertura da Biblioteca Pública Estadual): 340
 itens de medição, 346 itens de custo, 23 BMs e 20 disciplinas, extraídos das planilhas de
 MEDIÇÃO e ORÇAMENTO EXECUTIVO DETALHADO fornecidas (medição atualizada com os valores oficiais até
-a 5ª medição), além de 6 contratos de fornecedores extraídos dos PDFs assinados (locação de
+a 6ª medição), além de 6 contratos de fornecedores extraídos dos PDFs assinados (locação de
 caçambas, instalação de ar-condicionado, reforma de cobertura com termo aditivo, estrutura
 metálica, instalação elétrica com termo aditivo e reboco/chapisco). Basta reimportar versões
 atualizadas das planilhas em **Importar** sempre que houver uma nova medição/custo — cada
