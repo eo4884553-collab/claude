@@ -1398,6 +1398,15 @@ function renderStatusBulkBar(tabKey, getFilteredRows){
   return bar;
 }
 
+// Barra de totais (mesmo visual do grid .kpis) que acompanha os filtros de uma tabela — some
+// os valores só dos itens/disciplinas atualmente filtrados, para acompanhar quanto já foi
+// gasto/faturado naquele recorte sem precisar somar manualmente.
+function kpiBar(items){
+  const div = document.createElement('div'); div.className='grid kpis'; div.style.margin='8px 0';
+  div.innerHTML = items.map(([l,v,cls])=>`<div class="kpi"><div class="l">${l}</div><div class="v${cls?(' '+cls):''}">${v}</div></div>`).join('');
+  return div;
+}
+
 // Folds a sorted-desc list of {label,...} rows to the top N, summing the rest into "Outras".
 function foldTopN(rows, n, valueKeys){
   if(rows.length<=n) return rows;
@@ -1547,6 +1556,7 @@ function renderTotalProjeto(main){
   const p2 = document.createElement('div'); p2.className='panel';
   p2.innerHTML = `<h3>Totais por disciplina${infoIcon('Cada linha soma os itens de medição e custo daquela disciplina. Total Contrato/Medido/Aprovado vêm da planilha de MEDIÇÃO; Meta de Custo/Custo Realizado vêm da planilha de ORÇAMENTO EXECUTIVO DETALHADO.')}</h3>`;
   const filterHolder = document.createElement('div'); p2.appendChild(filterHolder);
+  const totalsHolder = document.createElement('div'); p2.appendChild(totalsHolder);
   const tableHolder = document.createElement('div'); p2.appendChild(tableHolder);
   main.appendChild(p2);
 
@@ -1563,6 +1573,15 @@ function renderTotalProjeto(main){
     filterHolder.innerHTML='';
     filterHolder.appendChild(renderFilterBar('totalProjetoDisc', {disciplina:true}, drawDisc));
     document.getElementById('filterCount_totalProjetoDisc').textContent = filtered.length + ' disciplinas';
+    const margemFiltrada = +(sumBy(filtered,'valorMedido') - sumBy(filtered,'custoRealizado')).toFixed(2);
+    totalsHolder.innerHTML='';
+    totalsHolder.appendChild(kpiBar([
+      ['Total Contrato (filtrado)', fmtMoney(sumBy(filtered,'valorContratado'))],
+      ['Medido BM (filtrado)', fmtMoney(sumBy(filtered,'valorMedido'))],
+      ['Meta de Custo (filtrado)', fmtMoney(sumBy(filtered,'metaCusto'))],
+      ['Custo Realizado (filtrado)', fmtMoney(sumBy(filtered,'custoRealizado'))],
+      ['Margem (fat. − custo)', fmtMoney(margemFiltrada), margemFiltrada<0?'bad':'good'],
+    ]));
     const cols = [
       {key:'disciplina', label:'Disciplina', width:200, wrap:true},
       {key:'valorContratado', label:'Total Contrato', type:'money', width:130, align:'num'},
@@ -1625,10 +1644,12 @@ function renderLancarBM(main){
       kpis.push(['Valor medido nesta BM', fmtMoney(valBM)]);
       kpis.push(['Valor aprovado nesta BM', fmtMoney(valAprovBM)]);
     } else {
-      kpis.push(['Valor medido (itens filtrados)', fmtMoney(sumBy(filtered,'valorMedido'))]);
-      kpis.push(['Valor aprovado (itens filtrados)', fmtMoney(sumBy(filtered,'valorAprovado'))]);
+      kpis.push(['Total Contrato (filtrado)', fmtMoney(sumBy(filtered,'totalContrato'))]);
+      kpis.push(['Valor medido (filtrado)', fmtMoney(sumBy(filtered,'valorMedido'))]);
+      kpis.push(['Valor aprovado (filtrado)', fmtMoney(sumBy(filtered,'valorAprovado'))]);
     }
-    totalsHolder.innerHTML = `<div class="grid kpis" style="margin:8px 0;">${kpis.map(([l,v])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('')}</div>`;
+    totalsHolder.innerHTML='';
+    totalsHolder.appendChild(kpiBar(kpis));
   }
   function draw(){
     filterHolder.innerHTML=''; filterHolder.appendChild(renderFilterBar('lancarbm', {disciplina:true, grupo:true, bm:true, status:true, statusOptions:['Não faturado','Em aprovação','Faturado aprovado']}, draw));
@@ -1764,6 +1785,7 @@ function renderSupressao(main){
 
   const p2 = document.createElement('div'); p2.className='panel';
   const filterHolder = document.createElement('div'); p2.appendChild(filterHolder);
+  const totalsHolder = document.createElement('div'); p2.appendChild(totalsHolder);
   const tableHolder = document.createElement('div'); p2.appendChild(tableHolder);
   main.appendChild(p2);
 
@@ -1784,6 +1806,12 @@ function renderSupressao(main){
     filterHolder.appendChild(renderFilterBar('supressao', {disciplina:true, status:true, statusOptions:['Não iniciado','Em execução','Concluído']}, draw));
     const filtered = getFiltered();
     document.getElementById('filterCount_supressao').textContent = filtered.length + ' disciplinas';
+    totalsHolder.innerHTML='';
+    totalsHolder.appendChild(kpiBar([
+      ['Valor contratado (filtrado)', fmtMoney(sumBy(filtered,'valorContratado'))],
+      ['Valor medido/faturado (filtrado)', fmtMoney(sumBy(filtered,'valorMedido'))],
+      ['Suprimido automático (filtrado)', fmtMoney(sumBy(filtered,'suprimidoAuto'))],
+    ]));
 
     const cols = [
       {key:'disciplina', label:'Disciplina', width:170, wrap:true},
@@ -1890,6 +1918,7 @@ function renderFisicoAnalise(main){
 
   const p2 = document.createElement('div'); p2.className='panel';
   const filterHolder = document.createElement('div'); p2.appendChild(filterHolder);
+  const totalsHolder = document.createElement('div'); p2.appendChild(totalsHolder);
   const tableHolder = document.createElement('div'); p2.appendChild(tableHolder);
   main.appendChild(p2);
 
@@ -1909,6 +1938,14 @@ function renderFisicoAnalise(main){
       if(f.search && !normStr(r.disciplina).includes(normStr(f.search))) return false;
       return true;
     });
+    totalsHolder.innerHTML='';
+    const margemFiltrada = +(sumBy(filtered,'valorMedido') - sumBy(filtered,'custoRealizado')).toFixed(2);
+    totalsHolder.appendChild(kpiBar([
+      ['Meta de custo (filtrado)', fmtMoney(sumBy(filtered,'metaCusto'))],
+      ['Custo realizado (filtrado)', fmtMoney(sumBy(filtered,'custoRealizado'))],
+      ['Faturamento BM (filtrado)', fmtMoney(sumBy(filtered,'valorMedido'))],
+      ['Margem (fat. − custo)', fmtMoney(margemFiltrada), margemFiltrada<0?'bad':'good'],
+    ]));
     filterHolder.innerHTML='';
     filterHolder.appendChild(renderFilterBar('fisicoAnalise', {disciplina:true, status:true, statusOptions:['Risco','OK']}, draw));
     document.getElementById('filterCount_fisicoAnalise').textContent = filtered.length + ' disciplinas';
@@ -1932,6 +1969,7 @@ function renderFisicoBase(main){
   main.appendChild(p);
   const p2 = document.createElement('div'); p2.className='panel';
   const filterHolder = document.createElement('div'); p2.appendChild(filterHolder);
+  const totalsHolder = document.createElement('div'); p2.appendChild(totalsHolder);
   const bulkHolder = document.createElement('div'); p2.appendChild(bulkHolder);
   const tableHolder = document.createElement('div'); p2.appendChild(tableHolder);
   main.appendChild(p2);
@@ -1942,10 +1980,24 @@ function renderFisicoBase(main){
   function getFiltered(){
     return applyFilters(state.custoItems, 'fisicoBase', {});
   }
+  function drawTotals(filtered){
+    const metaCusto = sumBy(filtered,'metaCusto');
+    const custoRealizado = sumBy(filtered,'custoRealizado');
+    const faturamento = filtered.reduce((s,r)=>s+(medById[r.id]?medById[r.id].valorMedido:0),0);
+    const margem = +(faturamento - custoRealizado).toFixed(2);
+    totalsHolder.innerHTML='';
+    totalsHolder.appendChild(kpiBar([
+      ['Meta de custo (filtrado)', fmtMoney(metaCusto)],
+      ['Custo realizado (filtrado)', fmtMoney(custoRealizado)],
+      ['Faturamento BM (filtrado)', fmtMoney(faturamento)],
+      ['Margem (fat. − custo)', fmtMoney(margem), margem<0?'bad':'good'],
+    ]));
+  }
   function draw(){
     filterHolder.innerHTML=''; filterHolder.appendChild(renderFilterBar('fisicoBase', {disciplina:true, grupo:true}, draw));
     const filtered = getFiltered();
     document.getElementById('filterCount_fisicoBase').textContent = filtered.length + ' de ' + state.custoItems.length + ' itens';
+    drawTotals(filtered);
     bulkHolder.innerHTML=''; bulkHolder.appendChild(renderBulkBar('fisicoBase', [
       {key:'metaCusto', label:'Meta de custo'},
       {key:'custoRealizado', label:'Custo realizado'},
@@ -1972,7 +2024,7 @@ function renderFisicoBase(main){
         const before = row[key];
         row[key] = val;
         logDeviation(row, key==='metaCusto'?'Meta de custo':'Custo realizado', before, val);
-        recalcAll(); saveLocalDebounced(); renderKpiStrip();
+        recalcAll(); saveLocalDebounced(); renderKpiStrip(); drawTotals(filtered);
       }
     }));
   }
@@ -1993,15 +2045,31 @@ function renderCustos(main){
 
   const p2 = document.createElement('div'); p2.className='panel';
   const filterHolder = document.createElement('div'); p2.appendChild(filterHolder);
+  const totalsHolder = document.createElement('div'); p2.appendChild(totalsHolder);
   const bulkHolder = document.createElement('div'); p2.appendChild(bulkHolder);
   const tableHolder = document.createElement('div'); p2.appendChild(tableHolder);
   main.appendChild(p2);
 
   function getFiltered(){ return applyFilters(state.custoItems, 'custos', {}); }
+  function drawTotals(filtered){
+    const discSet = new Set(filtered.map(r=>r.disciplina));
+    const metaCusto = sumBy(filtered,'metaCusto');
+    const custoRealizado = sumBy(filtered,'custoRealizado');
+    const faturamento = state.medicaoItems.filter(it=>discSet.has(it.disciplina)).reduce((s,it)=>s+(it.valorMedido||0),0);
+    const margem = +(faturamento - custoRealizado).toFixed(2);
+    totalsHolder.innerHTML='';
+    totalsHolder.appendChild(kpiBar([
+      ['Meta de custo (filtrado)', fmtMoney(metaCusto)],
+      ['Custo realizado (filtrado)', fmtMoney(custoRealizado)],
+      ['Faturamento BM (mesma disciplina)', fmtMoney(faturamento)],
+      ['Margem (fat. − custo)', fmtMoney(margem), margem<0?'bad':'good'],
+    ]));
+  }
   function draw(){
     filterHolder.innerHTML=''; filterHolder.appendChild(renderFilterBar('custos', {disciplina:true, grupo:true}, draw));
     const filtered = getFiltered();
     document.getElementById('filterCount_custos').textContent = filtered.length + ' de ' + state.custoItems.length + ' itens';
+    drawTotals(filtered);
     bulkHolder.innerHTML=''; bulkHolder.appendChild(renderBulkBar('custos', [
       {key:'metaCusto', label:'Meta de custo'},
       {key:'custoRealizado', label:'Custo realizado'},
@@ -2024,7 +2092,7 @@ function renderCustos(main){
         const before = row[key];
         row[key] = val;
         if(key==='metaCusto'||key==='custoRealizado') logDeviation(row, key==='metaCusto'?'Meta de custo':'Custo realizado', before, val);
-        recalcAll(); saveLocalDebounced(); renderKpiStrip();
+        recalcAll(); saveLocalDebounced(); renderKpiStrip(); drawTotals(filtered);
       }
     });
     tbl.querySelector('tbody').addEventListener('click', (e)=>{

@@ -25,6 +25,10 @@ Recursos principais:
 - Leitura de PDF 100% local via PDF.js; IA (Anthropic) é opcional e só é usada se uma chave de
   API for informada — sem ela (ou sem crédito), a leitura local do PDF continua funcionando.
 - Filtros, edição em massa (soma/subtração), largura de coluna ajustável em todas as tabelas.
+  As tabelas com filtro por disciplina (Lançar Custos, Lançar BM & Base de Dados, Físico-
+  Financeiro Base de Dados/Análise por Disciplina, Controle de Supressão, Total do Projeto)
+  mostram, logo acima da tabela, o total já gasto/medido e o faturamento correspondente
+  daquele recorte filtrado — acompanha automaticamente qualquer filtro aplicado.
 - Backup/importação em JSON, salvamento automático no navegador (localStorage) e exportação de
   uma cópia HTML autônoma (com os dados atuais embutidos) para publicar/hospedar.
 - Aprovação de BM propaga automaticamente para Dashboard Executivo, Total do Projeto,
