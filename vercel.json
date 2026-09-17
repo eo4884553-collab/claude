@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "webapp/relatorio-der-es.html", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "/", "dest": "/webapp/relatorio-der-es.html" },
+    { "src": "/(.*)", "dest": "/webapp/relatorio-der-es.html" }
+  ]
+}
