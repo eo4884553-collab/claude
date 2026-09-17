@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solicitar cadastro — Controle de Obra</title>
+<style>
+:root{ --bg:#0f1420; --panel:#1b2436; --border:#2c3a54; --text:#e7ecf5; --muted:#8fa0bd;
+  --accent:#4d8dff; --accent2:#2f6fe0; --bad:#f0563d; --good:#3ecf8e; --input-bg:#111826; }
+*{box-sizing:border-box;}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+  background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:28px 30px;
+  width:100%;max-width:380px;box-shadow:0 20px 50px rgba(0,0,0,.4);}
+h1{font-size:17px;margin:0 0 4px;}
+p.sub{color:var(--muted);font-size:12.5px;margin:0 0 20px;}
+label{display:block;font-size:12px;color:var(--muted);margin:14px 0 5px;}
+input{width:100%;padding:9px 10px;border-radius:6px;border:1px solid var(--border);
+  background:var(--input-bg);color:var(--text);font-size:14px;}
+input:focus{outline:2px solid var(--accent);border-color:var(--accent);}
+button{width:100%;margin-top:18px;padding:10px;border:none;border-radius:6px;
+  background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer;}
+button:hover{background:var(--accent2);}
+button:disabled{opacity:.6;cursor:default;}
+.msg{margin-top:12px;font-size:12.5px;border-radius:6px;padding:8px 10px;display:none;}
+.msg.err{display:block;background:#3a1c18;border:1px solid var(--bad);color:#ffb3a3;}
+.msg.ok{display:block;background:#123524;border:1px solid var(--good);color:#a9f0cf;}
+.foot{margin-top:18px;text-align:center;font-size:12.5px;color:var(--muted);}
+.foot a{color:var(--accent);text-decoration:none;}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Solicitar acesso</h1>
+  <p class="sub">Seu cadastro fica pendente até um administrador aprovar e liberar o que você pode fazer (só visualizar ou também editar).</p>
+  <form id="regForm">
+    <label>Nome</label>
+    <input type="text" id="name" autocomplete="name" required>
+    <label>E-mail</label>
+    <input type="email" id="email" autocomplete="username" required>
+    <label>Senha (mínimo 6 caracteres)</label>
+    <input type="password" id="password" autocomplete="new-password" minlength="6" required>
+    <div class="msg" id="msg"></div>
+    <button type="submit" id="submitBtn">Solicitar cadastro</button>
+  </form>
+  <div class="foot">Já tem acesso? <a href="/login.html">Entrar</a></div>
+</div>
+<script>
+document.getElementById('regForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const btn = document.getElementById('submitBtn');
+  const msg = document.getElementById('msg');
+  msg.className = 'msg'; msg.textContent = '';
+  btn.disabled = true; btn.textContent = 'Enviando...';
+  try{
+    const resp = await fetch('/api/register', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        name: document.getElementById('name').value,
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value,
+      })
+    });
+    const data = await resp.json();
+    if(!resp.ok){ throw new Error(data.error || 'Falha ao enviar cadastro.'); }
+    msg.className = 'msg ok'; msg.textContent = data.message;
+    document.getElementById('regForm').reset();
+    btn.textContent = 'Cadastro enviado';
+  }catch(err){
+    msg.className = 'msg err'; msg.textContent = err.message;
+    btn.disabled = false; btn.textContent = 'Solicitar cadastro';
+  }
+});
+</script>
+</body>
+</html>

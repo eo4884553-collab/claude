@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrar — Controle de Obra</title>
+<style>
+:root{ --bg:#0f1420; --panel:#1b2436; --border:#2c3a54; --text:#e7ecf5; --muted:#8fa0bd;
+  --accent:#4d8dff; --accent2:#2f6fe0; --bad:#f0563d; --input-bg:#111826; --radius:8px; }
+*{box-sizing:border-box;}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+  background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:28px 30px;
+  width:100%;max-width:380px;box-shadow:0 20px 50px rgba(0,0,0,.4);}
+h1{font-size:17px;margin:0 0 4px;}
+p.sub{color:var(--muted);font-size:12.5px;margin:0 0 20px;}
+label{display:block;font-size:12px;color:var(--muted);margin:14px 0 5px;}
+input{width:100%;padding:9px 10px;border-radius:6px;border:1px solid var(--border);
+  background:var(--input-bg);color:var(--text);font-size:14px;}
+input:focus{outline:2px solid var(--accent);border-color:var(--accent);}
+button{width:100%;margin-top:18px;padding:10px;border:none;border-radius:6px;
+  background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer;}
+button:hover{background:var(--accent2);}
+button:disabled{opacity:.6;cursor:default;}
+.msg{margin-top:12px;font-size:12.5px;border-radius:6px;padding:8px 10px;display:none;}
+.msg.err{display:block;background:#3a1c18;border:1px solid var(--bad);color:#ffb3a3;}
+.foot{margin-top:18px;text-align:center;font-size:12.5px;color:var(--muted);}
+.foot a{color:var(--accent);text-decoration:none;}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Controle de Obra — AIR MINAS</h1>
+  <p class="sub">Entre com seu e-mail e senha para acessar.</p>
+  <form id="loginForm">
+    <label>E-mail</label>
+    <input type="email" id="email" autocomplete="username" required>
+    <label>Senha</label>
+    <input type="password" id="password" autocomplete="current-password" required>
+    <div class="msg err" id="msg"></div>
+    <button type="submit" id="submitBtn">Entrar</button>
+  </form>
+  <div class="foot">Ainda não tem acesso? <a href="/register.html">Solicitar cadastro</a></div>
+</div>
+<script>
+document.getElementById('loginForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const btn = document.getElementById('submitBtn');
+  const msg = document.getElementById('msg');
+  msg.className = 'msg'; msg.textContent = '';
+  btn.disabled = true; btn.textContent = 'Entrando...';
+  try{
+    const resp = await fetch('/api/login', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ email: document.getElementById('email').value, password: document.getElementById('password').value })
+    });
+    const data = await resp.json();
+    if(!resp.ok){ throw new Error(data.error || 'Falha ao entrar.'); }
+    window.location.href = '/';
+  }catch(err){
+    msg.className = 'msg err'; msg.textContent = err.message;
+    btn.disabled = false; btn.textContent = 'Entrar';
+  }
+});
+</script>
+</body>
+</html>

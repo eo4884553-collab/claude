@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuração inicial — Controle de Obra</title>
+<style>
+:root{ --bg:#0f1420; --panel:#1b2436; --border:#2c3a54; --text:#e7ecf5; --muted:#8fa0bd;
+  --accent:#4d8dff; --accent2:#2f6fe0; --bad:#f0563d; --good:#3ecf8e; --input-bg:#111826; }
+*{box-sizing:border-box;}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+  background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:28px 30px;
+  width:100%;max-width:400px;box-shadow:0 20px 50px rgba(0,0,0,.4);}
+h1{font-size:17px;margin:0 0 4px;}
+p.sub{color:var(--muted);font-size:12.5px;margin:0 0 20px;line-height:1.5;}
+label{display:block;font-size:12px;color:var(--muted);margin:14px 0 5px;}
+input{width:100%;padding:9px 10px;border-radius:6px;border:1px solid var(--border);
+  background:var(--input-bg);color:var(--text);font-size:14px;}
+input:focus{outline:2px solid var(--accent);border-color:var(--accent);}
+button{width:100%;margin-top:18px;padding:10px;border:none;border-radius:6px;
+  background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer;}
+button:hover{background:var(--accent2);}
+button:disabled{opacity:.6;cursor:default;}
+.msg{margin-top:12px;font-size:12.5px;border-radius:6px;padding:8px 10px;display:none;}
+.msg.err{display:block;background:#3a1c18;border:1px solid var(--bad);color:#ffb3a3;}
+#loading, #alreadyDone{ text-align:center; color:var(--muted); font-size:13px; }
+#alreadyDone a{ color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="card">
+  <div id="loading">Verificando...</div>
+  <div id="alreadyDone" style="display:none;">
+    A configuração inicial já foi concluída. <a href="/login.html">Ir para o login</a>.
+  </div>
+  <div id="setupWrap" style="display:none;">
+    <h1>Configuração inicial</h1>
+    <p class="sub">Este é o primeiro acesso ao sistema — crie a conta do administrador
+      (você). Depois disso, todas as outras pessoas se cadastram em "Solicitar cadastro"
+      e você aprova cada uma, definindo se ela só visualiza ou também edita.</p>
+    <form id="setupForm">
+      <label>Seu nome</label>
+      <input type="text" id="name" autocomplete="name" required>
+      <label>E-mail</label>
+      <input type="email" id="email" autocomplete="username" required>
+      <label>Senha (mínimo 6 caracteres)</label>
+      <input type="password" id="password" autocomplete="new-password" minlength="6" required>
+      <div class="msg" id="msg"></div>
+      <button type="submit" id="submitBtn">Criar administrador e entrar</button>
+    </form>
+  </div>
+</div>
+<script>
+(async ()=>{
+  const resp = await fetch('/api/setup');
+  const data = await resp.json();
+  document.getElementById('loading').style.display = 'none';
+  if(data.needsSetup){
+    document.getElementById('setupWrap').style.display = 'block';
+  } else {
+    document.getElementById('alreadyDone').style.display = 'block';
+  }
+})();
+document.getElementById('setupForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const btn = document.getElementById('submitBtn');
+  const msg = document.getElementById('msg');
+  msg.className = 'msg'; msg.textContent = '';
+  btn.disabled = true; btn.textContent = 'Criando...';
+  try{
+    const resp = await fetch('/api/setup', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        name: document.getElementById('name').value,
+        email: document.getElementById('email').value,
+        password: document.getElementById('password').value,
+      })
+    });
+    const data = await resp.json();
+    if(!resp.ok){ throw new Error(data.error || 'Falha ao criar administrador.'); }
+    window.location.href = '/';
+  }catch(err){
+    msg.className = 'msg err'; msg.textContent = err.message;
+    btn.disabled = false; btn.textContent = 'Criar administrador e entrar';
+  }
+});
+</script>
+</body>
+</html>

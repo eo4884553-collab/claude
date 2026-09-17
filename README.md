@@ -3,9 +3,10 @@ repositorio para o claude
 
 ## Controle de Obra — Medição, BM e Físico-Financeiro
 
-Aplicativo de página única (`index.html`) para gestão de medição, boletins de medição (BM),
-faturamento e controle físico-financeiro de obras. Basta abrir `index.html` em um navegador
-(não requer servidor nem instalação).
+Aplicativo web para gestão de medição, boletins de medição (BM), faturamento e controle
+físico-financeiro de obras. Multiusuário, com login individual (e-mail/senha) e dados
+compartilhados em tempo real entre todas as pessoas com acesso aprovado — veja a seção
+**Hospedagem, login e permissões** abaixo para colocar em produção no Vercel.
 
 Abas: **Importar** · **Controle Master** (Dashboard Executivo, Lançar BM & Base de Dados, Controle
 de Supressão, Total do Projeto) · **Físico-Financeiro** (Dashboard, Análise por Disciplina, Base
@@ -29,8 +30,9 @@ Recursos principais:
   Financeiro Base de Dados/Análise por Disciplina, Controle de Supressão, Total do Projeto)
   mostram, logo acima da tabela, o total já gasto/medido e o faturamento correspondente
   daquele recorte filtrado — acompanha automaticamente qualquer filtro aplicado.
-- Backup/importação em JSON, salvamento automático no navegador (localStorage) e exportação de
-  uma cópia HTML autônoma (com os dados atuais embutidos) para publicar/hospedar.
+- Backup/importação em JSON e salvamento automático no banco de dados compartilhado (a cada
+  alteração, com indicação de "Salvo às ..." no topo) — qualquer pessoa que entrar vê os dados
+  mais recentes, de qualquer dispositivo.
 - Aprovação de BM propaga automaticamente para Dashboard Executivo, Total do Projeto,
   Histórico de Desvios, Controle de Supressão, Físico-Financeiro e Base de Dados. A aba
   **Lançar BM & Base de Dados** de Controle Master reúne lançamento por BM e aprovação num
@@ -74,3 +76,46 @@ metálica, instalação elétrica com termo aditivo e reboco/chapisco). Basta re
 atualizadas das planilhas em **Importar** sempre que houver uma nova medição/custo — cada
 reimportação é tratada como o valor/quantitativo atualizado daquele item (substitui o que estava
 lançado, não soma) — os campos continuam editáveis manualmente a qualquer momento.
+
+## Hospedagem, login e permissões
+
+O app roda como funções serverless na Vercel (`api/*.js`) com um banco Postgres compartilhado
+(tabelas `users` e `app_state`, uma única linha com o JSON completo do app). Autenticação por
+sessão em cookie `httpOnly` assinado (JWT), senhas com hash bcrypt — nunca em texto puro.
+
+**Papéis de acesso** (definidos pelo administrador em **Usuários**, visível só para admins):
+- **Pendente** — acabou de se cadastrar em `/register.html`; sem acesso a nada até ser aprovado.
+- **Somente visualização** — vê tudo, mas qualquer tentativa de editar é bloqueada (o servidor
+  recusa a gravação mesmo que alguém burle a interface) e avisada por um aviso na tela.
+- **Editor** — pode ver e editar normalmente, mas não gerencia usuários.
+- **Administrador** — tudo do editor, mais a aba **Usuários**: aprova cadastros, define o papel
+  de cada pessoa e remove acessos. Um admin não consegue rebaixar/remover a própria conta pela
+  interface (nem pela API) — evita ficar sem nenhum admin no sistema.
+
+Concorrência: a gravação é "a última que salvar vence" — não há mesclagem automática entre duas
+pessoas editando o mesmo item ao mesmo tempo. Para uma equipe pequena isso raramente é um
+problema na prática, mas vale saber.
+
+### Colocando no ar (Vercel)
+
+1. **Suba este repositório** para o GitHub (branch principal) e, no [painel da Vercel](https://vercel.com/dashboard),
+   clique em **Add New → Project** e importe o repositório. A Vercel detecta automaticamente as
+   funções em `api/*.js` — não é preciso configurar build command nem framework.
+2. **Crie o banco de dados**: na página do projeto na Vercel, aba **Storage** → **Create Database**
+   → **Postgres** (ou Neon). Ao conectar ao projeto, a Vercel injeta sozinha a variável de
+   ambiente `POSTGRES_URL` — não é preciso copiar nada manualmente.
+3. **Defina uma `JWT_SECRET` forte**: em **Settings → Environment Variables**, adicione
+   `JWT_SECRET` com um valor aleatório longo (ex.: gerado com `openssl rand -hex 32`). **Isso é
+   obrigatório** — sem essa variável, o app usa um valor padrão de desenvolvimento que está
+   público no código-fonte, o que tornaria as sessões falsificáveis por qualquer pessoa.
+4. **Reimplante** (Redeploy) o projeto depois de criar o banco e a `JWT_SECRET`, para que as
+   funções serverless carreguem as novas variáveis de ambiente.
+5. **Acesse `https://SEU-PROJETO.vercel.app/setup.html`** uma única vez — essa página só funciona
+   enquanto não existir nenhum administrador; ela cria sua conta (a primeira e única com acesso
+   automático) e depois se bloqueia sozinha (retorna erro 403 se alguém tentar de novo).
+6. **Compartilhe o link do app** com a equipe. Cada pessoa se cadastra em `/register.html` com
+   e-mail e senha próprios; o cadastro fica **pendente** até você entrar em **Usuários** e definir
+   se ela só visualiza ou também edita.
+
+Sem repetir o passo 5, ninguém mais consegue virar administrador — todo acesso novo passa
+obrigatoriamente pela aprovação manual descrita no passo 6.
