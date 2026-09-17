@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Controle de Obra — Medição, BM e Físico-Financeiro</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f1420">
+<link rel="icon" href="/icons/icon-32.png">
+<link rel="apple-touch-icon" href="/icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Controle Obra">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js" defer></script>
@@ -286,6 +293,7 @@ footer.app-footer{padding:10px 14px;color:var(--muted2);font-size:10.5px;text-al
 
 <header class="topbar">
   <div class="title">Controle de Obra <span class="sub">Medição · BM · Físico-Financeiro</span></div>
+  <button class="btn primary" id="btnSalvarAgora" title="Salvar agora no servidor">💾 Salvar</button>
   <button class="btn" id="btnBackupJson" title="Baixar backup completo em JSON">⬇ Backup JSON</button>
   <button class="btn" id="btnImportJsonTop" title="Restaurar backup JSON">⬆ Importar JSON</button>
   <input type="file" id="fileJsonTop" accept=".json" style="display:none">
@@ -3564,6 +3572,12 @@ function doRestoreJson(file){
 /* =========================================================================
    TOOLBAR GLOBAL
    ========================================================================= */
+document.getElementById('btnSalvarAgora').onclick = async ()=>{
+  const btn = document.getElementById('btnSalvarAgora');
+  btn.disabled = true; const original = btn.textContent; btn.textContent = 'Salvando...';
+  await persistRemote(false);
+  btn.textContent = original; btn.disabled = false;
+};
 document.getElementById('btnBackupJson').onclick = doBackupJson;
 document.getElementById('btnImportJsonTop').onclick = ()=>document.getElementById('fileJsonTop').click();
 document.getElementById('fileJsonTop').addEventListener('change', (e)=>{ if(e.target.files[0]) doRestoreJson(e.target.files[0]); });
@@ -3581,6 +3595,7 @@ function renderUserBar(){
   document.getElementById('btnLogout').style.display = '';
   document.getElementById('viewerBanner').style.display = currentUser.role === 'viewer' ? '' : 'none';
   document.getElementById('tabUsuarios').style.display = currentUser.role === 'admin' ? '' : 'none';
+  document.getElementById('btnSalvarAgora').style.display = currentUser.role === 'viewer' ? 'none' : '';
   document.getElementById('btnImportJsonTop').style.display = currentUser.role === 'viewer' ? 'none' : '';
 }
 
@@ -3613,6 +3628,7 @@ async function bootstrap(){
   }
 }
 bootstrap();
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('/sw.js').catch(()=>{}); }
 </script>
 </body>
 </html>
