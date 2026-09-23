@@ -130,3 +130,14 @@ $$;
 --
 -- Depois disso, esse usuario ja consegue aprovar todo mundo direto pela tela
 -- "Usuários" do app — nao precisa mais mexer no SQL Editor.
+
+-- ============================================================
+-- 6) OUTROS PROJETOS/EVENTOS (mesma estrutura, dados separados)
+-- ============================================================
+-- Cada linha aqui é um "board" separado dentro do mesmo app (aparece no
+-- seletor do topo, ao lado do nome do evento). As politicas de RLS acima ja
+-- valem pra qualquer id (nao precisa mexer nelas). Depois de rodar o INSERT
+-- abaixo, adicione o mesmo id em webapp/lib/projects.js e publique de novo.
+insert into public.project_state (id, data)
+  values ('feijoada-bloco', '{}'::jsonb)
+  on conflict (id) do nothing;

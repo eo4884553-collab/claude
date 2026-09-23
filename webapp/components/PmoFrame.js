@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { PROJECTS } from '../lib/projects';
 
-const PROJECT_ID = 'main';
 const SEED_MARKER = '/* __PIQUINZADA_STATE_SEED__ */';
 
 const topbar = {
@@ -25,7 +25,7 @@ const banner = {
 // injetando os dados vindos do Supabase e o papel do usuario (admin edita,
 // convidado so ve). A comunicacao com o iframe é via postMessage — o app
 // dentro do iframe nao muda de arquitetura, so ganha uma ponte pra nuvem.
-export default function PmoFrame({ auth }) {
+export default function PmoFrame({ auth, project, onChangeProject }) {
   const iframeRef = useRef(null);
   const templateRef = useRef(null);
   const saveTimer = useRef(null);
@@ -51,7 +51,7 @@ export default function PmoFrame({ auth }) {
         if (!res.ok) throw new Error('Não consegui carregar o app (pmo-app-template.html).');
         templateRef.current = await res.text();
       }
-      const { data, error } = await supabase.from('project_state').select('data,updated_at').eq('id', PROJECT_ID).maybeSingle();
+      const { data, error } = await supabase.from('project_state').select('data,updated_at').eq('id', project.id).maybeSingle();
       if (error) throw error;
       const seed = (data && data.data && Object.keys(data.data).length) ? data.data : null;
       lastLocalWrite.current = data?.updated_at ? new Date(data.updated_at).getTime() : 0;
@@ -60,19 +60,20 @@ export default function PmoFrame({ auth }) {
     } catch (e) {
       setStatus('error'); setErrMsg(e.message || String(e));
     }
-  }, [buildSrcDoc]);
+  }, [buildSrcDoc, project.id]);
 
-  useEffect(() => { mount(); /* eslint-disable-next-line */ }, []);
+  // troca de projeto (ou primeira montagem) recarrega os dados certos
+  useEffect(() => { mount(); /* eslint-disable-next-line */ }, [project.id]);
 
   // grava no Supabase com um pequeno debounce (varias mudancas seguidas viram 1 escrita só)
   const flushSave = useCallback(async (stateObj) => {
     const { error } = await supabase
       .from('project_state')
       .update({ data: stateObj, updated_at: new Date().toISOString(), updated_by: auth.user.id })
-      .eq('id', PROJECT_ID);
+      .eq('id', project.id);
     lastLocalWrite.current = Date.now();
     iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:save-ack', ok: !error }, '*');
-  }, [auth.user?.id]);
+  }, [auth.user?.id, project.id]);
 
   useEffect(() => {
     function onMessage(ev) {
@@ -93,15 +94,16 @@ export default function PmoFrame({ auth }) {
   // realtime: se OUTRO usuario salvar enquanto esta tela esta aberta, avisa em vez de sobrescrever
   // silenciosamente o que esta sendo visto/editado agora
   useEffect(() => {
-    const channel = supabase.channel('project_state_changes')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'project_state', filter: `id=eq.${PROJECT_ID}` }, (payload) => {
+    setStaleNotice(false);
+    const channel = supabase.channel(`project_state_changes_${project.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'project_state', filter: `id=eq.${project.id}` }, (payload) => {
         const updatedAt = payload.new?.updated_at ? new Date(payload.new.updated_at).getTime() : 0;
         // ignora o eco da propria gravacao (janela de 2s)
         if (updatedAt - lastLocalWrite.current > 2000) setStaleNotice(true);
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, []);
+  }, [project.id]);
 
   function reload() {
     setStaleNotice(false);
@@ -112,7 +114,17 @@ export default function PmoFrame({ auth }) {
   return (
     <div style={{ position: 'relative', height: '100dvh', display: 'flex', flexDirection: 'column' }}>
       <div style={topbar}>
-        <strong style={{ fontFamily: "'Fraunces', serif" }}>🎭 Piquinzada</strong>
+        <strong style={{ fontFamily: "'Fraunces', serif" }}>{project.emoji} {project.label}</strong>
+        {PROJECTS.length > 1 && (
+          <select
+            value={project.id}
+            onChange={(e) => onChangeProject(e.target.value)}
+            style={{ background: 'rgba(255,255,255,.12)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}
+            title="Trocar de projeto"
+          >
+            {PROJECTS.map((p) => <option key={p.id} value={p.id} style={{ color: '#241220' }}>{p.emoji} {p.label}</option>)}
+          </select>
+        )}
         <span style={badge(role === 'admin' ? '#5C7A16' : '#6B5566')}>{role === 'admin' ? 'Administrador' : 'Convidado · somente leitura'}</span>
         <span style={{ opacity: .7, marginLeft: 4 }}>{auth.user.email}</span>
         <span style={{ marginLeft: 'auto' }} />
@@ -138,7 +150,7 @@ export default function PmoFrame({ auth }) {
       )}
       <iframe
         ref={iframeRef}
-        title="Piquinzada PMO"
+        title={project.label}
         style={{ flex: 1, border: 'none', width: '100%', display: status === 'ready' ? 'block' : 'none' }}
         sandbox="allow-scripts allow-same-origin allow-downloads allow-forms"
       />
