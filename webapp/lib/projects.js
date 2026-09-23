@@ -7,6 +7,7 @@
 export const PROJECTS = [
   { id: 'main', label: 'Piquinzada 2027', emoji: '🎭' },
   { id: 'feijoada-bloco', label: 'Feijoada do Bloco', emoji: '🍲' },
+  { id: 'bateria-piquinzada', label: 'Bateria Piquinzada', emoji: '🥁' },
 ];
 
 export function projectById(id) {

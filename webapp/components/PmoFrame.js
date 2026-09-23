@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { PROJECTS } from '../lib/projects';
+import { approvedReimbursementsTotal } from '../lib/reimbursements';
 
 const SEED_MARKER = '/* __PIQUINZADA_STATE_SEED__ */';
 
@@ -53,8 +54,14 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
       }
       const { data, error } = await supabase.from('project_state').select('data,updated_at').eq('id', project.id).maybeSingle();
       if (error) throw error;
-      const seed = (data && data.data && Object.keys(data.data).length) ? data.data : null;
+      let seed = (data && data.data && Object.keys(data.data).length) ? data.data : null;
       lastLocalWrite.current = data?.updated_at ? new Date(data.updated_at).getTime() : 0;
+      // soma das restituicoes de caixa ja aprovadas entra como custo real do evento — busca
+      // sempre fresca (nunca fica gravada no project_state, pra nunca ficar desatualizada)
+      try {
+        const total = await approvedReimbursementsTotal(project.id);
+        seed = Object.assign({}, seed, { restituicoesAprovadas: total });
+      } catch (_) { /* se falhar, o app abre normalmente so sem essa soma (fica 0) */ }
       const doc = buildSrcDoc(templateRef.current, seed);
       if (iframeRef.current) iframeRef.current.srcdoc = doc;
     } catch (e) {
@@ -128,6 +135,7 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
         <span style={badge(role === 'admin' ? '#5C7A16' : '#6B5566')}>{role === 'admin' ? 'Administrador' : 'Convidado · somente leitura'}</span>
         <span style={{ opacity: .7, marginLeft: 4 }}>{auth.user.email}</span>
         <span style={{ marginLeft: 'auto' }} />
+        <a href="/restituicoes" style={{ ...topbarBtn, textDecoration: 'none', display: 'inline-block' }}>💸 Restituição de Caixa</a>
         {role === 'admin' && <a href="/admin" style={{ ...topbarBtn, textDecoration: 'none', display: 'inline-block' }}>Usuários</a>}
         <button style={topbarBtn} onClick={reload}>↻ Recarregar</button>
         <button style={topbarBtn} onClick={auth.signOut}>Sair</button>
