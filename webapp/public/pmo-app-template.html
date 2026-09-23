@@ -137,7 +137,11 @@ nav.groups{padding:14px 10px 20px; flex:1;}
 .section > h2{font-size:17px; margin:0 0 3px; font-weight:600;}
 .section > .sub{color:var(--text-dim); font-size:12.5px; margin-bottom:14px;}
 
-.pillrow{display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap;}
+.pillrow{display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; align-items:center;}
+.replicate-ctrl{display:inline-flex; align-items:center; gap:6px; margin-left:8px; padding-left:8px; border-left:1px solid var(--border);}
+.replicate-ctrl .replicate-lbl{font-size:11.5px; color:var(--text-faint);}
+.replicate-ctrl .replicate-select{width:auto; padding:4px 7px; font-size:11.5px;}
+.replicate-ctrl button{white-space:nowrap;}
 .pill{
   padding:6px 13px; border-radius:99px; border:1px solid var(--border); background:var(--surface);
   font-size:12.5px; font-weight:600; cursor:pointer; color:var(--text-dim);
@@ -419,6 +423,11 @@ function defaultItemCatalog(){
   COST_GROUPS.forEach(g=>{ cat[g.key] = g.items.map(([key,label])=>({key,label})); });
   return cat;
 }
+// lista de categorias de custo (grupos) — começa com as 5 padrão, mas o admin pode
+// criar novas categorias em "Custos por categoria" (ex.: "Camisas", "Transporte da bateria")
+function defaultCostGroups(){
+  return COST_GROUPS.map(g=>({key:g.key, label:g.label}));
+}
 
 function entradaDefaults(idx, scen){
   const o = {
@@ -426,6 +435,9 @@ function entradaDefaults(idx, scen){
     taxaPlataforma:0.07, taxaCartao:0.0, tributosIngressos:0.0,
     consumoBruto:[0,0,0][idx],
     custoOpConsumoPct: [0,0,0][idx],
+    // catalogo detalhado de bebidas/ativacoes (opcional) — se tiver pelo menos 1 item aqui,
+    // ele substitui a estimativa simplificada acima (consumoBruto/custoOpConsumoPct) no calculo
+    bebidas: [],
     outrasReceitas:0,
     atracoes:{}, estrutura:{}, operacao:{}, marketing:{}, logistica:{},
     outros:{
@@ -509,18 +521,20 @@ const FC_ENT_DEFAULT_PCT = [
   [0,0,0,0,0,0,0,0,0,0,0,100],
   [0,0,0,0,0,0,0,0,0,0,50,50],
 ];
-const FC_SAI_LABELS = ['Atrações (cachês)','Estrutura','Operação (produção/segurança/licenças)','Marketing','Logística','Administrativo','Taxas sobre ingressos','Open bar','Contingência'];
-const FC_SAI_KEYS = ['subAtracoes','subEstrutura','subOperacao','subMarketing','subLogistica','despesasAdm','custoTaxaIngressos','openBar','contingenciaValor'];
+const FC_SAI_LABELS = ['Atrações (cachês)','Estrutura','Operação (produção/segurança/licenças)','Marketing','Logística','Categorias extras','Administrativo','Taxas sobre ingressos','Open bar','Contingência','Restituições de caixa aprovadas'];
+const FC_SAI_KEYS = ['subAtracoes','subEstrutura','subOperacao','subMarketing','subLogistica','subExtra','despesasAdm','custoTaxaIngressos','openBar','contingenciaValor','restituicoesAprovadas'];
 const FC_SAI_DEFAULT_PCT = [
   [0,20,0,0,0,0,0,0,0,0,30,50],
   [0,0,0,0,0,0,0,0,10,20,30,40],
   [0,0,0,0,0,0,0,0,5,15,30,50],
   [5,5,5,5,10,10,10,10,10,10,10,10],
   [0,0,0,0,0,0,0,0,10,20,30,40],
+  [5,5,5,5,10,10,10,10,10,10,10,10],
   [8,8,8,8,9,9,9,9,9,8,8,7],
   [0,5,10,10,10,5,5,5,10,15,15,10],
   [0,0,0,0,0,0,0,0,0,0,30,70],
   [0,0,0,0,0,0,0,0,0,20,30,50],
+  [9,9,9,9,8,8,8,8,8,8,8,8],
 ];
 const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
@@ -531,6 +545,7 @@ function freshState(){
   return {
     entradas, vendas, patrocinios,
     itemCatalog: defaultItemCatalog(),
+    costGroups: defaultCostGroups(),
     stageProb: Object.assign({}, DEFAULT_STAGE_PROB),
     custos: custosDefaults(),
     riscos: RISCOS_DEFAULT.map(r=>Object.assign({},r)),
@@ -600,7 +615,18 @@ function migrateState(){
         if(op[k]==null || typeof op[k] !== 'object') op[k] = {qty:1, unitCost:Number(op[k])||0};
       });
     }
+    // catalogo detalhado de bebidas — estados salvos antes disso nao tem essa lista ainda
+    if(state.entradas && state.entradas[scen] && !state.entradas[scen].bebidas) state.entradas[scen].bebidas = [];
   });
+  // Fluxo de Caixa: nova linha "Categorias extras" (soma das categorias de custo criadas pelo
+  // usuario) — estados salvos antes disso nao tem essa chave dentro de fluxo.pctSai
+  if(state.fluxo && state.fluxo.pctSai && !state.fluxo.pctSai.subExtra){
+    state.fluxo.pctSai.subExtra = MESES.map(()=>0);
+  }
+  // Fluxo de Caixa: nova linha "Restituições de caixa aprovadas"
+  if(state.fluxo && state.fluxo.pctSai && !state.fluxo.pctSai.restituicoesAprovadas){
+    state.fluxo.pctSai.restituicoesAprovadas = FC_SAI_DEFAULT_PCT[FC_SAI_KEYS.indexOf('restituicoesAprovadas')].map(x=>x/100);
+  }
 }
 function loadState(){
   try{
@@ -708,13 +734,43 @@ function computePatrocinio(scen){
   });
   return {nCotas, contratado, pipeline, esperado, nominal};
 }
+// margem liquida por unidade de uma bebida/ativacao: preco de venda menos custo do produto,
+// mao de obra operacional (pra servir) e taxa de cartao sobre o preco de venda
+function bebidaCalc(b){
+  const custoUnit = Number(b.custoUnit)||0;
+  const precoVenda = Number(b.precoVenda)||0;
+  const custoOperacionalUnit = Number(b.custoOperacionalUnit)||0;
+  const taxaCartaoPct = Number(b.taxaCartaoPct)||0;
+  const qtdPorPessoa = Number(b.qtdPorPessoa)||0;
+  const taxaCartaoValor = precoVenda*taxaCartaoPct;
+  const margemUnit = precoVenda - custoUnit - custoOperacionalUnit - taxaCartaoValor;
+  const margemPct = precoVenda ? margemUnit/precoVenda : 0;
+  return {
+    custoUnit, precoVenda, custoOperacionalUnit, taxaCartaoPct, qtdPorPessoa,
+    taxaCartaoValor, margemUnit, margemPct,
+    receitaPP: precoVenda*qtdPorPessoa, margemPP: margemUnit*qtdPorPessoa,
+  };
+}
+// resumo do catalogo de bebidas de um cenario — usado tanto pela tela quanto pelo motor de calculo
+function computeBebidas(scen){
+  const list = (state.entradas[scen].bebidas)||[];
+  const rows = list.map(b=> Object.assign({}, b, bebidaCalc(b)));
+  const receitaPPTotal = sum(rows.map(r=>r.receitaPP));
+  const margemPPTotal = sum(rows.map(r=>r.margemPP));
+  return {rows, receitaPPTotal, margemPPTotal, ativo: rows.length>0};
+}
+const FIXED_COST_GROUP_KEYS = ['atracoes','estrutura','operacao','marketing','logistica'];
 function computeCustoGroups(scen){
   const e = state.entradas[scen];
   const subAtracoes = sumObj(e.atracoes), subEstrutura = sumObj(e.estrutura), subOperacao = sumOperacao(e.operacao),
         subMarketing = sumObj(e.marketing), subLogistica = sumObj(e.logistica);
+  // categorias extras criadas pelo usuario (alem das 5 padrao) somam juntas aqui — cada uma
+  // continua com seu proprio total na tela, so entram somadas no custo total do cenario
+  const extraGroups = (state.costGroups||[]).filter(g=> !FIXED_COST_GROUP_KEYS.includes(g.key));
+  const subExtra = sum(extraGroups.map(g=> sumObj(e[g.key]||{})));
   // custo direto "fixo": nao inclui taxa sobre ingressos nem open bar (ver computeScenario)
-  const custoDiretos = subAtracoes+subEstrutura+subOperacao+subMarketing+subLogistica+e.outros.despesasAdm;
-  return {subAtracoes, subEstrutura, subOperacao, subMarketing, subLogistica, custoDiretos};
+  const custoDiretos = subAtracoes+subEstrutura+subOperacao+subMarketing+subLogistica+subExtra+e.outros.despesasAdm;
+  return {subAtracoes, subEstrutura, subOperacao, subMarketing, subLogistica, subExtra, extraGroups, custoDiretos};
 }
 function computeScenario(scen, overrides){
   const e = state.entradas[scen];
@@ -743,7 +799,9 @@ function computeScenario(scen, overrides){
   const receitaIngressos = pagantes * v.ticketMedio * ticketFactor;
   const custoTaxaIngressos = receitaIngressos * taxaTotal;
 
-  const margemConsumoPP = e.consumoBruto*(1-e.custoOpConsumoPct);
+  // se houver catalogo detalhado de bebidas cadastrado, ele substitui a estimativa simplificada
+  const beb = computeBebidas(scen);
+  const margemConsumoPP = beb.ativo ? beb.margemPPTotal : e.consumoBruto*(1-e.custoOpConsumoPct);
   const receitaConsumo = margemConsumoPP * pagantes * consumoFactor;
 
   const patrocinio = p.esperado * patroFactor;
@@ -752,7 +810,11 @@ function computeScenario(scen, overrides){
 
   const subAtracoes = g.subAtracoes - e.atracoes.cachePrincipal + cacheOverride;
   const subEstrutura = g.subEstrutura * estruturaFactor;
-  const custoDiretos = subAtracoes + subEstrutura + g.subOperacao + g.subMarketing + g.subLogistica + e.outros.despesasAdm;
+  // restituicoes de caixa ja aprovadas (aba Restituição de Caixa) sao custo real ja incorrido —
+  // entram igual nos 3 cenarios, junto com despesas administrativas (nao vem do state salvo:
+  // o app hospedado busca e injeta este numero sempre fresco a cada carregamento, ver PmoFrame.js)
+  const restituicoesAprovadas = Number(state.restituicoesAprovadas)||0;
+  const custoDiretos = subAtracoes + subEstrutura + g.subOperacao + g.subMarketing + g.subLogistica + g.subExtra + e.outros.despesasAdm + restituicoesAprovadas;
   const openBar = e.outros.openBarValor * e.capMax;
   const tributosValor = (e.outros.tributosReceita + e.outros.taxasBancarias + e.outros.comissoes) * receitaTotal;
   // base sujeita a contingencia: custos fixos + taxa sobre ingressos (igual ao modelo original)
@@ -781,12 +843,13 @@ function computeScenario(scen, overrides){
 
   return {
     scen, pagantes, publicoTotal, ocupacao, ticketMedio: v.ticketMedio*ticketFactor,
-    receitaIngressos, receitaConsumo, patrocinio, outras, receitaTotal,
+    receitaIngressos, receitaConsumo, margemConsumoPP, bebidasAtivas: beb.ativo, patrocinio, outras, receitaTotal,
     custoTotal, resultado, margem, receitaPP, custoPP, contribPP, beSem, beCom, pctCapBe, mseg,
     patroMin, cobertura, status, classif,
     patroContratado: p.contratado, patroPipeline: p.pipeline, patroNominal: p.nominal, nCotas: p.nCotas,
     custoDiretos, subAtracoes, subEstrutura, subOperacao: g.subOperacao, subMarketing: g.subMarketing,
-    subLogistica: g.subLogistica, tributosValor, contingenciaValor, despesasAdm: e.outros.despesasAdm,
+    subLogistica: g.subLogistica, subExtra: g.subExtra, extraGroups: g.extraGroups,
+    tributosValor, contingenciaValor, despesasAdm: e.outros.despesasAdm, restituicoesAprovadas,
     custoTaxaIngressos, openBar, beBase, cachePrincipal: e.atracoes.cachePrincipal, capMax: e.capMax,
   };
 }
@@ -818,10 +881,21 @@ function computedCostValue(c){
   if(c.path[1]==='openBar') return base.openBar;
   return 0;
 }
+// categoria de Orçamento x Real de um grupo de custo: usa o mapeamento fixo quando existe;
+// para categorias novas criadas pelo usuario, cada uma vira sua propria categoria de OxR (pelo nome dela)
+function oxrCatForGroupKey(key){
+  if(GROUP_DEFAULT_OXR_CAT[key]) return GROUP_DEFAULT_OXR_CAT[key];
+  const g = (state.costGroups||[]).find(g=>g.key===key);
+  return g ? g.label : 'Outros';
+}
+function oxrCategories(){
+  const extra = (state.costGroups||[]).filter(g=> !FIXED_COST_GROUP_KEYS.includes(g.key)).map(g=>g.label);
+  return OXR_CATS.concat(extra.filter(l=> !OXR_CATS.includes(l)));
+}
 function computeOxR(){
   const cs = computeCustosSummary();
-  return OXR_CATS.map(cat=>{
-    const rows = cs.rows.filter(r=> (OXR_GROUP[r.path.join('.')] || GROUP_DEFAULT_OXR_CAT[r.path[0]]) === cat);
+  return oxrCategories().map(cat=>{
+    const rows = cs.rows.filter(r=> (OXR_GROUP[r.path.join('.')] || oxrCatForGroupKey(r.path[0])) === cat);
     const orcInicial = sum(rows.map(r=>r.orcInicial));
     const orcRevisado = sum(rows.map(r=>r.orcAprovado));
     const contratado = sum(rows.map(r=>r.contratado));
@@ -913,7 +987,7 @@ function computeFluxoCaixa(){
   const cs = computeScenario(scen);
   const entAnnual = {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras};
   const saiAnnual = {subAtracoes:cs.subAtracoes, subEstrutura:cs.subEstrutura, subOperacao:cs.subOperacao, subMarketing:cs.subMarketing,
-    subLogistica:cs.subLogistica, despesasAdm:cs.despesasAdm, custoTaxaIngressos:cs.custoTaxaIngressos, openBar:cs.openBar, contingenciaValor:cs.contingenciaValor};
+    subLogistica:cs.subLogistica, subExtra:cs.subExtra, despesasAdm:cs.despesasAdm, custoTaxaIngressos:cs.custoTaxaIngressos, openBar:cs.openBar, contingenciaValor:cs.contingenciaValor, restituicoesAprovadas:cs.restituicoesAprovadas};
   const entMonthly = FC_ENT_KEYS.map(k=> state.fluxo.pctEnt[k].map(p=>p*entAnnual[k]));
   const saiMonthly = FC_SAI_KEYS.map(k=> state.fluxo.pctSai[k].map(p=>p*saiAnnual[k]));
   const totalEnt = MESES.map((_,m)=> sum(entMonthly.map(row=>row[m])));
@@ -931,7 +1005,7 @@ function capGiroFor(scen){
   const cs = computeScenario(scen);
   const entAnnual = {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras};
   const saiAnnual = {subAtracoes:cs.subAtracoes, subEstrutura:cs.subEstrutura, subOperacao:cs.subOperacao, subMarketing:cs.subMarketing,
-    subLogistica:cs.subLogistica, despesasAdm:cs.despesasAdm, custoTaxaIngressos:cs.custoTaxaIngressos, openBar:cs.openBar, contingenciaValor:cs.contingenciaValor};
+    subLogistica:cs.subLogistica, subExtra:cs.subExtra, despesasAdm:cs.despesasAdm, custoTaxaIngressos:cs.custoTaxaIngressos, openBar:cs.openBar, contingenciaValor:cs.contingenciaValor, restituicoesAprovadas:cs.restituicoesAprovadas};
   const entMonthly = FC_ENT_KEYS.map(k=> state.fluxo.pctEnt[k].map(p=>p*entAnnual[k]));
   const saiMonthly = FC_SAI_KEYS.map(k=> state.fluxo.pctSai[k].map(p=>p*saiAnnual[k]));
   const totalEnt = MESES.map((_,m)=> sum(entMonthly.map(row=>row[m])));
@@ -1084,6 +1158,12 @@ function onGenericBind(e){
     const item = state.itemCatalog[gk] && state.itemCatalog[gk][idx];
     if(item) state.custos.forEach(c=>{ if(c.path[0]===gk && c.path[1]===item.key) c.subcategoria = item.label; });
   }
+  // renomear uma categoria de custo tambem atualiza o nome espelhado em cada lançamento
+  // dela no registro PMO (aba Custos), senao o agrupamento da tabela fica com nomes divergentes
+  if(path[0]==='costGroups' && path[2]==='label'){
+    const g = state.costGroups[Number(path[1])];
+    if(g) state.custos.forEach(c=>{ if(c.path[0]===g.key) c.grupo = g.label; });
+  }
   saveState();
   if(el.dataset.norerender) return;
   const preserveFocus = el.id || null;
@@ -1159,6 +1239,30 @@ function badge(status){
 function scenPills(groupPath, current, extra){
   return `<div class="pillrow">${SCEN.map(s=>`<button class="pill ${s===current?'active':''}" data-scen="${s}" data-tab="${groupPath}:${s}">${SCEN_LABEL[s]}</button>`).join('')}${extra||''}</div>`;
 }
+// botao "replicar de outro cenario" — copia TODOS os valores de um cenario pro atual
+// (usado em Entradas PMO, Vendas e Patrocinios). So aparece se ha pra onde copiar.
+function replicateControl(domain, currentScen){
+  const others = SCEN.filter(s=>s!==currentScen);
+  if(READONLY || !others.length) return '';
+  return `<span class="replicate-ctrl">
+    <span class="replicate-lbl">Replicar de</span>
+    <select id="replicateFrom_${domain}" class="replicate-select">
+      ${others.map(s=>`<option value="${s}">${SCEN_LABEL[s]}</option>`).join('')}
+    </select>
+    <button class="btn small" data-action="replicateScenario:${domain}:${currentScen}" data-confirm="Confirmar — substitui ${SCEN_LABEL[currentScen]}">📋 Replicar para ${SCEN_LABEL[currentScen]}</button>
+  </span>`;
+}
+ACTIONS.replicateScenario = (domain, toScen)=>{
+  const sel = document.getElementById('replicateFrom_'+domain);
+  const fromScen = sel ? sel.value : null;
+  if(!fromScen || fromScen===toScen) return;
+  const clone = (obj)=> JSON.parse(JSON.stringify(obj));
+  if(domain==='entradas') state.entradas[toScen] = clone(state.entradas[fromScen]);
+  else if(domain==='vendas') state.vendas[toScen] = clone(state.vendas[fromScen]);
+  else if(domain==='patrocinios') state.patrocinios[toScen] = clone(state.patrocinios[fromScen]);
+  else return;
+  saveState(); render();
+};
 function esc(s){ return String(s).replace(/"/g,'&quot;'); }
 function infoIcon(text){
   return `<span class="info-ic" tabindex="0" role="note" aria-label="${esc(text)}">i<span class="tip">${text}</span></span>`;
@@ -1401,17 +1505,19 @@ function costItemRowOperacao(scen, idx, item){
   </div>`;
 }
 function costGroupBlock(scen, group){
-  const catalog = state.itemCatalog[group.key];
+  const catalog = state.itemCatalog[group.key] || [];
   const isOp = group.key==='operacao';
-  const total = isOp ? sumOperacao(state.entradas[scen].operacao) : sumObj(state.entradas[scen][group.key]);
+  const total = isOp ? sumOperacao(state.entradas[scen].operacao) : sumObj(state.entradas[scen][group.key]||{});
   const header = isOp ? `<div class="costitem-row costitem-row-op costitem-head">
       <span>Item</span><span>Quantidade</span><span>Custo unitário</span><span>Total</span><span></span>
     </div>` : '';
   const rows = catalog.map((item,idx)=> isOp ? costItemRowOperacao(scen,idx,item) : costItemRow(scen, group.key, idx, item)).join('');
+  const gIdx = state.costGroups.findIndex(g=>g.key===group.key);
+  const nameId = mkId(`costGroups.${gIdx}.label`);
   return `<div class="card" style="padding:16px 18px; margin-bottom:14px;">
-    <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px;">
-      <h3 style="margin:0; font-size:14.5px;">${group.label}</h3>
-      <span class="mono" style="font-weight:700; color:var(--accent-strong);">${fmtCur(total)}</span>
+    <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; gap:10px;">
+      <input id="${nameId}" type="text" class="costgroup-name" data-bind="costGroups.${gIdx}.label" value="${esc(group.label)}" style="font-weight:700; font-size:14.5px; border:none; background:transparent; padding:2px 4px; flex:1 1 auto; min-width:0;">
+      <span class="mono" style="font-weight:700; color:var(--accent-strong); white-space:nowrap;">${fmtCur(total)}</span>
     </div>
     <div class="costitems">${header}${rows}</div>
     <button class="btn small" style="margin-top:10px;" data-action="addCostItem:${group.key}">+ Adicionar item em ${group.label}</button>
@@ -1475,9 +1581,34 @@ VIEWS.entradas = function(){
       </div>
     </div>`;
   } else if(sec==='consumo'){
-    body = `<div class="grid2">
+    const bebCalc = computeBebidas(scen);
+    const bebRows = bebCalc.rows.map((r,i)=>`<tr>
+      <td>${tblInput(`entradas.${scen}.bebidas.${i}.nome`, r.nome)}</td>
+      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.custoUnit`, r.custoUnit, {type:'number', step:'0.1', cls:'num'})}</td>
+      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.precoVenda`, r.precoVenda, {type:'number', step:'0.1', cls:'num'})}</td>
+      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.custoOperacionalUnit`, r.custoOperacionalUnit, {type:'number', step:'0.1', cls:'num'})}</td>
+      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.taxaCartaoPct`, Math.round(r.taxaCartaoPct*1000)/10, {type:'number', step:'0.1', cls:'num', kind:'pct'})}</td>
+      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.qtdPorPessoa`, r.qtdPorPessoa, {type:'number', step:'0.1', cls:'num'})}</td>
+      <td class="num mono">${fmtCur2(r.margemUnit)}</td>
+      <td class="num mono">${fmtPct(r.margemPct)}</td>
+      <td class="num mono">${fmtCur2(r.margemPP)}</td>
+      <td><button class="rm" data-action="rmBebida:${scen}:${i}" title="Remover bebida/ativação">✕</button></td>
+    </tr>`).join('');
+    body = `<div class="section" style="margin:0 0 16px;">
+      <h3 style="margin:0 0 6px; font-size:14.5px;">Catálogo detalhado de bebidas/ativações</h3>
+      <div class="hint">Cadastre cada tipo de bebida (ou ativação de consumo) com custo do produto, preço de venda, mão de obra operacional para servir e taxa de cartão — a margem líquida por pessoa é calculada automaticamente. Ao cadastrar pelo menos 1 item aqui, ele substitui a estimativa simplificada abaixo.</div>
+      <div class="tablewrap" style="margin-top:10px;">
+        <table>
+          <thead><tr><th>Bebida/ativação</th><th class="num">Custo unit. (R$)</th><th class="num">Preço venda (R$)</th><th class="num">Mão de obra/unid. (R$)</th><th class="num">Taxa cartão (%)</th><th class="num">Qtd./pessoa</th><th class="num">Margem unit.</th><th class="num">Margem %</th><th class="num">Margem/pessoa</th><th></th></tr></thead>
+          <tbody>${bebRows || `<tr><td colspan="10" class="hint">Nenhuma bebida cadastrada — usando a estimativa simplificada abaixo.</td></tr>`}</tbody>
+          ${bebCalc.rows.length ? `<tfoot><tr><td colspan="8">Total</td><td class="num mono">${fmtCur2(bebCalc.margemPPTotal)}</td><td></td></tr></tfoot>` : ''}
+        </table>
+      </div>
+      <button class="btn small" style="margin-top:10px;" data-action="addBebida:${scen}">+ Adicionar bebida/ativação</button>
+    </div>
+    <div class="grid2">
       <div class="card" style="padding:16px 18px;">
-        <h3 style="margin:0 0 10px; font-size:14.5px;">Consumo / bar / ativações</h3>
+        <h3 style="margin:0 0 10px; font-size:14.5px;">Estimativa simplificada${bebCalc.ativo ? ' <span class="hint">(inativa — há bebidas cadastradas acima)</span>' : ''}</h3>
         <div class="gridN">
           ${fld('Consumo médio bruto por pessoa', `entradas.${scen}.consumoBruto`, {kind:'currency', step:'0.5'})}
           ${fld('Custo operacional do consumo', `entradas.${scen}.custoOpConsumoPct`, {kind:'pct'})}
@@ -1485,14 +1616,15 @@ VIEWS.entradas = function(){
         </div>
       </div>
       <div class="card" style="padding:16px 18px;">
-        <h3 style="margin:0 0 10px; font-size:14.5px;">Calculado</h3>
-        ${readonlyRow('Margem líquida por pessoa', fmtCur2(e.consumoBruto*(1-e.custoOpConsumoPct)))}
+        <h3 style="margin:0 0 10px; font-size:14.5px;">Calculado (usado no cenário)</h3>
+        ${readonlyRow('Margem líquida por pessoa', fmtCur2(cs.margemConsumoPP))}
         ${readonlyRow('Receita líquida de consumo/ativações', fmtCur(cs.receitaConsumo))}
       </div>
     </div>`;
   } else if(sec==='custos'){
-    body = `<div class="hint" style="margin-bottom:12px;">Clique no nome de um item para renomeá-lo, use "+ Adicionar item" para criar uma nova linha, ou ✕ para excluir — vale para os 3 cenários e não altera nenhum valor já lançado nos demais itens.</div>
-      ${COST_GROUPS.map(g=>costGroupBlock(scen,g)).join('')}`;
+    body = `<div class="hint" style="margin-bottom:12px;">Clique no nome de uma categoria ou de um item para renomeá-lo, use "+ Adicionar item" para criar uma nova linha, ou ✕ para excluir — vale para os 3 cenários e não altera nenhum valor já lançado nos demais itens.</div>
+      ${state.costGroups.map(g=>costGroupBlock(scen,g)).join('')}
+      <button class="btn small" data-action="addCostGroup" style="margin-bottom:14px;">+ Nova categoria de custo</button>`;
   } else if(sec==='outros'){
     body = `<div class="grid2">
       <div class="card" style="padding:16px 18px;">
@@ -1514,23 +1646,42 @@ VIEWS.entradas = function(){
         ${readonlyRow('Tributos/taxas/comissões (valor)', fmtCur(cs.tributosValor))}
         ${readonlyRow('Contingência (valor)', fmtCur(cs.contingenciaValor))}
         ${readonlyRow('Open bar (valor)', fmtCur(cs.openBar))}
+        ${readonlyRow('Restituições de caixa aprovadas', fmtCur(cs.restituicoesAprovadas))}
         ${readonlyRow('CUSTO TOTAL DO CENÁRIO', fmtCur(cs.custoTotal))}
+        ${cs.restituicoesAprovadas ? `<div class="hint" style="margin-top:8px;">Vem da aba <strong>💸 Restituição de Caixa</strong> (topo do app) — soma de todos os lançamentos já aprovados por um administrador para este evento.</div>` : ''}
       </div>
     </div>`;
   }
 
   return `
   <div class="topline"><div><h1>Entradas PMO${infoIcon('Aqui você alimenta as premissas de cada cenário: capacidade do evento, taxas de ingresso, consumo, e todos os custos (atrações, estrutura, operação, marketing, logística e outros). É a base que alimenta o Dashboard, Break-even, Fluxo de Caixa e todo o resto do app.')}</h1><div class="desc">Fonte única das premissas de evento, consumo e custos — por cenário. Detalhe de ingressos e patrocínio fica nas abas dedicadas.</div></div></div>
-  ${scenPills('ui.scenTab.entradas', scen)}
+  ${scenPills('ui.scenTab.entradas', scen, replicateControl('entradas', scen))}
   <div class="pillrow" style="margin-top:-6px;">
     ${SECTIONS.map(([id,label])=>`<button class="pill ${id===sec?'active':''}" data-action="setEntradasSection:${id}">${label}</button>`).join('')}
   </div>
   ${body}`;
 };
 ACTIONS.setEntradasSection = (id)=>{ state.ui.entradasSection = id; saveState(); render(); };
+ACTIONS.addBebida = (scen)=>{
+  state.entradas[scen].bebidas.push({id:uid(), nome:'Nova bebida', custoUnit:0, precoVenda:0, custoOperacionalUnit:0, taxaCartaoPct:0, qtdPorPessoa:0});
+  saveState(); render();
+};
+ACTIONS.rmBebida = (scen, idx)=>{
+  state.entradas[scen].bebidas.splice(Number(idx),1);
+  saveState(); render();
+};
+// cria uma categoria de custo nova (alem das 5 padrao) — cada evento pode ter suas proprias
+// categorias (ex.: "Camisas", "Transporte da bateria"); admin pode renomear depois clicando no titulo
+ACTIONS.addCostGroup = ()=>{
+  const key = 'grupo_'+uid();
+  state.costGroups.push({key, label:'Nova categoria'});
+  state.itemCatalog[key] = [];
+  SCEN.forEach(s=>{ state.entradas[s][key] = {}; });
+  saveState(); render();
+};
 // insere um novo item de custo no catalogo (afeta os 3 cenarios, com valor 0 — nao mexe no que ja foi lancado)
 ACTIONS.addCostItem = (groupKey)=>{
-  const group = COST_GROUPS.find(g=>g.key===groupKey);
+  const group = state.costGroups.find(g=>g.key===groupKey);
   if(!group) return;
   const key = 'item_'+uid();
   state.itemCatalog[groupKey].push({key, label:'Novo item'});
@@ -1578,7 +1729,7 @@ VIEWS.vendas = function(){
 
   return `
   <div class="topline"><div><h1>Vendas de ingressos${infoIcon('Cadastre os lotes de venda de cada cenário. A quantidade total já vem travada nos pagantes calculados em Entradas PMO (capacidade × conversão) — aqui você só define o preço e o % mix de cada lote, e a quantidade de ingressos é gerada automaticamente. Mais abaixo, registre quantos ingressos já foram vendidos de verdade.')}</h1><div class="desc">Fonte única dos lotes de ingresso por cenário, mais o acompanhamento de vendas realizadas.</div></div></div>
-  ${scenPills('ui.scenTab.vendas', scen)}
+  ${scenPills('ui.scenTab.vendas', scen, replicateControl('vendas', scen))}
 
   <div class="section">
     <h2>Plano de lotes — ${SCEN_LABEL[scen]}</h2>
@@ -1658,7 +1809,7 @@ VIEWS.patrocinios = function(){
     <div class="gridN">${stageRows}</div>
   </div>
 
-  ${scenPills('ui.scenTab.patrocinios', scen)}
+  ${scenPills('ui.scenTab.patrocinios', scen, replicateControl('patrocinios', scen))}
   <div class="tablewrap">
     <table>
       <thead><tr><th>Cota</th><th class="num">Valor unitário</th><th class="num">Qtd. alvo</th><th>Estágio</th><th class="num">Prob. %</th><th class="num">Receita alvo</th><th class="num">Receita ponderada</th><th></th></tr></thead>

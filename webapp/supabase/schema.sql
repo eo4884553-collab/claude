@@ -141,3 +141,103 @@ $$;
 insert into public.project_state (id, data)
   values ('feijoada-bloco', '{}'::jsonb)
   on conflict (id) do nothing;
+
+insert into public.project_state (id, data)
+  values ('bateria-piquinzada', '{}'::jsonb)
+  on conflict (id) do nothing;
+
+-- ============================================================
+-- 7) RESTITUIÇÃO DE CAIXA (compras do próprio bolso, com comprovante)
+-- ============================================================
+-- Qualquer usuário aprovado (admin OU convidado) pode lançar uma compra que fez do
+-- próprio bolso e anexar o comprovante. Todo mundo aprovado pode VER os lançamentos
+-- (transparência), mas só administrador aprova/rejeita — sempre pela função
+-- admin_review_reimbursement() abaixo, nunca por UPDATE direto do cliente.
+create table if not exists public.reimbursements (
+  id uuid primary key default gen_random_uuid(),
+  project_id text not null references public.project_state(id),
+  user_id uuid not null references auth.users(id),
+  user_email text not null,
+  descricao text not null,
+  valor numeric not null check (valor > 0),
+  data_compra date,
+  comprovante_path text,
+  status text not null default 'pendente' check (status in ('pendente','aprovado','rejeitado')),
+  obs_admin text,
+  created_at timestamptz not null default now(),
+  reviewed_by uuid references auth.users(id),
+  reviewed_at timestamptz
+);
+
+alter table public.reimbursements enable row level security;
+
+drop policy if exists "reimb_select_approved" on public.reimbursements;
+create policy "reimb_select_approved" on public.reimbursements
+  for select using (
+    exists (select 1 from public.profiles p where p.id = auth.uid() and p.status = 'approved')
+  );
+
+-- qualquer aprovado cria SEU PRÓPRIO lançamento, sempre começando como 'pendente'
+-- (o valor de status que o cliente mandar é ignorado por causa do "with check" abaixo)
+drop policy if exists "reimb_insert_approved" on public.reimbursements;
+create policy "reimb_insert_approved" on public.reimbursements
+  for insert with check (
+    user_id = auth.uid() and status = 'pendente'
+    and exists (select 1 from public.profiles p where p.id = auth.uid() and p.status = 'approved')
+  );
+
+-- o próprio autor pode excluir enquanto está pendente (corrigir engano); admin pode excluir qualquer um
+drop policy if exists "reimb_delete_owner_pending_or_admin" on public.reimbursements;
+create policy "reimb_delete_owner_pending_or_admin" on public.reimbursements
+  for delete using (
+    (user_id = auth.uid() and status = 'pendente')
+    or exists (select 1 from public.profiles p where p.id = auth.uid() and p.status = 'approved' and p.role = 'admin')
+  );
+
+-- sem policy de UPDATE — aprovar/rejeitar é sempre por esta função, que confere admin no servidor
+create or replace function public.admin_review_reimbursement(
+  target_id uuid,
+  new_status text,
+  admin_obs text default null
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'admin' and status = 'approved'
+  ) then
+    raise exception 'Apenas administradores aprovados podem revisar restituições.';
+  end if;
+
+  if new_status not in ('pendente','aprovado','rejeitado') then
+    raise exception 'status inválido';
+  end if;
+
+  update public.reimbursements
+    set status = new_status, obs_admin = admin_obs, reviewed_by = auth.uid(), reviewed_at = now()
+    where id = target_id;
+end;
+$$;
+
+-- bucket de armazenamento dos comprovantes (imagem ou PDF) — privado, só quem está
+-- logado e aprovado no app consegue subir/ver arquivos dele
+insert into storage.buckets (id, name, public)
+  values ('comprovantes', 'comprovantes', false)
+  on conflict (id) do nothing;
+
+drop policy if exists "comprovantes_insert_approved" on storage.objects;
+create policy "comprovantes_insert_approved" on storage.objects
+  for insert with check (
+    bucket_id = 'comprovantes'
+    and exists (select 1 from public.profiles p where p.id = auth.uid() and p.status = 'approved')
+  );
+
+drop policy if exists "comprovantes_select_approved" on storage.objects;
+create policy "comprovantes_select_approved" on storage.objects
+  for select using (
+    bucket_id = 'comprovantes'
+    and exists (select 1 from public.profiles p where p.id = auth.uid() and p.status = 'approved')
+  );
