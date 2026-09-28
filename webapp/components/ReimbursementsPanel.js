@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { PROJECTS } from '../lib/projects';
+import { fetchEffectiveRole } from '../lib/roles';
 
 const wrap = { maxWidth: 920, margin: '0 auto', padding: '28px 20px', fontFamily: "'Public Sans', system-ui, sans-serif" };
 const h1 = { fontFamily: "'Fraunces', serif", fontSize: 24, margin: '0 0 4px', color: '#241220' };
@@ -47,6 +48,13 @@ export default function ReimbursementsPanel({ auth, project, onChangeProject }) 
   const [sending, setSending] = useState(false);
   const [form, setForm] = useState({ descricao: '', valor: '', dataCompra: '', file: null });
   const [obsDraft, setObsDraft] = useState({});
+  const [isAdmin, setIsAdmin] = useState(auth.isAdmin);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchEffectiveRole(project.id, auth.user.id, auth.isAdmin).then((r) => { if (!cancelled) setIsAdmin(r === 'admin'); });
+    return () => { cancelled = true; };
+  }, [project.id, auth.user?.id, auth.isAdmin]);
 
   const load = useCallback(async () => {
     setErr('');
@@ -120,7 +128,6 @@ export default function ReimbursementsPanel({ auth, project, onChangeProject }) 
   const totalAprovado = (rows || []).filter(r => r.status === 'aprovado').reduce((a, r) => a + Number(r.valor || 0), 0);
   const totalPendente = (rows || []).filter(r => r.status === 'pendente').reduce((a, r) => a + Number(r.valor || 0), 0);
   const minhas = (rows || []).filter(r => r.user_id === auth.user.id);
-  const isAdmin = auth.isAdmin;
 
   return (
     <div style={wrap}>

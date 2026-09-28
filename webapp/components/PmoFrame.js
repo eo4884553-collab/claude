@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { PROJECTS } from '../lib/projects';
 import { approvedReimbursementsTotal } from '../lib/reimbursements';
+import { fetchEffectiveRole } from '../lib/roles';
 
 const SEED_MARKER = '/* __PIQUINZADA_STATE_SEED__ */';
 
@@ -35,14 +36,17 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
   const [errMsg, setErrMsg] = useState('');
   const [staleNotice, setStaleNotice] = useState(false);
   const lastLocalWrite = useRef(0);
+  // papel EFETIVO no projeto atual — pode ser diferente do papel global (profiles.role)
+  // se houver uma excecao em project_roles pra este usuario/projeto (ver lib/roles.js)
+  const [role, setRole] = useState(auth.isAdmin ? 'admin' : 'convidado');
+  const roleRef = useRef(role);
+  roleRef.current = role;
 
-  const role = auth.isAdmin ? 'admin' : 'convidado';
-
-  const buildSrcDoc = useCallback((template, dataObj) => {
+  const buildSrcDoc = useCallback((template, dataObj, roleForFrame) => {
     const safeJson = JSON.stringify(dataObj || {}).replace(/</g, '\\u003c');
-    const seedScript = `<\/script><script>window.__PIQUINZADA_ROLE__=${JSON.stringify(role)};window.__PIQUINZADA_STATE__=${safeJson};<\/script><script>`;
+    const seedScript = `<\/script><script>window.__PIQUINZADA_ROLE__=${JSON.stringify(roleForFrame)};window.__PIQUINZADA_STATE__=${safeJson};<\/script><script>`;
     return template.replace(SEED_MARKER, SEED_MARKER + seedScript);
-  }, [role]);
+  }, []);
 
   const mount = useCallback(async () => {
     setStatus('loading'); setErrMsg('');
@@ -52,6 +56,8 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
         if (!res.ok) throw new Error('Não consegui carregar o app (pmo-app-template.html).');
         templateRef.current = await res.text();
       }
+      const effectiveRole = await fetchEffectiveRole(project.id, auth.user.id, auth.isAdmin);
+      setRole(effectiveRole);
       const { data, error } = await supabase.from('project_state').select('data,updated_at').eq('id', project.id).maybeSingle();
       if (error) throw error;
       let seed = (data && data.data && Object.keys(data.data).length) ? data.data : null;
@@ -62,12 +68,12 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
         const total = await approvedReimbursementsTotal(project.id);
         seed = Object.assign({}, seed, { restituicoesAprovadas: total });
       } catch (_) { /* se falhar, o app abre normalmente so sem essa soma (fica 0) */ }
-      const doc = buildSrcDoc(templateRef.current, seed);
+      const doc = buildSrcDoc(templateRef.current, seed, effectiveRole);
       if (iframeRef.current) iframeRef.current.srcdoc = doc;
     } catch (e) {
       setStatus('error'); setErrMsg(e.message || String(e));
     }
-  }, [buildSrcDoc, project.id]);
+  }, [buildSrcDoc, project.id, auth.user?.id, auth.isAdmin]);
 
   // troca de projeto (ou primeira montagem) recarrega os dados certos
   useEffect(() => { mount(); /* eslint-disable-next-line */ }, [project.id]);
@@ -88,7 +94,7 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
       if (!d || typeof d !== 'object') return;
       if (d.type === 'piquinzada:ready') { setStatus('ready'); return; }
       if (d.type === 'piquinzada:save') {
-        if (role !== 'admin') return; // so admin grava — o RLS no banco tambem recusaria, isso e so pra nao gastar uma chamada
+        if (roleRef.current !== 'admin') return; // so admin grava — o RLS no banco tambem recusaria, isso e so pra nao gastar uma chamada
         pendingSave.current = d.state;
         clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(() => { flushSave(pendingSave.current); }, 600);
@@ -96,7 +102,7 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [flushSave, role]);
+  }, [flushSave]);
 
   // realtime: se OUTRO usuario salvar enquanto esta tela esta aberta, avisa em vez de sobrescrever
   // silenciosamente o que esta sendo visto/editado agora

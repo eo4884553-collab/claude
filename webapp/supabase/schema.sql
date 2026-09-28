@@ -241,3 +241,134 @@ create policy "comprovantes_select_approved" on storage.objects
     bucket_id = 'comprovantes'
     and exists (select 1 from public.profiles p where p.id = auth.uid() and p.status = 'approved')
   );
+
+-- ============================================================
+-- 8) ADMINISTRADOR POR PROJETO (admin só num domínio, convidado nos outros)
+-- ============================================================
+-- Por padrão o papel GLOBAL (profiles.role) vale em todos os projetos. Esta
+-- tabela guarda EXCEÇÕES por projeto: se existir uma linha aqui pra
+-- (projeto, usuário), ela manda SÓ NAQUELE projeto, por cima do papel global —
+-- sem mudar o papel do usuário nos outros projetos.
+create table if not exists public.project_roles (
+  project_id text not null references public.project_state(id),
+  user_id uuid not null references auth.users(id),
+  role text not null check (role in ('admin','convidado')),
+  updated_at timestamptz not null default now(),
+  updated_by uuid references auth.users(id),
+  primary key (project_id, user_id)
+);
+
+alter table public.project_roles enable row level security;
+
+-- qualquer aprovado le (precisa pra calcular o proprio papel efetivo em cada projeto)
+drop policy if exists "project_roles_select_approved" on public.project_roles;
+create policy "project_roles_select_approved" on public.project_roles
+  for select using (
+    exists (select 1 from public.profiles p where p.id = auth.uid() and p.status = 'approved')
+  );
+
+-- sem policy de insert/update/delete direto — sempre pelas funcoes abaixo
+
+-- papel EFETIVO de um usuario num projeto: exceção em project_roles manda; senão
+-- vale o papel global (profiles.role). Usada pelas policies e pelo app (client).
+create or replace function public.effective_role(target_project text, target_user uuid)
+returns text
+language sql
+stable
+security definer set search_path = public
+as $$
+  select coalesce(
+    (select pr.role from public.project_roles pr where pr.project_id = target_project and pr.user_id = target_user),
+    (select p.role from public.profiles p where p.id = target_user)
+  );
+$$;
+
+-- so quem ja e admin (global OU so daquele projeto) pode criar/trocar uma excecao
+create or replace function public.admin_set_project_role(
+  target_project text,
+  target_user uuid,
+  new_role text
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not exists (select 1 from public.profiles where id = auth.uid() and status = 'approved')
+     or public.effective_role(target_project, auth.uid()) is distinct from 'admin' then
+    raise exception 'Apenas administradores (globais ou deste projeto) podem alterar papéis.';
+  end if;
+
+  if new_role not in ('admin','convidado') then
+    raise exception 'papel inválido';
+  end if;
+
+  insert into public.project_roles (project_id, user_id, role, updated_by)
+    values (target_project, target_user, new_role, auth.uid())
+  on conflict (project_id, user_id) do update
+    set role = excluded.role, updated_at = now(), updated_by = excluded.updated_by;
+end;
+$$;
+
+-- remove a excecao (o usuario volta a usar o papel global nesse projeto)
+create or replace function public.admin_clear_project_role(
+  target_project text,
+  target_user uuid
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not exists (select 1 from public.profiles where id = auth.uid() and status = 'approved')
+     or public.effective_role(target_project, auth.uid()) is distinct from 'admin' then
+    raise exception 'Apenas administradores (globais ou deste projeto) podem alterar papéis.';
+  end if;
+
+  delete from public.project_roles where project_id = target_project and user_id = target_user;
+end;
+$$;
+
+-- a partir daqui, "e admin" pra gravar em project_state e revisar restituicoes
+-- passa a considerar o papel POR PROJETO (com fallback pro papel global)
+
+drop policy if exists "project_state_update_admin" on public.project_state;
+create policy "project_state_update_admin" on public.project_state
+  for update using (
+    public.effective_role(id, auth.uid()) = 'admin'
+  );
+
+drop policy if exists "reimb_delete_owner_pending_or_admin" on public.reimbursements;
+create policy "reimb_delete_owner_pending_or_admin" on public.reimbursements
+  for delete using (
+    (user_id = auth.uid() and status = 'pendente')
+    or public.effective_role(project_id, auth.uid()) = 'admin'
+  );
+
+create or replace function public.admin_review_reimbursement(
+  target_id uuid,
+  new_status text,
+  admin_obs text default null
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  target_project text;
+begin
+  select project_id into target_project from public.reimbursements where id = target_id;
+
+  if target_project is null or public.effective_role(target_project, auth.uid()) is distinct from 'admin' then
+    raise exception 'Apenas administradores (globais ou deste projeto) podem revisar restituições.';
+  end if;
+
+  if new_status not in ('pendente','aprovado','rejeitado') then
+    raise exception 'status inválido';
+  end if;
+
+  update public.reimbursements
+    set status = new_status, obs_admin = admin_obs, reviewed_by = auth.uid(), reviewed_at = now()
+    where id = target_id;
+end;
+$$;
