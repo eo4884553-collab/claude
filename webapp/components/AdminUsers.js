@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { PROJECTS } from '../lib/projects';
+import ProjectRolesSection from './ProjectRolesSection';
 
 const wrap = { maxWidth: 760, margin: '0 auto', padding: '28px 20px', fontFamily: "'Public Sans', system-ui, sans-serif" };
 const h1 = { fontFamily: "'Fraunces', serif", fontSize: 24, margin: '0 0 4px', color: '#241220' };
@@ -84,6 +86,9 @@ export default function AdminUsers({ myId }) {
           </tbody>
         </table>
       )}
+
+      <h1 style={{ ...h1, marginTop: 40 }}>Administradores por projeto</h1>
+      <ProjectRolesSection projects={PROJECTS} myId={myId} />
     </div>
   );
 }
