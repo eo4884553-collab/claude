@@ -516,27 +516,32 @@ const RISCOS_DEFAULT = [
 const FC_ENT_LABELS = ['Ingressos','Patrocínios','Bar / Ativações','Outras receitas'];
 const FC_ENT_KEYS = ['receitaIngressos','patrocinio','receitaConsumo','outras'];
 const FC_ENT_DEFAULT_PCT = [
-  [0,5,10,10,10,5,5,5,10,15,15,10],
-  [5,10,15,15,10,5,5,5,10,10,5,5],
-  [0,0,0,0,0,0,0,0,0,0,0,100],
-  [0,0,0,0,0,0,0,0,0,0,50,50],
+  [0,5,10,10,10,5,5,5,10,15,15,10, 0,0,0],
+  [5,10,15,15,10,5,5,5,10,10,5,5, 0,0,0],
+  [0,0,0,0,0,0,0,0,0,0,0,100, 0,0,0],
+  [0,0,0,0,0,0,0,0,0,0,50,50, 0,0,0],
 ];
 const FC_SAI_LABELS = ['Atrações (cachês)','Estrutura','Operação (produção/segurança/licenças)','Marketing','Logística','Categorias extras','Administrativo','Taxas sobre ingressos','Open bar','Contingência','Restituições de caixa aprovadas'];
 const FC_SAI_KEYS = ['subAtracoes','subEstrutura','subOperacao','subMarketing','subLogistica','subExtra','despesasAdm','custoTaxaIngressos','openBar','contingenciaValor','restituicoesAprovadas'];
+// os ultimos 3 meses (ver MESES) sao PÓS-evento — comeca tudo zerado neles; quem tiver
+// fornecedor pago depois do evento redistribui manualmente o % dessa linha pra la
 const FC_SAI_DEFAULT_PCT = [
-  [0,20,0,0,0,0,0,0,0,0,30,50],
-  [0,0,0,0,0,0,0,0,10,20,30,40],
-  [0,0,0,0,0,0,0,0,5,15,30,50],
-  [5,5,5,5,10,10,10,10,10,10,10,10],
-  [0,0,0,0,0,0,0,0,10,20,30,40],
-  [5,5,5,5,10,10,10,10,10,10,10,10],
-  [8,8,8,8,9,9,9,9,9,8,8,7],
-  [0,5,10,10,10,5,5,5,10,15,15,10],
-  [0,0,0,0,0,0,0,0,0,0,30,70],
-  [0,0,0,0,0,0,0,0,0,20,30,50],
-  [9,9,9,9,8,8,8,8,8,8,8,8],
+  [0,20,0,0,0,0,0,0,0,0,30,50, 0,0,0],
+  [0,0,0,0,0,0,0,0,10,20,30,40, 0,0,0],
+  [0,0,0,0,0,0,0,0,5,15,30,50, 0,0,0],
+  [5,5,5,5,10,10,10,10,10,10,10,10, 0,0,0],
+  [0,0,0,0,0,0,0,0,10,20,30,40, 0,0,0],
+  [5,5,5,5,10,10,10,10,10,10,10,10, 0,0,0],
+  [8,8,8,8,9,9,9,9,9,8,8,7, 0,0,0],
+  [0,5,10,10,10,5,5,5,10,15,15,10, 0,0,0],
+  [0,0,0,0,0,0,0,0,0,0,30,70, 0,0,0],
+  [0,0,0,0,0,0,0,0,0,20,30,50, 0,0,0],
+  [9,9,9,9,8,8,8,8,8,8,8,8, 0,0,0],
 ];
-const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+// 12 meses de preparação + 3 meses PÓS-evento (fornecedores/restituições pagos depois
+// da conclusão) — o mes 12 ("Dez") e o mes do evento; ajuste o % de cada linha conforme
+// o calendario real do seu evento
+const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez','Jan (pós)','Fev (pós)','Mar (pós)'];
 
 /* ---------------- state ---------------- */
 function freshState(){
@@ -618,14 +623,21 @@ function migrateState(){
     // catalogo detalhado de bebidas — estados salvos antes disso nao tem essa lista ainda
     if(state.entradas && state.entradas[scen] && !state.entradas[scen].bebidas) state.entradas[scen].bebidas = [];
   });
-  // Fluxo de Caixa: nova linha "Categorias extras" (soma das categorias de custo criadas pelo
-  // usuario) — estados salvos antes disso nao tem essa chave dentro de fluxo.pctSai
-  if(state.fluxo && state.fluxo.pctSai && !state.fluxo.pctSai.subExtra){
-    state.fluxo.pctSai.subExtra = MESES.map(()=>0);
-  }
-  // Fluxo de Caixa: nova linha "Restituições de caixa aprovadas"
-  if(state.fluxo && state.fluxo.pctSai && !state.fluxo.pctSai.restituicoesAprovadas){
-    state.fluxo.pctSai.restituicoesAprovadas = FC_SAI_DEFAULT_PCT[FC_SAI_KEYS.indexOf('restituicoesAprovadas')].map(x=>x/100);
+  // Fluxo de Caixa: cada linha (entrada ou saida) precisa de 1 valor por mes em MESES.
+  // Sempre que MESES ganha uma linha nova (ex.: "Restituições de caixa aprovadas") ou
+  // fica mais longo (ex.: meses extras pos-evento), estados salvos antes disso ficam
+  // faltando essa chave ou mais curtos — completa com 0 (nunca mexe no que ja tem valor).
+  if(state.fluxo){
+    if(!state.fluxo.pctEnt) state.fluxo.pctEnt = {};
+    if(!state.fluxo.pctSai) state.fluxo.pctSai = {};
+    FC_ENT_KEYS.forEach((k,i)=>{
+      if(!state.fluxo.pctEnt[k]) state.fluxo.pctEnt[k] = FC_ENT_DEFAULT_PCT[i].map(x=>x/100);
+      while(state.fluxo.pctEnt[k].length < MESES.length) state.fluxo.pctEnt[k].push(0);
+    });
+    FC_SAI_KEYS.forEach((k,i)=>{
+      if(!state.fluxo.pctSai[k]) state.fluxo.pctSai[k] = FC_SAI_DEFAULT_PCT[i].map(x=>x/100);
+      while(state.fluxo.pctSai[k].length < MESES.length) state.fluxo.pctSai[k].push(0);
+    });
   }
 }
 function loadState(){
