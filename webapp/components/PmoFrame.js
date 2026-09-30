@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import { PROJECTS } from '../lib/projects';
 import { approvedReimbursementsTotal } from '../lib/reimbursements';
 import { fetchEffectiveRole } from '../lib/roles';
+import { fetchSharedCashBalance, setSharedCashSaldoInicial } from '../lib/cash';
 
 const SEED_MARKER = '/* __PIQUINZADA_STATE_SEED__ */';
 
@@ -44,9 +45,9 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
 
   const buildSrcDoc = useCallback((template, dataObj, roleForFrame) => {
     const safeJson = JSON.stringify(dataObj || {}).replace(/</g, '\\u003c');
-    const seedScript = `<\/script><script>window.__PIQUINZADA_ROLE__=${JSON.stringify(roleForFrame)};window.__PIQUINZADA_STATE__=${safeJson};<\/script><script>`;
+    const seedScript = `<\/script><script>window.__PIQUINZADA_ROLE__=${JSON.stringify(roleForFrame)};window.__PIQUINZADA_PROJECT_ID__=${JSON.stringify(project.id)};window.__PIQUINZADA_STATE__=${safeJson};<\/script><script>`;
     return template.replace(SEED_MARKER, SEED_MARKER + seedScript);
-  }, []);
+  }, [project.id]);
 
   const mount = useCallback(async () => {
     setStatus('loading'); setErrMsg('');
@@ -68,6 +69,20 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
         const total = await approvedReimbursementsTotal(project.id);
         seed = Object.assign({}, seed, { restituicoesAprovadas: total });
       } catch (_) { /* se falhar, o app abre normalmente so sem essa soma (fica 0) */ }
+      // saldo de caixa REAL, compartilhado entre todos os domínios — busca sempre fresco
+      // (nunca fica gravado no project_state), soma dados dos 3 domínios de uma vez
+      try {
+        const cash = await fetchSharedCashBalance();
+        seed = Object.assign({}, seed, {
+          saldoCompartilhado: cash.saldo,
+          saldoCompartilhadoInicial: cash.saldoInicial,
+          saldoCompartilhadoDetalhe: {
+            totalRecebidoIngressos: cash.totalRecebidoIngressos,
+            totalPagoCustos: cash.totalPagoCustos,
+            totalPagoRestituicoes: cash.totalPagoRestituicoes,
+          },
+        });
+      } catch (_) { /* se falhar, o app abre normalmente so sem esse saldo (fica 0) */ }
       const doc = buildSrcDoc(templateRef.current, seed, effectiveRole);
       if (iframeRef.current) iframeRef.current.srcdoc = doc;
     } catch (e) {
@@ -99,10 +114,52 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
         clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(() => { flushSave(pendingSave.current); }, 600);
       }
+      // o motor dentro do iframe nao tem credenciais do Supabase — pede pro pai subir o
+      // comprovante (ou abrir o link assinado de um ja anexado) e devolve o resultado por postMessage
+      if (d.type === 'piquinzada:upload-comprovante') {
+        if (roleRef.current !== 'admin') return;
+        (async () => {
+          try {
+            const file = d.file;
+            const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+            const path = `${project.id}/${d.domain}/${d.itemId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+            const { error } = await supabase.storage.from('comprovantes').upload(path, file);
+            iframeRef.current?.contentWindow?.postMessage({
+              type: 'piquinzada:upload-comprovante-result', domain: d.domain, itemId: d.itemId,
+              ok: !error, path: error ? null : path,
+            }, '*');
+          } catch (_) {
+            iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:upload-comprovante-result', domain: d.domain, itemId: d.itemId, ok: false }, '*');
+          }
+        })();
+      }
+      if (d.type === 'piquinzada:view-comprovante' && d.path) {
+        supabase.storage.from('comprovantes').createSignedUrl(d.path, 300).then(({ data, error }) => {
+          if (!error && data?.signedUrl) window.open(data.signedUrl, '_blank', 'noopener');
+        });
+      }
+      // saldo inicial do caixa compartilhado é um número da ORGANIZAÇÃO inteira (não de 1
+      // projeto) — só admin global mexe; o RLS no banco também recusaria de qualquer forma
+      if (d.type === 'piquinzada:set-saldo-compartilhado') {
+        if (!auth.isAdmin) return;
+        (async () => {
+          try {
+            await setSharedCashSaldoInicial(Number(d.valor) || 0, auth.user.id);
+            const cash = await fetchSharedCashBalance();
+            iframeRef.current?.contentWindow?.postMessage({
+              type: 'piquinzada:saldo-compartilhado-result', ok: true,
+              saldo: cash.saldo, saldoInicial: cash.saldoInicial,
+              detalhe: { totalRecebidoIngressos: cash.totalRecebidoIngressos, totalPagoCustos: cash.totalPagoCustos, totalPagoRestituicoes: cash.totalPagoRestituicoes },
+            }, '*');
+          } catch (e) {
+            iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:saldo-compartilhado-result', ok: false }, '*');
+          }
+        })();
+      }
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [flushSave]);
+  }, [flushSave, project.id, auth.isAdmin, auth.user?.id]);
 
   // realtime: se OUTRO usuario salvar enquanto esta tela esta aberta, avisa em vez de sobrescrever
   // silenciosamente o que esta sendo visto/editado agora

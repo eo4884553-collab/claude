@@ -468,6 +468,7 @@ function patrocinioDefaults(scen){
     qtd: Math.round(qtd*TIER_QTY_MULT[scen]),
     prob: Math.round(prob*TIER_PROB_MULT[scen]*10000)/10000,
     estagio: 'Negociação', contrapartida:contra, perfil,
+    parcelas: [], // pagamento parcelado (valor + data prevista/paga) — ver Fluxo de Caixa
   }));
 }
 const CUSTOS_SPEC = (()=>{
@@ -487,7 +488,7 @@ function custosDefaults(){
     id:uid(), grupo:spec.grupo, path:spec.path, subcategoria:spec.subcategoria, computed:!!spec.computed,
     fornecedor:'', descricao:'',
     orcamentoAprovado:null, valorContratado:0, valorPago:0,
-    dataPrevista:'', dataPagamento:'', status:'Não iniciado',
+    dataPrevista:'', dataPagamento:'', status:'Não iniciado', comprovantePath:'',
     responsavel: (spec.grupo==='Administrativo'||spec.grupo==='Contingência')?'Financeiro':(spec.grupo==='Marketing'?'Marketing':'Produção'), obs:'',
   }));
 }
@@ -513,13 +514,14 @@ const RISCOS_DEFAULT = [
   ['Operação','Acidente de trabalho na montagem/desmontagem','Prazos apertados e equipe terceirizada sem treinamento','Risco jurídico, atraso no cronograma físico',2,4,'Mitigar','Exigir NRs e treinamento de segurança de todos os fornecedores'],
 ].map(r=>({id:uid(), categoria:r[0], risco:r[1], causa:r[2], consequencia:r[3], prob:r[4], impacto:r[5], resposta:r[6], plano:r[7], responsavel:'Produção', prazo:'', status:'Aberto'}));
 
-const FC_ENT_LABELS = ['Ingressos','Patrocínios','Bar / Ativações','Outras receitas'];
-const FC_ENT_KEYS = ['receitaIngressos','patrocinio','receitaConsumo','outras'];
+const FC_ENT_LABELS = ['Ingressos','Patrocínios','Bar / Ativações','Outras receitas','Contribuições (Bateria)'];
+const FC_ENT_KEYS = ['receitaIngressos','patrocinio','receitaConsumo','outras','contribuicoesBateria'];
 const FC_ENT_DEFAULT_PCT = [
   [0,5,10,10,10,5,5,5,10,15,15,10, 0,0,0],
   [5,10,15,15,10,5,5,5,10,10,5,5, 0,0,0],
   [0,0,0,0,0,0,0,0,0,0,0,100, 0,0,0],
   [0,0,0,0,0,0,0,0,0,0,50,50, 0,0,0],
+  [5,5,5,5,10,10,10,10,10,10,10,10, 0,0,0],
 ];
 const FC_SAI_LABELS = ['Atrações (cachês)','Estrutura','Operação (produção/segurança/licenças)','Marketing','Logística','Categorias extras','Administrativo','Taxas sobre ingressos','Open bar','Contingência','Restituições de caixa aprovadas'];
 const FC_SAI_KEYS = ['subAtracoes','subEstrutura','subOperacao','subMarketing','subLogistica','subExtra','despesasAdm','custoTaxaIngressos','openBar','contingenciaValor','restituicoesAprovadas'];
@@ -560,7 +562,10 @@ function freshState(){
       prazo:{g1:'',g2:'',g3:'',g4:'',g5:''},
       decisao:{g1:'Pendente',g2:'Pendente',g3:'Pendente',g4:'Pendente',g5:'Pendente'},
     },
-    venda: { dataInicio: todayISO(), dataEvento: addDays(todayISO(), 150), vendidosHoje: 0 },
+    venda: { dataInicio: todayISO(), dataEvento: addDays(todayISO(), 150), vendidosHoje: 0, valorRecebido: 0 },
+    // rastreio de pagamentos por pessoa — só usado no domínio Bateria Piquinzada (custos
+    // rateados entre integrantes: camisas, instrumentos etc.)
+    contribuintesBateria: [],
     fluxo: {
       saldoInicial:0, scen:'base',
       pctEnt: FC_ENT_KEYS.reduce((acc,k,i)=>(acc[k]=FC_ENT_DEFAULT_PCT[i].map(x=>x/100),acc),{}),
@@ -584,6 +589,10 @@ let stateSource = 'fresh'; // 'seed' (arquivo exportado) | 'storage' (salvamento
 // window.__PIQUINZADA_ROLE__ junto com window.__PIQUINZADA_STATE__ ao montar o srcdoc
 const HOSTED = (typeof window!=='undefined' && window.parent && window.parent!==window);
 const READONLY = (typeof window!=='undefined' && window.__PIQUINZADA_ROLE__ === 'convidado');
+// id do projeto/domínio atual (main | feijoada-bloco | bateria-piquinzada) — injetado pelo
+// PmoFrame junto com o papel; usado só pra mostrar telas específicas de um domínio (ex.: o
+// rastreio de pagamentos por pessoa, que só faz sentido na Bateria)
+const PROJECT_ID = (typeof window!=='undefined' && window.__PIQUINZADA_PROJECT_ID__) || 'main';
 let state = loadState();
 migrateState();
 initSaveStatusText();
@@ -595,6 +604,48 @@ if(HOSTED){
     const d = ev.data;
     if(!d || typeof d!=='object' || d.type!=='piquinzada:save-ack') return;
     markSaveStatus(d.ok ? 'saved' : 'error');
+  });
+}
+// ponte de comprovantes (anexar/ver) com o app hospedado — o iframe nao tem acesso direto ao
+// Supabase Storage (nem credenciais), entao pede pro pai fazer o upload/abrir o link assinado.
+// File e um objeto clonavel via postMessage, entao da pra mandar o arquivo escolhido direto.
+function requestComprovanteUpload(domain, itemId, file){
+  if(!HOSTED || typeof window==='undefined') return;
+  window.parent.postMessage({type:'piquinzada:upload-comprovante', domain, itemId, file}, '*');
+}
+function requestComprovanteView(path){
+  if(!HOSTED || typeof window==='undefined') return;
+  window.parent.postMessage({type:'piquinzada:view-comprovante', path}, '*');
+}
+if(HOSTED){
+  window.addEventListener('message', (ev)=>{
+    const d = ev.data;
+    if(!d || typeof d!=='object' || d.type!=='piquinzada:upload-comprovante-result') return;
+    if(d.domain==='custos'){
+      const row = state.custos.find(c=>c.id===d.itemId);
+      if(row && d.ok){ row.comprovantePath = d.path; saveState(); render(); }
+      else if(!d.ok){ markSaveStatus('error'); }
+    }
+  });
+}
+// saldo de caixa compartilhado entre os 3 domínios — o pai (PmoFrame) e quem tem acesso ao
+// Supabase; o iframe so pede pra ler/gravar o saldo inicial e recebe o numero ja calculado
+function requestSetSaldoCompartilhado(valor){
+  if(!HOSTED || typeof window==='undefined') return;
+  window.parent.postMessage({type:'piquinzada:set-saldo-compartilhado', valor}, '*');
+}
+if(HOSTED){
+  window.addEventListener('message', (ev)=>{
+    const d = ev.data;
+    if(!d || typeof d!=='object' || d.type!=='piquinzada:saldo-compartilhado-result') return;
+    if(d.ok){
+      state.saldoCompartilhado = d.saldo;
+      state.saldoCompartilhadoInicial = d.saldoInicial;
+      state.saldoCompartilhadoDetalhe = d.detalhe;
+      render();
+    } else {
+      markSaveStatus('error');
+    }
   });
 }
 // ajusta o FORMATO de dados antigos para o novo formato, sem apagar nem recalcular nada que
@@ -622,7 +673,15 @@ function migrateState(){
     }
     // catalogo detalhado de bebidas — estados salvos antes disso nao tem essa lista ainda
     if(state.entradas && state.entradas[scen] && !state.entradas[scen].bebidas) state.entradas[scen].bebidas = [];
+    // parcelamento do patrocinio (valor + data) — cotas salvas antes disso nao tem essa lista
+    (state.patrocinios && state.patrocinios[scen] || []).forEach(t=>{ if(!t.parcelas) t.parcelas = []; });
   });
+  // comprovante de pagamento por item de custo — linhas salvas antes disso nao tem esse campo
+  (state.custos||[]).forEach(c=>{ if(c.comprovantePath===undefined) c.comprovantePath=''; });
+  // valor ja recebido em caixa de venda de ingressos — estados salvos antes disso nao tem esse campo
+  if(state.venda && state.venda.valorRecebido===undefined) state.venda.valorRecebido = 0;
+  // rastreio de pagamentos por pessoa (Bateria) — estados salvos antes disso nao tem essa lista
+  if(!state.contribuintesBateria) state.contribuintesBateria = [];
   // Fluxo de Caixa: cada linha (entrada ou saida) precisa de 1 valor por mes em MESES.
   // Sempre que MESES ganha uma linha nova (ex.: "Restituições de caixa aprovadas") ou
   // fica mais longo (ex.: meses extras pos-evento), estados salvos antes disso ficam
@@ -994,16 +1053,101 @@ function sensLevel(pct){
   if(a<0.05) return 'Baixo'; if(a<0.15) return 'Moderado'; if(a<0.30) return 'Alto'; return 'Crítico';
 }
 
-function computeFluxoCaixa(){
-  const scen = state.fluxo.scen;
+// converte uma data real (dataPrevista/dataPagamento de um item de Custos, ou de uma parcela de
+// patrocínio) no índice de mês usado no grid do Fluxo de Caixa. Usa a Data do evento (aba Vendas)
+// como âncora: o mês do evento cai no índice 11 ("Dez"); os 3 meses seguintes são os índices 12-14
+// ("pós"); fora desse intervalo de 15 meses a data é ignorada (o valor cai no % manual, como antes)
+function monthIndexForDate(dateStr){
+  if(!dateStr) return null;
+  const d = new Date(dateStr+'T00:00:00');
+  if(isNaN(d)) return null;
+  const evt = new Date((state.venda.dataEvento||todayISO())+'T00:00:00');
+  if(isNaN(evt)) return null;
+  const diff = (evt.getFullYear()-d.getFullYear())*12 + (evt.getMonth()-d.getMonth());
+  const idx = 11-diff;
+  return (idx>=0 && idx<MESES.length) ? idx : null;
+}
+// linhas de state.custos que pertencem a uma categoria do Fluxo de Caixa (mesmo agrupamento usado
+// no Orçamento x Real) — usado pra achar o valor/data real de pagamento de cada categoria
+function custosRowsForFCKey(fcKey, custosRows){
+  if(fcKey==='restituicoesAprovadas') return [];
+  if(fcKey==='despesasAdm') return custosRows.filter(r=> r.path.join('.')==='outros.despesasAdm');
+  if(fcKey==='custoTaxaIngressos') return custosRows.filter(r=> r.path.join('.')==='outros.custoTaxaIngressos');
+  if(fcKey==='openBar') return custosRows.filter(r=> r.path.join('.')==='outros.openBar');
+  if(fcKey==='contingenciaValor') return custosRows.filter(r=> r.path.join('.')==='outros.contingencia');
+  if(fcKey==='subExtra') return custosRows.filter(r=> r.path[0] && r.path[0]!=='outros' && !FIXED_COST_GROUP_KEYS.includes(r.path[0]));
+  const groupKey = fcKey.replace(/^sub/,'').toLowerCase();
+  return custosRows.filter(r=> r.path[0]===groupKey);
+}
+// valores com data real (pago, ou contratado/aprovado ainda a pagar mas com previsão) de uma
+// categoria de custo — o que sobra do total do cenário (sem data real) continua usando o % manual
+function custosDatedAmounts(fcKey, custosRows){
+  const out = [];
+  custosRowsForFCKey(fcKey, custosRows).forEach(r=>{
+    if(r.dataPagamento && r.pago){
+      const mes = monthIndexForDate(r.dataPagamento);
+      if(mes!=null) out.push({mes, valor:r.pago});
+    } else if(!r.dataPagamento && r.dataPrevista){
+      const valor = r.contratado || r.orcAprovado || 0;
+      if(valor){ const mes = monthIndexForDate(r.dataPrevista); if(mes!=null) out.push({mes, valor}); }
+    }
+  });
+  return out;
+}
+// idem para as parcelas de patrocínio (aba Patrocínios) — cada parcela com data (paga ou prevista)
+// cai no mês exato; cotas sem parcelas cadastradas continuam usando o % manual da linha Patrocínios
+function patrocinioDatedAmounts(scen){
+  const out = [];
+  (state.patrocinios[scen]||[]).forEach(t=> (t.parcelas||[]).forEach(p=>{
+    const valor = Number(p.valor)||0;
+    if(!valor) return;
+    const mes = monthIndexForDate(p.dataPagamento || p.dataPrevista);
+    if(mes!=null) out.push({mes, valor});
+  }));
+  return out;
+}
+// contribuições de pessoas da Bateria (só existe nesse domínio) — cada parcela com data (paga ou
+// prevista) cai no mês exato, igual patrocínio; o total anual é a soma de TODAS as parcelas
+function contribuintesBateriaDatedAmounts(){
+  const out = [];
+  (state.contribuintesBateria||[]).forEach(p=> (p.parcelas||[]).forEach(pc=>{
+    const valor = Number(pc.valor)||0;
+    if(!valor) return;
+    const mes = monthIndexForDate(pc.dataPagamento || pc.dataPrevista);
+    if(mes!=null) out.push({mes, valor});
+  }));
+  return out;
+}
+function contribuintesBateriaTotalAnual(){
+  return sum((state.contribuintesBateria||[]).flatMap(p=> (p.parcelas||[]).map(pc=> Number(pc.valor)||0)));
+}
+// distribui um total anual: a parte com data real cai exatamente no mês dela; o restante (o que
+// não tem data ainda) usa a distribuição percentual manual, igual ao comportamento anterior
+function monthlyDatedPlusRemainder(totalAnnual, datedAmounts, pctRow){
+  const dated = MESES.map(()=>0);
+  let sumDated = 0;
+  datedAmounts.forEach(({mes,valor})=>{ dated[mes]+=valor; sumDated+=valor; });
+  const remainder = Math.max(0, (totalAnnual||0)-sumDated);
+  return MESES.map((_,m)=> dated[m] + remainder*(pctRow[m]||0));
+}
+function computeMonthlyFlow(scen){
   const cs = computeScenario(scen);
-  const entAnnual = {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras};
+  const custosRows = computeCustosSummary().rows;
+  const entAnnual = {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras, contribuicoesBateria: contribuintesBateriaTotalAnual()};
   const saiAnnual = {subAtracoes:cs.subAtracoes, subEstrutura:cs.subEstrutura, subOperacao:cs.subOperacao, subMarketing:cs.subMarketing,
     subLogistica:cs.subLogistica, subExtra:cs.subExtra, despesasAdm:cs.despesasAdm, custoTaxaIngressos:cs.custoTaxaIngressos, openBar:cs.openBar, contingenciaValor:cs.contingenciaValor, restituicoesAprovadas:cs.restituicoesAprovadas};
-  const entMonthly = FC_ENT_KEYS.map(k=> state.fluxo.pctEnt[k].map(p=>p*entAnnual[k]));
-  const saiMonthly = FC_SAI_KEYS.map(k=> state.fluxo.pctSai[k].map(p=>p*saiAnnual[k]));
+  const entMonthly = FC_ENT_KEYS.map(k=>{
+    const dated = k==='patrocinio' ? patrocinioDatedAmounts(scen) : k==='contribuicoesBateria' ? contribuintesBateriaDatedAmounts() : [];
+    return monthlyDatedPlusRemainder(entAnnual[k], dated, state.fluxo.pctEnt[k]);
+  });
+  const saiMonthly = FC_SAI_KEYS.map(k=> monthlyDatedPlusRemainder(saiAnnual[k], custosDatedAmounts(k, custosRows), state.fluxo.pctSai[k]));
   const totalEnt = MESES.map((_,m)=> sum(entMonthly.map(row=>row[m])));
   const totalSai = MESES.map((_,m)=> sum(saiMonthly.map(row=>row[m])));
+  return {entMonthly, saiMonthly, totalEnt, totalSai};
+}
+function computeFluxoCaixa(){
+  const scen = state.fluxo.scen;
+  const {entMonthly, saiMonthly, totalEnt, totalSai} = computeMonthlyFlow(scen);
   const periodo = MESES.map((_,m)=> totalEnt[m]-totalSai[m]);
   const acumulado = []; let acc = state.fluxo.saldoInicial;
   periodo.forEach(p=>{ acc += p; acumulado.push(acc); });
@@ -1014,14 +1158,7 @@ function computeFluxoCaixa(){
   return {entMonthly, saiMonthly, totalEnt, totalSai, periodo, acumulado, capGiro, resultadoFinal, alerta};
 }
 function capGiroFor(scen){
-  const cs = computeScenario(scen);
-  const entAnnual = {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras};
-  const saiAnnual = {subAtracoes:cs.subAtracoes, subEstrutura:cs.subEstrutura, subOperacao:cs.subOperacao, subMarketing:cs.subMarketing,
-    subLogistica:cs.subLogistica, subExtra:cs.subExtra, despesasAdm:cs.despesasAdm, custoTaxaIngressos:cs.custoTaxaIngressos, openBar:cs.openBar, contingenciaValor:cs.contingenciaValor, restituicoesAprovadas:cs.restituicoesAprovadas};
-  const entMonthly = FC_ENT_KEYS.map(k=> state.fluxo.pctEnt[k].map(p=>p*entAnnual[k]));
-  const saiMonthly = FC_SAI_KEYS.map(k=> state.fluxo.pctSai[k].map(p=>p*saiAnnual[k]));
-  const totalEnt = MESES.map((_,m)=> sum(entMonthly.map(row=>row[m])));
-  const totalSai = MESES.map((_,m)=> sum(saiMonthly.map(row=>row[m])));
+  const {totalEnt, totalSai} = computeMonthlyFlow(scen);
   let acc = state.fluxo.saldoInicial; const acumulado=[];
   MESES.forEach((_,m)=>{ acc += totalEnt[m]-totalSai[m]; acumulado.push(acc); });
   return Math.max(0, -Math.min(...acumulado));
@@ -1702,7 +1839,7 @@ ACTIONS.addCostItem = (groupKey)=>{
     id:uid(), grupo:group.label, path:[groupKey,key], subcategoria:'Novo item', computed:false,
     fornecedor:'', descricao:'',
     orcamentoAprovado:null, valorContratado:0, valorPago:0,
-    dataPrevista:'', dataPagamento:'', status:'Não iniciado',
+    dataPrevista:'', dataPagamento:'', status:'Não iniciado', comprovantePath:'',
     responsavel: groupKey==='marketing' ? 'Marketing' : 'Produção', obs:'',
   });
   saveState(); render();
@@ -1770,7 +1907,9 @@ VIEWS.vendas = function(){
         ${fld('Data de início das vendas', 'venda.dataInicio', {kind:'date'})}
         ${fld('Data do evento', 'venda.dataEvento', {kind:'date'})}
         ${fld('Ingressos vendidos até hoje', 'venda.vendidosHoje', {kind:'int'})}
+        ${fld('Valor já recebido em caixa (ingressos)', 'venda.valorRecebido', {kind:'currency'})}
       </div>
+      <div class="hint" style="margin-top:6px;">"Valor já recebido" é o que de fato entrou no caixa — soma no saldo de caixa compartilhado entre todos os domínios (ver Fluxo de Caixa).</div>
       <div class="divider"></div>
       <div class="gridN">
         <div class="kpi"><div class="lbl">Ingressos disponíveis</div><div class="kpi-value">${fmtInt(trk.ingressosDisponiveis)}</div></div>
@@ -1784,10 +1923,84 @@ VIEWS.vendas = function(){
         <div class="kpi"><div class="lbl">Projeção de público final</div><div class="kpi-value">${fmtInt(trk.projecaoFinal)}</div></div>
       </div>
     </div>
-  </div>`;
+  </div>
+  ${PROJECT_ID==='bateria-piquinzada' ? viewContribuintesBateria() : ''}`;
 };
 ACTIONS.addLot = (scen)=>{ state.vendas[scen].push({id:uid(), lote:'Novo lote', preco:100, pctMix:0}); saveState(); render(); };
 ACTIONS.rmLot = (scen,i)=>{ state.vendas[scen].splice(Number(i),1); saveState(); render(); };
+
+// rastreio de pagamentos por pessoa — só aparece no domínio Bateria Piquinzada (custos rateados
+// entre integrantes: camisas, instrumentos, transporte etc.). Mesmo padrão de parcelas expansíveis
+// já usado em Patrocínios, mas por "pessoa" em vez de "cota".
+function viewContribuintesBateria(){
+  const list = state.contribuintesBateria||[];
+  function parcelaSummary(c){
+    const parcelas = c.parcelas||[];
+    const total = sum(parcelas.map(p=> Number(p.valor)||0));
+    const pago = sum(parcelas.filter(p=>p.dataPagamento).map(p=> Number(p.valor)||0));
+    return {total, pago, pendente: total-pago, n: parcelas.length};
+  }
+  const openSet = state.ui.contribBateriaParcelasOpen || {};
+  const totalGeral = sum(list.map(c=> Number(c.valorTotal)||0));
+  const totalPagoGeral = sum(list.map(c=> parcelaSummary(c).pago));
+  const rows = list.map((c,i)=>{
+    const ps = parcelaSummary(c);
+    const isOpen = !!openSet[c.id];
+    const mainRow = `<tr>
+      <td>${tblInput(`contribuintesBateria.${i}.nome`, c.nome)}</td>
+      <td class="num">${tblInput(`contribuintesBateria.${i}.valorTotal`, c.valorTotal, {type:'number', step:'50', cls:'num'})}</td>
+      <td class="num mono">${fmtCur(ps.pago)}</td>
+      <td class="num mono">${fmtCur(ps.pendente)}</td>
+      <td>${tblInput(`contribuintesBateria.${i}.obs`, c.obs)}</td>
+      <td><button class="btn small" data-action="toggleContribBateriaParcelas:${c.id}">${ps.n ? `📅 ${ps.n} parcela${ps.n>1?'s':''}` : '📅 Parcelas'}</button></td>
+      <td><button class="rm" data-action="rmContribuinte:${i}">✕</button></td>
+    </tr>`;
+    if(!isOpen) return mainRow;
+    const parcelaRows = (c.parcelas||[]).map((pc,pi)=>`<tr>
+      <td class="num">${tblInput(`contribuintesBateria.${i}.parcelas.${pi}.valor`, pc.valor, {type:'number', step:'50', cls:'num'})}</td>
+      <td>${tblInput(`contribuintesBateria.${i}.parcelas.${pi}.dataPrevista`, pc.dataPrevista, {type:'date'})}</td>
+      <td>${tblInput(`contribuintesBateria.${i}.parcelas.${pi}.dataPagamento`, pc.dataPagamento, {type:'date'})}</td>
+      <td><button class="rm" data-action="rmParcelaContribuinte:${i}:${pi}">✕</button></td>
+    </tr>`).join('');
+    return mainRow + `<tr><td colspan="7" style="background:var(--surface-2); padding:10px 14px;">
+      <div style="font-size:12.5px; font-weight:700; margin-bottom:6px;">Parcelas de "${esc(c.nome)}" ${ps.n?`<span class="hint" style="font-weight:400;">— pago ${fmtCur(ps.pago)} de ${fmtCur(ps.total)}</span>`:''}</div>
+      <table style="width:auto; min-width:420px;"><thead><tr><th class="num">Valor</th><th>Data prevista</th><th>Data de pagamento</th><th></th></tr></thead>
+      <tbody>${parcelaRows || `<tr><td colspan="4" class="hint">Nenhuma parcela ainda.</td></tr>`}</tbody></table>
+      <button class="btn small" style="margin-top:8px;" data-action="addParcelaContribuinte:${i}">+ Adicionar parcela</button>
+    </td></tr>`;
+  }).join('');
+
+  return `
+  <div class="section">
+    <h2>Pagamentos por pessoa (Bateria) ${infoIcon('Quem comprou o quê na Bateria, quanto já pagou e quando ainda falta pagar. Cada parcela com data alimenta a linha "Contribuições (Bateria)" do Fluxo de Caixa direto no mês certo — parcelas sem data continuam entrando na projeção percentual.')} <span class="hint">só neste domínio — custos rateados entre os integrantes (camisas, instrumentos, transporte etc.)</span></h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Nome</th><th class="num">Valor total</th><th class="num">Pago</th><th class="num">Pendente</th><th>Obs.</th><th>Parcelas</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7" class="hint">Nenhuma pessoa cadastrada ainda.</td></tr>`}</tbody>
+        <tfoot><tr><td>Total</td><td class="num mono">${fmtCur(totalGeral)}</td><td class="num mono">${fmtCur(totalPagoGeral)}</td><td class="num mono">${fmtCur(totalGeral-totalPagoGeral)}</td><td colspan="3"></td></tr></tfoot>
+      </table>
+    </div>
+    <button class="btn small" style="margin-top:10px;" data-action="addContribuinte">+ Adicionar pessoa</button>
+  </div>`;
+}
+ACTIONS.addContribuinte = ()=>{ state.contribuintesBateria.push({id:uid(), nome:'Novo integrante', valorTotal:0, obs:'', parcelas:[]}); saveState(); render(); };
+ACTIONS.rmContribuinte = (i)=>{ state.contribuintesBateria.splice(Number(i),1); saveState(); render(); };
+ACTIONS.toggleContribBateriaParcelas = (contribId)=>{
+  if(!state.ui.contribBateriaParcelasOpen) state.ui.contribBateriaParcelasOpen = {};
+  state.ui.contribBateriaParcelasOpen[contribId] = !state.ui.contribBateriaParcelasOpen[contribId];
+  render(); // so muda a tela — nao chama saveState
+};
+ACTIONS.addParcelaContribuinte = (i)=>{
+  const c = state.contribuintesBateria[Number(i)]; if(!c) return;
+  if(!c.parcelas) c.parcelas=[];
+  c.parcelas.push({id:uid(), valor:0, dataPrevista:'', dataPagamento:''});
+  saveState(); render();
+};
+ACTIONS.rmParcelaContribuinte = (i,pi)=>{
+  const c = state.contribuintesBateria[Number(i)]; if(!c || !c.parcelas) return;
+  c.parcelas.splice(Number(pi),1);
+  saveState(); render();
+};
 
 /* ================= PATROCINIOS ================= */
 VIEWS.patrocinios = function(){
@@ -1797,11 +2010,21 @@ VIEWS.patrocinios = function(){
 
   const stageRows = STAGE_LIST.map(s=>`<div class="kv"><span class="k">${s}</span><span class="v"><input id="${mkId('stageProb.'+s)}" type="number" step="1" style="width:70px; display:inline-block;" data-bind="stageProb.${s}" data-kind="pct" value="${Math.round(state.stageProb[s]*1000)/10}"> %</span></div>`).join('');
 
+  // soma das parcelas de uma cota: total parcelado, quanto ja foi pago (tem dataPagamento) e quanto falta
+  function parcelaSummary(t){
+    const parcelas = t.parcelas||[];
+    const total = sum(parcelas.map(p=> Number(p.valor)||0));
+    const pago = sum(parcelas.filter(p=>p.dataPagamento).map(p=> Number(p.valor)||0));
+    return {total, pago, pendente: total-pago, n: parcelas.length};
+  }
+  const openSet = state.ui.patrocParcelasOpen || {};
   const rows = tiers.map((t,i)=>{
     const alvo = t.valorUnit*t.qtd;
     const prob = Number(t.prob)||0;
     const ponderada = alvo*prob;
-    return `<tr>
+    const ps = parcelaSummary(t);
+    const isOpen = !!openSet[t.id];
+    const mainRow = `<tr>
       <td>${tblInput(`patrocinios.${scen}.${i}.cota`, t.cota)}</td>
       <td class="num">${tblInput(`patrocinios.${scen}.${i}.valorUnit`, t.valorUnit, {type:'number', step:'500', cls:'num'})}</td>
       <td class="num">${tblInput(`patrocinios.${scen}.${i}.qtd`, t.qtd, {type:'number', cls:'num'})}</td>
@@ -1809,12 +2032,26 @@ VIEWS.patrocinios = function(){
       <td class="num">${tblInput(`patrocinios.${scen}.${i}.prob`, Math.round(prob*1000)/10, {type:'number', step:'1', cls:'num', kind:'pct', width:'62px'})}</td>
       <td class="num mono">${fmtCur(alvo)}</td>
       <td class="num mono">${fmtCur(ponderada)}</td>
+      <td><button class="btn small" data-action="togglePatrocParcelas:${t.id}">${ps.n ? `📅 ${ps.n} parcela${ps.n>1?'s':''}` : '📅 Parcelas'}</button></td>
       <td><button class="rm" data-action="rmTier:${scen}:${i}">✕</button></td>
     </tr>`;
+    if(!isOpen) return mainRow;
+    const parcelaRows = (t.parcelas||[]).map((pc,pi)=>`<tr>
+      <td class="num">${tblInput(`patrocinios.${scen}.${i}.parcelas.${pi}.valor`, pc.valor, {type:'number', step:'100', cls:'num'})}</td>
+      <td>${tblInput(`patrocinios.${scen}.${i}.parcelas.${pi}.dataPrevista`, pc.dataPrevista, {type:'date'})}</td>
+      <td>${tblInput(`patrocinios.${scen}.${i}.parcelas.${pi}.dataPagamento`, pc.dataPagamento, {type:'date'})}</td>
+      <td><button class="rm" data-action="rmParcela:${scen}:${i}:${pi}">✕</button></td>
+    </tr>`).join('');
+    return mainRow + `<tr><td colspan="9" style="background:var(--surface-2); padding:10px 14px;">
+      <div style="font-size:12.5px; font-weight:700; margin-bottom:6px;">Parcelas de "${esc(t.cota)}" ${ps.n?`<span class="hint" style="font-weight:400;">— pago ${fmtCur(ps.pago)} de ${fmtCur(ps.total)}</span>`:''}</div>
+      <table style="width:auto; min-width:420px;"><thead><tr><th class="num">Valor</th><th>Data prevista</th><th>Data de pagamento</th><th></th></tr></thead>
+      <tbody>${parcelaRows || `<tr><td colspan="4" class="hint">Nenhuma parcela ainda.</td></tr>`}</tbody></table>
+      <button class="btn small" style="margin-top:8px;" data-action="addParcela:${scen}:${i}">+ Adicionar parcela</button>
+    </td></tr>`;
   }).join('');
 
   return `
-  <div class="topline"><div><h1>Patrocínios ${infoIcon('Pipeline comercial de cotas de patrocínio. A Probabilidade é editável linha a linha — o Estágio é só uma etiqueta de acompanhamento (não altera o cálculo). Receita ponderada = Valor × Qtd × Probabilidade.')}</h1><div class="desc">Pipeline comercial por cenário. A probabilidade de fechamento é editável cota a cota.</div></div></div>
+  <div class="topline"><div><h1>Patrocínios ${infoIcon('Pipeline comercial de cotas de patrocínio. A Probabilidade é editável linha a linha — o Estágio é só uma etiqueta de acompanhamento (não altera o cálculo). Receita ponderada = Valor × Qtd × Probabilidade. As parcelas (valor + data) de cada cota alimentam o Fluxo de Caixa automaticamente, no mês certo.')}</h1><div class="desc">Pipeline comercial por cenário. A probabilidade de fechamento é editável cota a cota.</div></div></div>
 
   <div class="card" style="padding:14px 18px; margin-bottom:20px;">
     <h3 style="margin:0 0 8px; font-size:13.5px;">Probabilidade sugerida por estágio ${infoIcon('Apenas uma referência rápida para você preencher a coluna Probabilidade de cada cota manualmente — mudar o Estágio não recalcula a probabilidade sozinho.')} <span class="hint">(referência — ajuste a probabilidade de cada cota na tabela abaixo)</span></h3>
@@ -1824,9 +2061,9 @@ VIEWS.patrocinios = function(){
   ${scenPills('ui.scenTab.patrocinios', scen, replicateControl('patrocinios', scen))}
   <div class="tablewrap">
     <table>
-      <thead><tr><th>Cota</th><th class="num">Valor unitário</th><th class="num">Qtd. alvo</th><th>Estágio</th><th class="num">Prob. %</th><th class="num">Receita alvo</th><th class="num">Receita ponderada</th><th></th></tr></thead>
+      <thead><tr><th>Cota</th><th class="num">Valor unitário</th><th class="num">Qtd. alvo</th><th>Estágio</th><th class="num">Prob. %</th><th class="num">Receita alvo</th><th class="num">Receita ponderada</th><th>Parcelas</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr><td colspan="2">Total</td><td class="num mono">${fmtInt(p.nCotas)}</td><td></td><td></td><td class="num mono">${fmtCur(p.nominal)}</td><td class="num mono">${fmtCur(p.esperado)}</td><td></td></tr></tfoot>
+      <tfoot><tr><td colspan="2">Total</td><td class="num mono">${fmtInt(p.nCotas)}</td><td></td><td></td><td class="num mono">${fmtCur(p.nominal)}</td><td class="num mono">${fmtCur(p.esperado)}</td><td></td><td></td></tr></tfoot>
     </table>
   </div>
   <button class="btn small" style="margin-top:10px;" data-action="addTier:${scen}">+ Adicionar cota</button>
@@ -1837,8 +2074,24 @@ VIEWS.patrocinios = function(){
     <div class="kpi"><div class="lbl">Receita ponderada (esperado)</div><div class="kpi-value">${fmtCur(p.esperado)}</div></div>
   </div>`;
 };
-ACTIONS.addTier = (scen)=>{ state.patrocinios[scen].push({id:uid(), cota:'Nova cota', valorUnit:5000, qtd:1, estagio:'Prospecção', prob:state.stageProb['Prospecção']||0.15, contrapartida:'', perfil:''}); saveState(); render(); };
+ACTIONS.addTier = (scen)=>{ state.patrocinios[scen].push({id:uid(), cota:'Nova cota', valorUnit:5000, qtd:1, estagio:'Prospecção', prob:state.stageProb['Prospecção']||0.15, contrapartida:'', perfil:'', parcelas:[]}); saveState(); render(); };
 ACTIONS.rmTier = (scen,i)=>{ state.patrocinios[scen].splice(Number(i),1); saveState(); render(); };
+ACTIONS.togglePatrocParcelas = (tierId)=>{
+  if(!state.ui.patrocParcelasOpen) state.ui.patrocParcelasOpen = {};
+  state.ui.patrocParcelasOpen[tierId] = !state.ui.patrocParcelasOpen[tierId];
+  render(); // so muda a tela (o que esta aberto/fechado nao e um dado do projeto) — nao chama saveState
+};
+ACTIONS.addParcela = (scen,i)=>{
+  const t = state.patrocinios[scen][Number(i)]; if(!t) return;
+  if(!t.parcelas) t.parcelas=[];
+  t.parcelas.push({id:uid(), valor:0, dataPrevista:'', dataPagamento:''});
+  saveState(); render();
+};
+ACTIONS.rmParcela = (scen,i,pi)=>{
+  const t = state.patrocinios[scen][Number(i)]; if(!t || !t.parcelas) return;
+  t.parcelas.splice(Number(pi),1);
+  saveState(); render();
+};
 
 /* ================= CUSTOS ================= */
 const CUSTO_STATUS = ['Não iniciado','Em cotação','Contratado','Pago Parcial','Pago Total','Cancelado'];
@@ -1848,6 +2101,9 @@ VIEWS.custos = function(){
   const rows = cs.rows.map((r,i)=>{
     const groupHdr = r.grupo!==lastGroup ? `<tr class="section-hdr-row"><td colspan="12">${r.grupo}</td></tr>` : '';
     lastGroup = r.grupo;
+    const comprovanteBtn = r.comprovantePath
+      ? `<button class="btn small" data-action="viewComprovanteCusto:${r.id}" title="Ver comprovante anexado">📎 Ver</button>`
+      : `<button class="btn small" data-action="attachComprovanteCusto:${r.id}" title="Anexar comprovante de pagamento">📎 Anexar</button>`;
     return groupHdr + `<tr>
       <td>${r.subcategoria}</td>
       <td>${tblInput(`custos.${i}.fornecedor`, r.fornecedor)}</td>
@@ -1859,6 +2115,8 @@ VIEWS.custos = function(){
       <td><select id="${mkId('custos.'+i+'.status')}" data-bind="custos.${i}.status">${CUSTO_STATUS.map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}</select></td>
       <td>${tblInput(`custos.${i}.responsavel`, r.responsavel)}</td>
       <td>${tblInput(`custos.${i}.dataPrevista`, r.dataPrevista, {type:'date'})}</td>
+      <td>${tblInput(`custos.${i}.dataPagamento`, r.dataPagamento, {type:'date'})}</td>
+      <td>${comprovanteBtn}</td>
     </tr>`;
   }).join('');
 
@@ -1878,11 +2136,28 @@ VIEWS.custos = function(){
 
   <div class="tablewrap">
     <table>
-      <thead><tr><th>Subcategoria</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th></tr></thead>
+      <thead><tr><th>Subcategoria</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th><th>Data de pagamento</th><th>Comprovante</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>
-  <div class="hint" style="margin-top:8px;">Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal.</div>`;
+  <div class="hint" style="margin-top:8px;">Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Preencher "Pago" + "Data de pagamento" faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual.</div>
+  <input type="file" id="custoComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
+};
+ACTIONS.attachComprovanteCusto = (itemId)=>{
+  if(READONLY) return;
+  const input = document.getElementById('custoComprovanteFileInput');
+  if(!input) return;
+  input.value = '';
+  input.onchange = ()=>{
+    const file = input.files && input.files[0];
+    if(!file) return;
+    requestComprovanteUpload('custos', itemId, file);
+  };
+  input.click();
+};
+ACTIONS.viewComprovanteCusto = (itemId)=>{
+  const row = state.custos.find(c=>c.id===itemId);
+  if(row && row.comprovantePath) requestComprovanteView(row.comprovantePath);
 };
 
 /* ================= ORCAMENTO x REAL ================= */
@@ -1947,9 +2222,30 @@ VIEWS.fluxo = function(){
 
   <div class="pillrow">${SCEN.map(s=>`<button class="pill ${s===scen?'active':''}" data-tab="fluxo.scen:${s}">${SCEN_LABEL[s]}</button>`).join('')}
     <label class="field" style="flex-direction:row; align-items:center; gap:6px; margin-left:14px;">
-      <span class="lbl" style="white-space:nowrap;">Saldo inicial de caixa</span>
+      <span class="lbl" style="white-space:nowrap;">Saldo inicial (projeção deste cenário)</span>
       <input id="${mkId('fluxo.saldoInicial')}" type="number" step="100" data-bind="fluxo.saldoInicial" value="${state.fluxo.saldoInicial}" style="width:120px;">
     </label>
+  </div>
+
+  <div class="section">
+    <h2>💰 Saldo de caixa real ${infoIcon('Este número é o caixa físico de verdade da organização — o MESMO valor aparece nos 3 domínios (Piquinzada 2027, Feijoada do Bloco e Bateria Piquinzada). Ele sobe quando alguém lança "valor recebido" na aba Vendas de qualquer domínio, e desce quando um item de Custos é marcado como pago ou uma Restituição de Caixa é marcada como paga, em qualquer domínio.')} <span class="hint">compartilhado entre todos os domínios — diferente do "saldo inicial" da projeção acima</span></h2>
+    ${(()=>{
+      const saldoAtual = Number(state.saldoCompartilhado)||0;
+      const saldoInicial = Number(state.saldoCompartilhadoInicial)||0;
+      const det = state.saldoCompartilhadoDetalhe||{};
+      return `<div class="gridN">
+        <div class="kpi"><div class="lbl">Saldo atual (todos os domínios)</div><div class="kpi-value" style="color:${saldoAtual>=0?'var(--good)':'var(--bad)'}">${fmtCur(saldoAtual)}</div></div>
+        <div class="kpi"><div class="lbl">Recebido em ingressos (todos)</div><div class="kpi-value">${fmtCur(det.totalRecebidoIngressos||0)}</div></div>
+        <div class="kpi"><div class="lbl">Pago em custos (todos)</div><div class="kpi-value">${fmtCur(det.totalPagoCustos||0)}</div></div>
+        <div class="kpi"><div class="lbl">Pago em restituições (todos)</div><div class="kpi-value">${fmtCur(det.totalPagoRestituicoes||0)}</div></div>
+      </div>
+      ${HOSTED ? `<label class="field" style="flex-direction:row; align-items:center; gap:6px; margin-top:14px; max-width:320px;">
+        <span class="lbl" style="white-space:nowrap;">Saldo inicial do caixa (ajustar)</span>
+        <input type="number" step="100" value="${saldoInicial}" onchange="requestSetSaldoCompartilhado(Number(this.value)||0)" style="width:140px;">
+      </label>
+      <div class="hint" style="margin-top:6px;">Só administrador ajusta este valor — é o ponto de partida do caixa antes de qualquer recebimento/pagamento.</div>`
+      : `<div class="hint" style="margin-top:10px;">O saldo compartilhado só fica disponível no app publicado (conectado ao Supabase) — não neste arquivo local.</div>`}`;
+    })()}
   </div>
 
   <div class="section">

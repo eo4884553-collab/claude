@@ -372,3 +372,87 @@ begin
     where id = target_id;
 end;
 $$;
+
+-- ============================================================
+-- 9) RESTITUIÇÃO DE CAIXA — status "pago" (dinheiro devolvido de verdade)
+-- ============================================================
+-- "Aprovado" só reconhece o gasto como legítimo (já entra no custo do evento). "Pago" é quando o
+-- dinheiro de fato sai do caixa e volta pra pessoa — é ESSE status que deduz do saldo de caixa
+-- compartilhado entre os domínios (seção 10). Guarda também o comprovante do PAGAMENTO em si
+-- (ex.: print do PIX), separado do comprovante da COMPRA que a pessoa já anexou ao lançar.
+alter table public.reimbursements
+  add column if not exists pagamento_comprovante_path text,
+  add column if not exists paid_by uuid references auth.users(id),
+  add column if not exists paid_at timestamptz;
+
+alter table public.reimbursements drop constraint if exists reimbursements_status_check;
+alter table public.reimbursements add constraint reimbursements_status_check
+  check (status in ('pendente','aprovado','rejeitado','pago'));
+
+create or replace function public.admin_review_reimbursement(
+  target_id uuid,
+  new_status text,
+  admin_obs text default null,
+  pagamento_comprovante_path text default null
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  target_project text;
+begin
+  select project_id into target_project from public.reimbursements where id = target_id;
+
+  if target_project is null or public.effective_role(target_project, auth.uid()) is distinct from 'admin' then
+    raise exception 'Apenas administradores (globais ou deste projeto) podem revisar restituições.';
+  end if;
+
+  if new_status not in ('pendente','aprovado','rejeitado','pago') then
+    raise exception 'status inválido';
+  end if;
+  if new_status = 'pago' and pagamento_comprovante_path is null then
+    raise exception 'Anexe o comprovante do pagamento antes de marcar como pago.';
+  end if;
+
+  update public.reimbursements r
+    set status = new_status, obs_admin = admin_obs, reviewed_by = auth.uid(), reviewed_at = now(),
+        pagamento_comprovante_path = coalesce(admin_review_reimbursement.pagamento_comprovante_path, r.pagamento_comprovante_path),
+        paid_by = case when new_status='pago' then auth.uid() else r.paid_by end,
+        paid_at = case when new_status='pago' then now() else r.paid_at end
+    where r.id = target_id;
+end;
+$$;
+
+-- ============================================================
+-- 10) SALDO DE CAIXA COMPARTILHADO (um caixa físico só, entre TODOS os domínios)
+-- ============================================================
+-- Guarda só o saldo INICIAL (um número da organização inteira, não de 1 evento). O saldo atual é
+-- calculado ao vivo pelo app (PmoFrame): saldo inicial + tudo que já foi RECEBIDO de venda de
+-- ingressos (em qualquer domínio) − tudo que já foi PAGO em Custos (em qualquer domínio) − tudo
+-- que já foi PAGO em restituições de caixa (em qualquer domínio). O mesmo número aparece em
+-- todos os 3 domínios.
+create table if not exists public.org_cash (
+  id text primary key default 'main',
+  saldo_inicial numeric not null default 0,
+  updated_at timestamptz not null default now(),
+  updated_by uuid references auth.users(id)
+);
+
+insert into public.org_cash (id) values ('main') on conflict (id) do nothing;
+
+alter table public.org_cash enable row level security;
+
+drop policy if exists "org_cash_select_approved" on public.org_cash;
+create policy "org_cash_select_approved" on public.org_cash
+  for select using (
+    exists (select 1 from public.profiles p where p.id = auth.uid() and p.status = 'approved')
+  );
+
+-- só administrador GLOBAL altera o saldo inicial — é um número da organização inteira, não
+-- de um projeto só, então não usa o papel por projeto (effective_role) aqui de propósito
+drop policy if exists "org_cash_update_global_admin" on public.org_cash;
+create policy "org_cash_update_global_admin" on public.org_cash
+  for update using (
+    exists (select 1 from public.profiles p where p.id = auth.uid() and p.status = 'approved' and p.role = 'admin')
+  );
