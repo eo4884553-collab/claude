@@ -489,7 +489,7 @@ function custosDefaults(){
     id:uid(), grupo:spec.grupo, path:spec.path, subcategoria:spec.subcategoria, computed:!!spec.computed,
     fornecedor:'', descricao:'',
     orcamentoAprovado:null, valorContratado:0, valorPago:0,
-    dataPrevista:'', dataPagamento:'', status:'Não iniciado', comprovantePath:'',
+    dataPrevista:'', dataPagamento:'', status:'Não iniciado', comprovantes:[],
     responsavel: (spec.grupo==='Administrativo'||spec.grupo==='Contingência')?'Financeiro':(spec.grupo==='Marketing'?'Marketing':'Produção'), obs:'',
   }));
 }
@@ -624,7 +624,7 @@ if(HOSTED){
     if(!d || typeof d!=='object' || d.type!=='piquinzada:upload-comprovante-result') return;
     if(d.domain==='custos'){
       const row = state.custos.find(c=>c.id===d.itemId);
-      if(row && d.ok){ row.comprovantePath = d.path; saveState(); render(); }
+      if(row && d.ok){ if(!row.comprovantes) row.comprovantes=[]; row.comprovantes.push(d.path); saveState(); render(); }
       else if(!d.ok){ markSaveStatus('error'); }
     }
   });
@@ -677,8 +677,13 @@ function migrateState(){
     // parcelamento do patrocinio (valor + data) — cotas salvas antes disso nao tem essa lista
     (state.patrocinios && state.patrocinios[scen] || []).forEach(t=>{ if(!t.parcelas) t.parcelas = []; });
   });
-  // comprovante de pagamento por item de custo — linhas salvas antes disso nao tem esse campo
-  (state.custos||[]).forEach(c=>{ if(c.comprovantePath===undefined) c.comprovantePath=''; });
+  // comprovantes de pagamento por item de custo — agora é uma LISTA (item pode ter varios
+  // pagamentos parciais, cada um com seu proprio comprovante). Linhas salvas antes disso tem
+  // o campo antigo "comprovantePath" (um so arquivo) — migra pra dentro da lista nova.
+  (state.custos||[]).forEach(c=>{
+    if(!c.comprovantes) c.comprovantes = c.comprovantePath ? [c.comprovantePath] : [];
+    delete c.comprovantePath;
+  });
   // valor ja recebido em caixa de venda de ingressos — estados salvos antes disso nao tem esse campo
   if(state.venda && state.venda.valorRecebido===undefined) state.venda.valorRecebido = 0;
   // rastreio de pagamentos por pessoa (Bateria) — estados salvos antes disso nao tem essa lista
@@ -1840,7 +1845,7 @@ ACTIONS.addCostItem = (groupKey)=>{
     id:uid(), grupo:group.label, path:[groupKey,key], subcategoria:'Novo item', computed:false,
     fornecedor:'', descricao:'',
     orcamentoAprovado:null, valorContratado:0, valorPago:0,
-    dataPrevista:'', dataPagamento:'', status:'Não iniciado', comprovantePath:'',
+    dataPrevista:'', dataPagamento:'', status:'Não iniciado', comprovantes:[],
     responsavel: groupKey==='marketing' ? 'Marketing' : 'Produção', obs:'',
   });
   saveState(); render();
@@ -2102,9 +2107,15 @@ VIEWS.custos = function(){
   const rows = cs.rows.map((r,i)=>{
     const groupHdr = r.grupo!==lastGroup ? `<tr class="section-hdr-row"><td colspan="12">${r.grupo}</td></tr>` : '';
     lastGroup = r.grupo;
-    const comprovanteBtn = r.comprovantePath
-      ? `<button class="btn small" data-action="viewComprovanteCusto:${r.id}" title="Ver comprovante anexado">📎 Ver</button>`
-      : `<button class="btn small" data-action="attachComprovanteCusto:${r.id}" title="Anexar comprovante de pagamento">📎 Anexar</button>`;
+    const comprovantes = r.comprovantes||[];
+    const comprovantesList = comprovantes.map((path,ci)=>`<span style="display:flex; align-items:center; gap:3px;">
+        <button class="btn small" data-action="viewComprovanteCusto:${r.id}:${ci}" title="Ver comprovante ${ci+1}">📎 Ver ${comprovantes.length>1?ci+1:''}</button>
+        <button class="rm" data-action="rmComprovanteCusto:${r.id}:${ci}" title="Remover este anexo">✕</button>
+      </span>`).join('');
+    const comprovanteCell = `<div style="display:flex; flex-direction:column; gap:4px; align-items:flex-start;">
+        ${comprovantesList}
+        <button class="btn small" data-action="attachComprovanteCusto:${r.id}" title="Anexar mais um comprovante de pagamento">+ Anexar</button>
+      </div>`;
     return groupHdr + `<tr>
       <td>${r.subcategoria}</td>
       <td>${tblInput(`custos.${i}.fornecedor`, r.fornecedor)}</td>
@@ -2117,7 +2128,7 @@ VIEWS.custos = function(){
       <td>${tblInput(`custos.${i}.responsavel`, r.responsavel)}</td>
       <td>${tblInput(`custos.${i}.dataPrevista`, r.dataPrevista, {type:'date'})}</td>
       <td>${tblInput(`custos.${i}.dataPagamento`, r.dataPagamento, {type:'date'})}</td>
-      <td>${comprovanteBtn}</td>
+      <td>${comprovanteCell}</td>
     </tr>`;
   }).join('');
 
@@ -2141,7 +2152,7 @@ VIEWS.custos = function(){
       <tbody>${rows}</tbody>
     </table>
   </div>
-  <div class="hint" style="margin-top:8px;">Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Preencher "Pago" + "Data de pagamento" faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual.</div>
+  <div class="hint" style="margin-top:8px;">Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Preencher "Pago" + "Data de pagamento" faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento.</div>
   <input type="file" id="custoComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
 };
 ACTIONS.attachComprovanteCusto = (itemId)=>{
@@ -2156,9 +2167,17 @@ ACTIONS.attachComprovanteCusto = (itemId)=>{
   };
   input.click();
 };
-ACTIONS.viewComprovanteCusto = (itemId)=>{
+ACTIONS.viewComprovanteCusto = (itemId,ci)=>{
   const row = state.custos.find(c=>c.id===itemId);
-  if(row && row.comprovantePath) requestComprovanteView(row.comprovantePath);
+  const path = row && row.comprovantes && row.comprovantes[Number(ci)];
+  if(path) requestComprovanteView(path);
+};
+ACTIONS.rmComprovanteCusto = (itemId,ci)=>{
+  if(READONLY) return;
+  const row = state.custos.find(c=>c.id===itemId);
+  if(!row || !row.comprovantes) return;
+  row.comprovantes.splice(Number(ci),1);
+  saveState(); render();
 };
 
 /* ================= ORCAMENTO x REAL ================= */
