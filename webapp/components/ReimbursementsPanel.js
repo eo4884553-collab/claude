@@ -30,8 +30,9 @@ const STATUS_BADGE = {
   pendente: badge('#FBEACC', '#C1780F'),
   aprovado: badge('#DCF0E6', '#1E8F63'),
   rejeitado: badge('#FAE0E2', '#D6323F'),
+  pago: badge('#E3E8FC', '#3949AB'),
 };
-const STATUS_LABEL = { pendente: 'Pendente', aprovado: 'Aprovado', rejeitado: 'Rejeitado' };
+const STATUS_LABEL = { pendente: 'Pendente', aprovado: 'Aprovado', rejeitado: 'Rejeitado', pago: 'Pago' };
 
 function fmtCur(v) {
   return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -119,6 +120,30 @@ export default function ReimbursementsPanel({ auth, project, onChangeProject }) 
     if (error) setErr(error.message); else load();
   }
 
+  // marcar como pago exige o comprovante do PAGAMENTO em si (ex.: print do PIX) — sem ele o
+  // banco recusa a chamada (ver admin_review_reimbursement). É esse status que deduz do caixa
+  // compartilhado entre os domínios, diferente de "aprovado" (que só reconhece o custo).
+  async function markPaid(id, file) {
+    if (!file) return;
+    setErr('');
+    setBusyId(id);
+    try {
+      const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+      const path = `${project.id}/pagamentos/${id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('comprovantes').upload(path, file);
+      if (upErr) throw upErr;
+      const { error: rpcErr } = await supabase.rpc('admin_review_reimbursement', {
+        target_id: id, new_status: 'pago', admin_obs: obsDraft[id] || null, pagamento_comprovante_path: path,
+      });
+      if (rpcErr) throw rpcErr;
+      load();
+    } catch (e2) {
+      setErr(e2.message || String(e2));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function viewComprovante(path) {
     const { data, error } = await supabase.storage.from('comprovantes').createSignedUrl(path, 300);
     if (error) { setErr(error.message); return; }
@@ -126,6 +151,7 @@ export default function ReimbursementsPanel({ auth, project, onChangeProject }) 
   }
 
   const totalAprovado = (rows || []).filter(r => r.status === 'aprovado').reduce((a, r) => a + Number(r.valor || 0), 0);
+  const totalPago = (rows || []).filter(r => r.status === 'pago').reduce((a, r) => a + Number(r.valor || 0), 0);
   const totalPendente = (rows || []).filter(r => r.status === 'pendente').reduce((a, r) => a + Number(r.valor || 0), 0);
   const minhas = (rows || []).filter(r => r.user_id === auth.user.id);
 
@@ -136,6 +162,8 @@ export default function ReimbursementsPanel({ auth, project, onChangeProject }) 
       <p style={sub}>
         Lance aqui compras feitas do próprio bolso, com o comprovante em anexo. Assim que um administrador aprova,
         o valor entra automaticamente como custo real de <strong>{project.label}</strong> nas avaliações financeiras.
+        Quando o administrador marca como <strong>pago</strong> (com o comprovante do pagamento), o valor sai do
+        saldo de caixa — que é compartilhado entre todos os domínios.
       </p>
       {PROJECTS.length > 1 && (
         <div style={{ marginBottom: 18 }}>
@@ -147,8 +175,9 @@ export default function ReimbursementsPanel({ auth, project, onChangeProject }) 
       )}
 
       <div style={kpiRow}>
-        <div style={kpi}><div style={kpiLbl}>Total aprovado (soma como custo)</div><div style={kpiVal}>{fmtCur(totalAprovado)}</div></div>
-        <div style={kpi}><div style={kpiLbl}>Total pendente de aprovação</div><div style={kpiVal}>{fmtCur(totalPendente)}</div></div>
+        <div style={kpi}><div style={kpiLbl}>Aprovado (aguardando pagamento)</div><div style={kpiVal}>{fmtCur(totalAprovado)}</div></div>
+        <div style={kpi}><div style={kpiLbl}>Pago (saiu do caixa)</div><div style={kpiVal}>{fmtCur(totalPago)}</div></div>
+        <div style={kpi}><div style={kpiLbl}>Pendente de aprovação</div><div style={kpiVal}>{fmtCur(totalPendente)}</div></div>
       </div>
 
       {err && <p style={{ color: '#D6323F', fontSize: 13 }}>{err}</p>}
@@ -202,7 +231,14 @@ export default function ReimbursementsPanel({ auth, project, onChangeProject }) 
                     <td style={td}>{r.descricao}</td>
                     <td style={{ ...td, fontFamily: 'monospace' }}>{fmtCur(r.valor)}</td>
                     <td style={td}>{r.data_compra || '—'}</td>
-                    <td style={td}>{r.comprovante_path ? <button style={btnSm('#FBE9F4', '#B8156A')} onClick={() => viewComprovante(r.comprovante_path)}>Ver</button> : '—'}</td>
+                    <td style={td}>
+                      {r.comprovante_path ? <button style={btnSm('#FBE9F4', '#B8156A')} onClick={() => viewComprovante(r.comprovante_path)}>Ver compra</button> : '—'}
+                      {r.pagamento_comprovante_path && (
+                        <div style={{ marginTop: 4 }}>
+                          <button style={btnSm('#E3E8FC', '#3949AB')} onClick={() => viewComprovante(r.pagamento_comprovante_path)}>Ver pagamento</button>
+                        </div>
+                      )}
+                    </td>
                     <td style={td}><span style={STATUS_BADGE[r.status]}>{STATUS_LABEL[r.status]}</span></td>
                     <td style={td}>
                       <input
@@ -215,7 +251,16 @@ export default function ReimbursementsPanel({ auth, project, onChangeProject }) 
                     <td style={td}>
                       {busyId === r.id ? '…' : (
                         <>
-                          {r.status !== 'aprovado' && <button style={btnSm('#1E8F63', '#fff')} onClick={() => review(r.id, 'aprovado')}>Aprovar</button>}
+                          {r.status !== 'aprovado' && r.status !== 'pago' && <button style={btnSm('#1E8F63', '#fff')} onClick={() => review(r.id, 'aprovado')}>Aprovar</button>}
+                          {r.status === 'aprovado' && (
+                            <>
+                              <input
+                                id={`payFile_${r.id}`} type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
+                                onChange={e => markPaid(r.id, e.target.files?.[0] || null)}
+                              />
+                              <button style={btnSm('#3949AB', '#fff')} onClick={() => document.getElementById(`payFile_${r.id}`).click()}>Marcar como pago…</button>
+                            </>
+                          )}
                           {r.status !== 'rejeitado' && <button style={btnSm('#FAE0E2', '#D6323F')} onClick={() => review(r.id, 'rejeitado')}>Rejeitar</button>}
                           {r.status !== 'pendente' && <button style={btnSm('#FBEACC', '#C1780F')} onClick={() => review(r.id, 'pendente')}>Reabrir</button>}
                         </>
