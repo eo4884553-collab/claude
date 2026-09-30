@@ -389,6 +389,13 @@ alter table public.reimbursements drop constraint if exists reimbursements_statu
 alter table public.reimbursements add constraint reimbursements_status_check
   check (status in ('pendente','aprovado','rejeitado','pago'));
 
+-- a versão antiga (3 parâmetros) precisa ser removida explicitamente — "create or replace"
+-- NÃO substitui uma função com assinatura diferente, ele cria uma segunda função por cima.
+-- Com as duas no banco, uma chamada com só 3 argumentos fica ambígua (o Postgres não sabe
+-- se é a antiga ou a nova com o 4º parâmetro no padrão), e toda aprovação passa a falhar com
+-- "Could not choose the best candidate function".
+drop function if exists public.admin_review_reimbursement(uuid, text, text);
+
 create or replace function public.admin_review_reimbursement(
   target_id uuid,
   new_status text,
