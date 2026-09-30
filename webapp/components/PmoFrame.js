@@ -101,6 +101,19 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
       .eq('id', project.id);
     lastLocalWrite.current = Date.now();
     iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:save-ack', ok: !error }, '*');
+    // um save pode ter mudado "Pago" em Custos ou "valor recebido" em Vendas — ambos entram no
+    // saldo de caixa compartilhado. Sem isso, o cartão "Saldo de caixa real" fica com o número
+    // antigo (só buscado 1x no mount) até a página ser recarregada na mão.
+    if (!error) {
+      try {
+        const cash = await fetchSharedCashBalance();
+        iframeRef.current?.contentWindow?.postMessage({
+          type: 'piquinzada:saldo-compartilhado-result', ok: true,
+          saldo: cash.saldo, saldoInicial: cash.saldoInicial,
+          detalhe: { totalRecebidoIngressos: cash.totalRecebidoIngressos, totalPagoCustos: cash.totalPagoCustos, totalPagoRestituicoes: cash.totalPagoRestituicoes },
+        }, '*');
+      } catch (_) { /* se falhar, o saldo so fica desatualizado ate o proximo save ou recarregar */ }
+    }
   }, [auth.user?.id, project.id]);
 
   useEffect(() => {
