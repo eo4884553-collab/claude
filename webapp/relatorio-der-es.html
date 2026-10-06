@@ -137,6 +137,7 @@ td.valcell{ text-align:right; font-weight:700; color:var(--blue-900); }
 .btn.primary:hover{ background:var(--blue-900); }
 .btn.primary:disabled{ opacity:.55; cursor:wait; }
 .btn.ghost{ background:transparent; border-color:var(--line); }
+.btn.small{ font-size:11px; padding:4px 10px; border-radius:5px; display:inline-block; margin:4px 0 6px; }
 
 .hidden{ display:none !important; }
 
@@ -403,8 +404,14 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
           <label class="field">Valor Medido Acumulado (R$)<input type="number" step="any" name="rec_valor_medido_acumulado" /></label>
           <label class="field">Valor Previsto Acumulado (R$)<input type="number" step="any" name="rec_valor_previsto_acumulado" /></label>
         </div>
-        <label class="field" style="margin-top:14px">Etapas Macro Previstas para o Período<textarea name="rec_etapas_previstas" rows="3"></textarea></label>
-        <label class="field" style="margin-top:14px">Etapas Macro Executadas no Período<textarea name="rec_etapas_executadas" rows="3"></textarea></label>
+        <label class="field" style="margin-top:14px">Etapas Macro Previstas para o Período
+          <button type="button" class="btn small" id="copy-etapas-previstas">↺ Copiar da seção 11.1 (Atividades no mês)</button>
+          <textarea name="rec_etapas_previstas" rows="3"></textarea>
+        </label>
+        <label class="field" style="margin-top:14px">Etapas Macro Executadas no Período
+          <button type="button" class="btn small" id="copy-etapas-executadas">↺ Copiar da seção 11.1 (Atividades no mês)</button>
+          <textarea name="rec_etapas_executadas" rows="3"></textarea>
+        </label>
         <label class="field" style="margin-top:14px">Análise dos Desvios<textarea name="rec_analise_desvios" rows="2"></textarea></label>
         <div class="grid" style="margin-top:14px">
           <label class="field">Será necessária a revisão do cronograma?
@@ -415,7 +422,10 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
           </label>
           <label class="field">Prazo para entrega da revisão (se aplicável)<input type="text" name="rec_revisao_prazo" /></label>
         </div>
-        <label class="field" style="margin-top:14px">Etapas Macro Previstas para o Próximo Período<textarea name="rec_etapas_proximo" rows="3"></textarea></label>
+        <label class="field" style="margin-top:14px">Etapas Macro Previstas para o Próximo Período
+          <button type="button" class="btn small" id="copy-etapas-proximo">↺ Copiar da seção 11.3 (Mês +1)</button>
+          <textarea name="rec_etapas_proximo" rows="3"></textarea>
+        </label>
       </div>
     </section>
 
@@ -661,18 +671,19 @@ const EXEMPLO_ITENS = ["010101", "010102", "170115"].map((codigo) => {
   return { item: codigo, descricao: d.descricao, unidade: d.unidade, qtd_contratada: d.qtd_contratada, qtd_anterior: d.qtd_acumulada_anterior, qtd_atual: EXEMPLO_QTD_ATUAL[codigo], preco_unitario: d.preco_unitario };
 });
 const EXEMPLO_EXECUTADO_CONHECIDO = {
-  "mar-26": 62278.10, "abr-26": 103503.12, "mai-26": 120763.43, "jun-26": 343673.57, "jul-26": 435357.99,
+  "mar-26": 62278.10, "abr-26": 103503.10, "mai-26": 120970.51, "jun-26": 341638.29,
+  "jul-26": 431987.47, "ago-26": 484420.18, "set-26": 516395.66,
 };
 // As 13 medições completas da planilha RAO oficial (Relatório de Andamento
 // da Obra), conferidas linha a linha com o Relatório Técnico já entregue.
 const EXEMPLO_RAO = [
   { ate_dia: "2026-03-31", valor_contratual: 2460000, prazo_dias: 600, previsto_pct: 0.09, executado_pct: 2.53, status: "PRAZO" },
   { ate_dia: "2026-04-30", valor_contratual: 2460000, prazo_dias: 900, previsto_pct: 2.03, executado_pct: 4.21, status: "PRAZO" },
-  { ate_dia: "2026-05-31", valor_contratual: 2460000, prazo_dias: 900, previsto_pct: 4.62, executado_pct: 4.91, status: "PRAZO" },
-  { ate_dia: "2026-06-30", valor_contratual: 2460000, prazo_dias: 900, previsto_pct: 6.25, executado_pct: 13.97, status: "PRAZO" },
-  { ate_dia: "2026-07-31", valor_contratual: 2460000, prazo_dias: 900, previsto_pct: 9.42, executado_pct: 17.70, status: "PRAZO" },
-  { ate_dia: "2026-08-31", valor_contratual: 2460000, prazo_dias: 900, previsto_pct: 17.88, executado_pct: "", status: "" },
-  { ate_dia: "2026-09-30", valor_contratual: 2460000, prazo_dias: 900, previsto_pct: 32.04, executado_pct: "", status: "" },
+  { ate_dia: "2026-05-31", valor_contratual: 2460000, prazo_dias: 900, previsto_pct: 4.62, executado_pct: 4.92, status: "PRAZO" },
+  { ate_dia: "2026-06-30", valor_contratual: 2460000, prazo_dias: 900, previsto_pct: 6.25, executado_pct: 13.89, status: "PRAZO" },
+  { ate_dia: "2026-07-31", valor_contratual: 2460000, prazo_dias: 900, previsto_pct: 9.42, executado_pct: 17.56, status: "PRAZO" },
+  { ate_dia: "2026-08-31", valor_contratual: 2460000, prazo_dias: 900, previsto_pct: 17.88, executado_pct: 19.69, status: "PRAZO" },
+  { ate_dia: "2026-09-30", valor_contratual: 2460000, prazo_dias: 900, previsto_pct: 32.04, executado_pct: 20.99, status: "ATRASO" },
   { ate_dia: "2026-10-31", valor_contratual: 2460000, prazo_dias: 900, previsto_pct: 51.01, executado_pct: "", status: "" },
   { ate_dia: "2026-11-30", valor_contratual: 2460000, prazo_dias: 900, previsto_pct: 61.64, executado_pct: "", status: "" },
   { ate_dia: "2026-12-31", valor_contratual: 2460000, prazo_dias: 900, previsto_pct: 76.92, executado_pct: "", status: "" },
@@ -1556,6 +1567,26 @@ document.getElementById("toggle-rec").addEventListener("change", (e) => {
   document.getElementById("rec-fields").classList.toggle("hidden", !e.target.checked);
 });
 
+// A atividade programada no mês de referência (seção 11.1) e a etapa
+// macro do REC descrevem o mesmo trabalho em dois formatos diferentes
+// (tabela detalhada x resumo executivo) — em vez de digitar duas vezes,
+// um clique copia a lista de atividades como marcadores de texto.
+function atividadesComoBullets(tableSelector) {
+  const atividades = Array.from(document.querySelectorAll(`${tableSelector} tbody tr`))
+    .map((tr) => tr.querySelector("input")?.value.trim())
+    .filter(Boolean);
+  return atividades.map((a) => `- ${a}`).join("\n");
+}
+document.getElementById("copy-etapas-previstas").addEventListener("click", () => {
+  form.elements["rec_etapas_previstas"].value = atividadesComoBullets("#atividades-table");
+});
+document.getElementById("copy-etapas-executadas").addEventListener("click", () => {
+  form.elements["rec_etapas_executadas"].value = atividadesComoBullets("#atividades-table");
+});
+document.getElementById("copy-etapas-proximo").addEventListener("click", () => {
+  form.elements["rec_etapas_proximo"].value = atividadesComoBullets("#atividades-fut1-table");
+});
+
 EQUIPE_CONTRATADA_KNOWN.forEach((p) => equipeContratadaMgr.addRow(p));
 EQUIPE_FISCALIZACAO_KNOWN.forEach((p) => equipeFiscalizacaoMgr.addRow(p));
 EXEMPLO_ATIVIDADES.forEach((r) => atividadesMgr.addRow(r));
@@ -1860,19 +1891,26 @@ const {
   PageNumber, PageBreak, TabStopType, HeadingLevel, TableOfContents,
 } = docx;
 
-const DARK_BLUE = "1F6EB1", TEXT_BLUE = "0E4D79", LIGHT_1 = "E9F4FB", LIGHT_2 = "D8EBF6",
-      BORDER_BLUE = "5B9AD4", WHITE = "FFFFFF", RED = "C0504D";
-const FONT = "Arial";
+// Paleta e tipografia extraídas diretamente do Relatório Técnico (6ª
+// Medição) já entregue à fiscalização: fonte Calibri (identificada como
+// "Carlito" no PDF — substituta de código aberto, mesma métrica),
+// títulos/cabeçalhos de tabela em azul-marinho escuro, texto de corpo
+// em quase-preto (não azul), rodapé em cinza, e listras "zebra" das
+// tabelas de dados em creme — não em azul claro.
+const DARK_BLUE = "1F3864", TEXT_BLUE = "16294A", LIGHT_1 = "F2F2F2", LIGHT_2 = "FBEFD9",
+      BORDER_BLUE = "D9D9D9", WHITE = "FFFFFF", RED = "C0504D",
+      BODY_TEXT = "1A1A1A", FOOTER_GRAY = "595959", ACCENT_GOLD = "F0DCA8";
+const FONT = "Calibri";
 const cm = (v) => Math.round(v * 566.9291339);
 
 function cellBorders(color = BORDER_BLUE, size = 4) {
   const b = { style: BorderStyle.SINGLE, size, color };
   return { top: b, bottom: b, left: b, right: b };
 }
-function txt(text, { bold = false, color = TEXT_BLUE, size = 18, italic = false } = {}) {
-  return new TextRun({ text: String(text ?? "-"), bold, italics: italic, color, size, font: FONT });
+function txt(text, { bold = false, color, size = 18, italic = false } = {}) {
+  return new TextRun({ text: String(text ?? "-"), bold, italics: italic, color: color || (bold ? TEXT_BLUE : BODY_TEXT), size, font: FONT });
 }
-function cell(text, { fill, bold, color = TEXT_BLUE, size = 18, align = AlignmentType.CENTER, widthDxa } = {}) {
+function cell(text, { fill, bold, color, size = 18, align = AlignmentType.CENTER, widthDxa } = {}) {
   return new TableCell({
     width: widthDxa ? { size: widthDxa, type: WidthType.DXA } : undefined,
     verticalAlign: VerticalAlign.CENTER,
@@ -1932,15 +1970,15 @@ function fmtDateBR(iso) {
 function sectionHeading(text) {
   return new Paragraph({
     heading: HeadingLevel.HEADING_1,
-    children: [new TextRun({ text, bold: true, color: TEXT_BLUE, size: 20, font: FONT })],
+    children: [new TextRun({ text, bold: true, color: TEXT_BLUE, size: 24, font: FONT })],
   });
 }
 
 const DOC_STYLES = {
   default: {
-    document: { run: { font: FONT, size: 20 } },
+    document: { run: { font: FONT, size: 20, color: BODY_TEXT } },
     heading1: {
-      run: { font: FONT, size: 20, bold: true, color: TEXT_BLUE },
+      run: { font: FONT, size: 24, bold: true, color: TEXT_BLUE },
       paragraph: { spacing: { before: 260, after: 140 } },
     },
   },
@@ -2065,7 +2103,7 @@ function blockTitle(text) {
   return new Paragraph({
     alignment: AlignmentType.CENTER,
     spacing: { before: 260, after: 140 },
-    children: [new TextRun({ text, bold: true, size: 22, color: TEXT_BLUE, font: FONT })],
+    children: [new TextRun({ text, bold: true, size: 30, color: DARK_BLUE, font: FONT })],
   });
 }
 
@@ -2093,7 +2131,7 @@ function raoTable(rows, medicaoAtual) {
   const bodyRows = rows.map((r, i) => {
     const numero = i + 1;
     const isCurrent = String(numero) === String(medicaoAtual);
-    const fill = isCurrent ? "BFE0F5" : (i % 2 === 0 ? LIGHT_1 : LIGHT_2);
+    const fill = isCurrent ? ACCENT_GOLD : (i % 2 === 0 ? LIGHT_1 : LIGHT_2);
     return new TableRow({ children: raoRowCells(numero, r, fill, isCurrent) });
   });
   return new Table({ width: { size: totalWidth, type: WidthType.DXA }, columnWidths: widthsDxa, rows: [headerRow, ...bodyRows], alignment: AlignmentType.CENTER });
@@ -2106,7 +2144,7 @@ function raoSnapshot(row, medicaoAtual) {
     tableHeader: true,
     children: RAO_HEADERS.map((h, i) => cell(h, { fill: DARK_BLUE, bold: true, color: WHITE, size: 16, widthDxa: widthsDxa[i] })),
   });
-  const dataRow = new TableRow({ children: raoRowCells(medicaoAtual, row, "BFE0F5", true) });
+  const dataRow = new TableRow({ children: raoRowCells(medicaoAtual, row, ACCENT_GOLD, true) });
   return new Table({ width: { size: totalWidth, type: WidthType.DXA }, columnWidths: widthsDxa, rows: [headerRow, dataRow], alignment: AlignmentType.CENTER });
 }
 
@@ -2203,15 +2241,15 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
       new Paragraph({
         alignment: AlignmentType.CENTER,
         border: { top: { style: BorderStyle.SINGLE, size: 4, color: BORDER_BLUE, space: 4 } },
-        children: [new TextRun({ text: footerText, size: 15, color: TEXT_BLUE, font: FONT })],
+        children: [new TextRun({ text: footerText, size: 18, color: FOOTER_GRAY, font: FONT })],
       }),
       new Paragraph({
         alignment: AlignmentType.CENTER,
         children: [
-          new TextRun({ text: "Página ", size: 15, color: TEXT_BLUE, font: FONT }),
-          new TextRun({ children: [PageNumber.CURRENT], size: 15, color: TEXT_BLUE, font: FONT }),
-          new TextRun({ text: " de ", size: 15, color: TEXT_BLUE, font: FONT }),
-          new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 15, color: TEXT_BLUE, font: FONT }),
+          new TextRun({ text: "Página ", size: 18, color: FOOTER_GRAY, font: FONT }),
+          new TextRun({ children: [PageNumber.CURRENT], size: 18, color: FOOTER_GRAY, font: FONT }),
+          new TextRun({ text: " de ", size: 18, color: FOOTER_GRAY, font: FONT }),
+          new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 18, color: FOOTER_GRAY, font: FONT }),
         ],
       }),
     ],
@@ -2223,12 +2261,12 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
     spacing: { after: 40 },
-    children: [new TextRun({ text: "RELATÓRIO TÉCNICO", bold: true, size: 20, color: TEXT_BLUE, font: FONT })],
+    children: [new TextRun({ text: "RELATÓRIO TÉCNICO", bold: true, size: 44, color: DARK_BLUE, font: FONT })],
   }));
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
     spacing: { after: 200 },
-    children: [new TextRun({ text: `${data.medicao.numero}ª Medição – ${data.medicao.periodo_faturamento}`, italics: true, size: 18, color: TEXT_BLUE, font: FONT })],
+    children: [new TextRun({ text: `${data.medicao.numero}ª Medição – ${data.medicao.periodo_faturamento}`, italics: true, size: 26, color: TEXT_BLUE, font: FONT })],
   }));
 
   children.push(infoTable([
@@ -2253,11 +2291,11 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
 
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
-    children: [new TextRun({ text: `Fiscalização: ${data.contrato.fiscalizacao}`, bold: true, size: 21, color: TEXT_BLUE, font: FONT })],
+    children: [new TextRun({ text: `Fiscalização: ${data.contrato.fiscalizacao}`, bold: true, size: 20, color: TEXT_BLUE, font: FONT })],
   }));
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
-    children: [new TextRun({ text: `${data.contrato.contratada} · Contrato ${data.contrato.contrato} · Vitória/ES · ${data.medicao.periodo_faturamento}`, size: 18, color: TEXT_BLUE, font: FONT })],
+    children: [new TextRun({ text: `${data.contrato.contratada} · Contrato ${data.contrato.contrato} · Vitória/ES · ${data.medicao.periodo_faturamento}`, size: 18, color: FOOTER_GRAY, font: FONT })],
   }));
 
   children.push(new Paragraph({ children: [new PageBreak()] }));
@@ -2293,7 +2331,7 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
   children.push(new Paragraph({ spacing: { before: 400 }, children: [] }));
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
-    children: [new TextRun({ text: "Responsável pela elaboração:", size: 20, color: TEXT_BLUE, font: FONT })],
+    children: [new TextRun({ text: "Responsável pela elaboração:", size: 20, color: FOOTER_GRAY, font: FONT })],
   }));
 
   if (assinaturaBuf) {
@@ -2312,7 +2350,7 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
   }));
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
-    children: [new TextRun({ text: [data.responsavel.cargo, data.responsavel.crea].filter(Boolean).join(" · "), size: 19, color: TEXT_BLUE, font: FONT })],
+    children: [new TextRun({ text: [data.responsavel.cargo, data.responsavel.crea].filter(Boolean).join(" · "), size: 19, color: FOOTER_GRAY, font: FONT })],
   }));
 
   const doc = new Document({
@@ -2373,15 +2411,15 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
       new Paragraph({
         alignment: AlignmentType.CENTER,
         border: { top: { style: BorderStyle.SINGLE, size: 4, color: BORDER_BLUE, space: 4 } },
-        children: [new TextRun({ text: footerText, size: 15, color: TEXT_BLUE, font: FONT })],
+        children: [new TextRun({ text: footerText, size: 18, color: FOOTER_GRAY, font: FONT })],
       }),
       new Paragraph({
         alignment: AlignmentType.CENTER,
         children: [
-          new TextRun({ text: "Página ", size: 15, color: TEXT_BLUE, font: FONT }),
-          new TextRun({ children: [PageNumber.CURRENT], size: 15, color: TEXT_BLUE, font: FONT }),
-          new TextRun({ text: " de ", size: 15, color: TEXT_BLUE, font: FONT }),
-          new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 15, color: TEXT_BLUE, font: FONT }),
+          new TextRun({ text: "Página ", size: 18, color: FOOTER_GRAY, font: FONT }),
+          new TextRun({ children: [PageNumber.CURRENT], size: 18, color: FOOTER_GRAY, font: FONT }),
+          new TextRun({ text: " de ", size: 18, color: FOOTER_GRAY, font: FONT }),
+          new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 18, color: FOOTER_GRAY, font: FONT }),
         ],
       }),
     ],
@@ -2391,15 +2429,15 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
   const caption = makeCaptioner();
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER, spacing: { after: 60 },
-    children: [new TextRun({ text: "RELATÓRIO MENSAL DE ANDAMENTO DAS ATIVIDADES", bold: true, size: 20, color: TEXT_BLUE, font: FONT })],
+    children: [new TextRun({ text: "RELATÓRIO MENSAL DE ANDAMENTO DAS ATIVIDADES", bold: true, size: 36, color: DARK_BLUE, font: FONT })],
   }));
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER, spacing: { after: 60 },
-    children: [new TextRun({ text: "RMAA", bold: true, size: 20, color: DARK_BLUE, font: FONT })],
+    children: [new TextRun({ text: "RMAA", bold: true, size: 36, color: DARK_BLUE, font: FONT })],
   }));
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER, spacing: { after: 200 },
-    children: [new TextRun({ text: `${data.medicao.numero}ª Medição – ${data.medicao.periodo_faturamento}`, italics: true, size: 18, color: TEXT_BLUE, font: FONT })],
+    children: [new TextRun({ text: `${data.medicao.numero}ª Medição – ${data.medicao.periodo_faturamento}`, italics: true, size: 26, color: TEXT_BLUE, font: FONT })],
   }));
   children.push(infoTable([
     ["OBJETO", data.contrato.objeto], ["CONTRATADA", data.contrato.contratada], ["CONTRATO", data.contrato.contrato],
@@ -2413,8 +2451,8 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
     ["PERÍODO (FATURAMENTO)", data.medicao.periodo_faturamento], ["PERÍODO (DOCUMENTAÇÃO)", data.medicao.periodo_documentacao],
   ]));
   children.push(new Paragraph({ spacing: { before: 160, after: 160 }, children: [] }));
-  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `Fiscalização: ${data.contrato.fiscalizacao}`, bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
-  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `${data.contrato.contratada} · Contrato ${data.contrato.contrato} · Vitória/ES · ${data.medicao.periodo_faturamento}`, size: 18, color: TEXT_BLUE, font: FONT })] }));
+  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `Fiscalização: ${data.contrato.fiscalizacao}`, bold: true, size: 20, color: TEXT_BLUE, font: FONT })] }));
+  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `${data.contrato.contratada} · Contrato ${data.contrato.contrato} · Vitória/ES · ${data.medicao.periodo_faturamento}`, size: 18, color: FOOTER_GRAY, font: FONT })] }));
   children.push(new Paragraph({ children: [new PageBreak()] }));
 
   children.push(new Paragraph({
@@ -2539,14 +2577,14 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
   }
 
   children.push(new Paragraph({ spacing: { before: 400 }, children: [] }));
-  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: "Responsável pela elaboração:", size: 20, color: TEXT_BLUE, font: FONT })] }));
+  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: "Responsável pela elaboração:", size: 20, color: FOOTER_GRAY, font: FONT })] }));
   if (assinaturaBuf) {
     children.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 100 }, children: [new ImageRun({ data: assinaturaBuf, type: assinaturaType, transformation: assinaturaDims })] }));
   } else {
     children.push(new Paragraph({ spacing: { before: 200 }, alignment: AlignmentType.CENTER, children: [new TextRun({ text: "_".repeat(40), font: FONT })] }));
   }
   children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: data.responsavel.nome, bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
-  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: [data.responsavel.cargo, data.responsavel.crea].filter(Boolean).join(" · "), size: 19, color: TEXT_BLUE, font: FONT })] }));
+  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: [data.responsavel.cargo, data.responsavel.crea].filter(Boolean).join(" · "), size: 19, color: FOOTER_GRAY, font: FONT })] }));
 
   return new Document({
     styles: DOC_STYLES,
