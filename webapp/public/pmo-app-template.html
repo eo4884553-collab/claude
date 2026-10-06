@@ -1106,14 +1106,19 @@ function custosRowsForFCKey(fcKey, custosRows){
   return custosRows.filter(r=> r.path[0]===groupKey);
 }
 // valores com data real (pago, ou contratado/aprovado ainda a pagar mas com previsão) de uma
-// categoria de custo — o que sobra do total do cenário (sem data real) continua usando o % manual
-function custosDatedAmounts(fcKey, custosRows){
+// categoria de custo — o que sobra do total do cenário (sem data real) continua usando o % manual.
+// kind opcional filtra só 'real' (já pago) ou só 'previsto' (contratado, ainda sem pagar) — usado
+// pra mostrar as duas linhas separadas (Previsto/Realizado) na tela; sem kind, traz os dois juntos
+// (comportamento original, usado no cálculo do fluxo).
+function custosDatedAmounts(fcKey, custosRows, kind){
   const out = [];
   custosRowsForFCKey(fcKey, custosRows).forEach(r=>{
     if(r.dataPagamento && r.pago){
+      if(kind==='previsto') return;
       const mes = monthIndexForDate(r.dataPagamento);
       if(mes!=null) out.push({mes, valor:r.pago});
     } else if(!r.dataPagamento && r.dataPrevista){
+      if(kind==='real') return;
       const valor = r.contratado || r.orcAprovado || 0;
       if(valor){ const mes = monthIndexForDate(r.dataPrevista); if(mes!=null) out.push({mes, valor}); }
     }
@@ -1121,24 +1126,34 @@ function custosDatedAmounts(fcKey, custosRows){
   return out;
 }
 // idem para as parcelas de patrocínio (aba Patrocínios) — cada parcela com data (paga ou prevista)
-// cai no mês exato; cotas sem parcelas cadastradas continuam usando o % manual da linha Patrocínios
-function patrocinioDatedAmounts(scen){
+// cai no mês exato; cotas sem parcelas cadastradas continuam usando o % manual da linha Patrocínios.
+// kind: ver comentário de custosDatedAmounts acima — aqui "real" = parcela com data de pagamento,
+// "previsto" = parcela com data prevista mas AINDA sem pagamento (o patrocinador pode fechar e não
+// pagar, então essa parte não entra no caixa real até ter data de pagamento de verdade).
+function patrocinioDatedAmounts(scen, kind){
   const out = [];
   (state.patrocinios[scen]||[]).forEach(t=> (t.parcelas||[]).forEach(p=>{
     const valor = Number(p.valor)||0;
     if(!valor) return;
+    const isReal = !!p.dataPagamento;
+    if(kind==='real' && !isReal) return;
+    if(kind==='previsto' && isReal) return;
     const mes = monthIndexForDate(p.dataPagamento || p.dataPrevista);
     if(mes!=null) out.push({mes, valor});
   }));
   return out;
 }
 // contribuições de pessoas da Bateria (só existe nesse domínio) — cada parcela com data (paga ou
-// prevista) cai no mês exato, igual patrocínio; o total anual é a soma de TODAS as parcelas
-function contribuintesBateriaDatedAmounts(){
+// prevista) cai no mês exato, igual patrocínio; o total anual é a soma de TODAS as parcelas.
+// kind: mesmo filtro real/previsto de patrocinioDatedAmounts acima.
+function contribuintesBateriaDatedAmounts(kind){
   const out = [];
   (state.contribuintesBateria||[]).forEach(p=> (p.parcelas||[]).forEach(pc=>{
     const valor = Number(pc.valor)||0;
     if(!valor) return;
+    const isReal = !!pc.dataPagamento;
+    if(kind==='real' && !isReal) return;
+    if(kind==='previsto' && isReal) return;
     const mes = monthIndexForDate(pc.dataPagamento || pc.dataPrevista);
     if(mes!=null) out.push({mes, valor});
   }));
@@ -1171,8 +1186,8 @@ function monthlyDatedPlusRemainder(totalAnnual, datedAmounts, pctRow){
 }
 // qual lista de pagamentos datados alimenta cada linha de ENTRADA — extraído à parte pra poder
 // ser reaproveitado tanto no cálculo do fluxo quanto na sinalização visual da tabela de %
-function entDatedAmountsForKey(k, scen){
-  return k==='patrocinio' ? patrocinioDatedAmounts(scen) : k==='contribuicoesBateria' ? contribuintesBateriaDatedAmounts() : [];
+function entDatedAmountsForKey(k, scen, kind){
+  return k==='patrocinio' ? patrocinioDatedAmounts(scen, kind) : k==='contribuicoesBateria' ? contribuintesBateriaDatedAmounts(kind) : [];
 }
 function computeMonthlyFlow(scen){
   const cs = computeScenario(scen);
@@ -2249,7 +2264,15 @@ VIEWS.oxr = function(){
 };
 
 /* ================= FLUXO DE CAIXA ================= */
-function pctMonthTable(title, labels, keys, storePath, datedByKey){
+// linha auxiliar (Previsto ou Realizado) embaixo da linha principal de uma categoria — mostra o
+// valor em R$ já contratado/pago mês a mês, sem % nenhum (vem direto dos dados de Patrocínio/
+// Custos/Bateria). So renderiza se a categoria tiver pelo menos 1 valor datado desse tipo.
+function datedSubRow(label, monthlyArr, colorVar, bgVar){
+  if(!monthlyArr || sum(monthlyArr)<=0) return '';
+  const cells = monthlyArr.map(v=> `<td class="num mono" style="font-size:10.5px; padding:3px 5px; color:${v>0?colorVar:'var(--text-faint)'}; background:${v>0?bgVar:'transparent'};">${v>0?fmtInt(v):''}</td>`).join('');
+  return `<tr><td style="padding-left:22px; font-size:11px; color:${colorVar}; white-space:nowrap;">↳ ${label}</td>${cells}<td></td></tr>`;
+}
+function pctMonthTable(title, labels, keys, storePath, datedByKey, previstoByKey, realByKey){
   const rows = keys.map((k,ri)=>{
     const vals = MESES.map((_,m)=> Math.round((getPath(state, `${storePath}.${k}.${m}`.split('.'))||0)*1000)/10);
     const dated = datedByKey && datedByKey[ri];
@@ -2270,7 +2293,14 @@ function pctMonthTable(title, labels, keys, storePath, datedByKey){
     const totalCell = `<td class="num mono" style="font-weight:700; white-space:nowrap; color:${ok?'var(--good)':'var(--warn)'};">${fmtNum(total,1)}%</td>`;
     const temReal = dated && sum(dated)>0;
     const labelCell = `<td style="white-space:nowrap;">${labels[ri]}${temReal?` <span class="hint" title="Esta linha tem pelo menos um pagamento real com data — os meses marcados em destaque já têm valor confirmado, além da % que você definiu.">💰</span>`:''}</td>`;
-    return `<tr>${labelCell}${cells}${totalCell}</tr>`;
+    const mainRow = `<tr>${labelCell}${cells}${totalCell}</tr>`;
+    // "Previsto" = contratado/com data prevista mas AINDA sem pagamento (o patrocinador/fornecedor
+    // pode fechar e não pagar, então isso é só expectativa); "Realizado" = já pago de verdade.
+    // Calculadas automaticamente a partir do que foi preenchido em Patrocínios/Custos/Bateria —
+    // não se digita nada aqui, é só leitura, pra comparar o que era esperado com o que aconteceu.
+    const previstoRow = datedSubRow('Previsto (contratado)', previstoByKey && previstoByKey[ri], 'var(--text-dim)', 'var(--surface-2)');
+    const realRow = datedSubRow('Realizado (pago)', realByKey && realByKey[ri], 'var(--good)', 'var(--good-soft)');
+    return mainRow + previstoRow + realRow;
   }).join('');
   return `<div class="tablewrap" style="margin-bottom:10px;"><table>
     <thead><tr><th>${title}</th>${MESES.map(m=>`<th class="num">${m}</th>`).join('')}<th class="num">Total</th></tr></thead>
@@ -2321,10 +2351,21 @@ VIEWS.fluxo = function(){
 
   <div class="section">
     <h2>Entradas <span class="hint">% do total anual em cada mês</span></h2>
-    <div class="hint" style="margin-bottom:8px;">Os % abaixo são a SUA estimativa manual de distribuição ao longo do ano — eles não mudam sozinhos. Onde já existe um pagamento real com data (parcela de patrocínio paga, pagamento de integrante da Bateria), esse valor entra automaticamente no mês certo, <em>além</em> da % que você definiu — a célula fica marcada em verde (💰 na linha) pra avisar que ali já tem algo confirmado, mas a % mostrada continua sendo só a sua projeção, não o realizado.</div>
-    ${pctMonthTable('Linha', FC_ENT_LABELS, FC_ENT_KEYS, 'fluxo.pctEnt', FC_ENT_KEYS.map(k=> datedAmountsToMonthly(entDatedAmountsForKey(k, scen))))}
+    <div class="hint" style="margin-bottom:8px;">Os % abaixo são a SUA estimativa manual de distribuição ao longo do ano — eles não mudam sozinhos, e continuam servindo pra cobrir só a parte do valor anual que ainda não tem nenhuma parcela/pagamento com data. Onde já existe dado datado (Patrocínios, Bateria, e qualquer item de Custos), a linha ganha automaticamente duas sublinhas só de leitura: <strong>Previsto</strong> (contratado, com data esperada, mas ainda sem pagamento — pode não se confirmar) e <strong>Realizado</strong> (já pago de verdade) — calculadas a partir do que você preenche em Patrocínios/Custos/Bateria, sem digitar nada aqui.</div>
+    ${(()=>{
+      const entPrevisto = FC_ENT_KEYS.map(k=> datedAmountsToMonthly(entDatedAmountsForKey(k, scen, 'previsto')));
+      const entReal = FC_ENT_KEYS.map(k=> datedAmountsToMonthly(entDatedAmountsForKey(k, scen, 'real')));
+      const entDated = FC_ENT_KEYS.map((k,i)=> MESES.map((_,m)=> entPrevisto[i][m]+entReal[i][m]));
+      return pctMonthTable('Linha', FC_ENT_LABELS, FC_ENT_KEYS, 'fluxo.pctEnt', entDated, entPrevisto, entReal);
+    })()}
     <h2 style="margin-top:20px;">Saídas <span class="hint">% do total anual em cada mês</span></h2>
-    ${pctMonthTable('Linha', FC_SAI_LABELS, FC_SAI_KEYS, 'fluxo.pctSai', FC_SAI_KEYS.map(k=> datedAmountsToMonthly(custosDatedAmounts(k, computeCustosSummary().rows))))}
+    ${(()=>{
+      const custosRows = computeCustosSummary().rows;
+      const saiPrevisto = FC_SAI_KEYS.map(k=> datedAmountsToMonthly(custosDatedAmounts(k, custosRows, 'previsto')));
+      const saiReal = FC_SAI_KEYS.map(k=> datedAmountsToMonthly(custosDatedAmounts(k, custosRows, 'real')));
+      const saiDated = FC_SAI_KEYS.map((k,i)=> MESES.map((_,m)=> saiPrevisto[i][m]+saiReal[i][m]));
+      return pctMonthTable('Linha', FC_SAI_LABELS, FC_SAI_KEYS, 'fluxo.pctSai', saiDated, saiPrevisto, saiReal);
+    })()}
   </div>
 
   <div class="section">
