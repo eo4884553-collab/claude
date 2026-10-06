@@ -172,6 +172,10 @@ td.num, th.num{text-align:right;}
 table input, table select{padding:5px 7px; font-size:12.4px;}
 table input{min-width:64px;}
 table select{min-width:128px;}
+/* mes com pagamento real ja confirmado (data preenchida) na tabela de % do Fluxo de Caixa —
+   sinaliza visualmente que ali ja tem dinheiro de verdade, nao so a estimativa % ao lado */
+.fc-real-cell{background:var(--good-soft); position:relative;}
+.fc-real-cell::after{content:'●'; position:absolute; top:2px; right:3px; font-size:7px; color:var(--good); pointer-events:none;}
 tfoot td{font-weight:700; border-top:1px solid var(--border); border-bottom:none;}
 
 .grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:16px;}
@@ -1149,14 +1153,26 @@ function contribuintesBateriaTotalAnual(){
 function contribuintesBateriaTotalPago(){
   return sum((state.contribuintesBateria||[]).flatMap(p=> (p.parcelas||[]).filter(pc=>pc.dataPagamento).map(pc=> Number(pc.valor)||0)));
 }
+// converte a lista [{mes,valor}] (pagamentos/parcelas já datados) num array de 15 posições,
+// um valor por mês — usado tanto pro calculo do fluxo quanto pra sinalizar na tela quais meses
+// já tem dinheiro real confirmado (em vez de só a estimativa percentual)
+function datedAmountsToMonthly(datedAmounts){
+  const arr = MESES.map(()=>0);
+  (datedAmounts||[]).forEach(({mes,valor})=>{ arr[mes]+=valor; });
+  return arr;
+}
 // distribui um total anual: a parte com data real cai exatamente no mês dela; o restante (o que
 // não tem data ainda) usa a distribuição percentual manual, igual ao comportamento anterior
 function monthlyDatedPlusRemainder(totalAnnual, datedAmounts, pctRow){
-  const dated = MESES.map(()=>0);
-  let sumDated = 0;
-  datedAmounts.forEach(({mes,valor})=>{ dated[mes]+=valor; sumDated+=valor; });
+  const dated = datedAmountsToMonthly(datedAmounts);
+  const sumDated = sum(dated);
   const remainder = Math.max(0, (totalAnnual||0)-sumDated);
   return MESES.map((_,m)=> dated[m] + remainder*(pctRow[m]||0));
+}
+// qual lista de pagamentos datados alimenta cada linha de ENTRADA — extraído à parte pra poder
+// ser reaproveitado tanto no cálculo do fluxo quanto na sinalização visual da tabela de %
+function entDatedAmountsForKey(k, scen){
+  return k==='patrocinio' ? patrocinioDatedAmounts(scen) : k==='contribuicoesBateria' ? contribuintesBateriaDatedAmounts() : [];
 }
 function computeMonthlyFlow(scen){
   const cs = computeScenario(scen);
@@ -1164,10 +1180,7 @@ function computeMonthlyFlow(scen){
   const entAnnual = {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras, contribuicoesBateria: contribuintesBateriaTotalAnual()};
   const saiAnnual = {subAtracoes:cs.subAtracoes, subEstrutura:cs.subEstrutura, subOperacao:cs.subOperacao, subMarketing:cs.subMarketing,
     subLogistica:cs.subLogistica, subExtra:cs.subExtra, despesasAdm:cs.despesasAdm, custoTaxaIngressos:cs.custoTaxaIngressos, openBar:cs.openBar, contingenciaValor:cs.contingenciaValor, restituicoesAprovadas:cs.restituicoesAprovadas};
-  const entMonthly = FC_ENT_KEYS.map(k=>{
-    const dated = k==='patrocinio' ? patrocinioDatedAmounts(scen) : k==='contribuicoesBateria' ? contribuintesBateriaDatedAmounts() : [];
-    return monthlyDatedPlusRemainder(entAnnual[k], dated, state.fluxo.pctEnt[k]);
-  });
+  const entMonthly = FC_ENT_KEYS.map(k=> monthlyDatedPlusRemainder(entAnnual[k], entDatedAmountsForKey(k, scen), state.fluxo.pctEnt[k]));
   const saiMonthly = FC_SAI_KEYS.map(k=> monthlyDatedPlusRemainder(saiAnnual[k], custosDatedAmounts(k, custosRows), state.fluxo.pctSai[k]));
   const totalEnt = MESES.map((_,m)=> sum(entMonthly.map(row=>row[m])));
   const totalSai = MESES.map((_,m)=> sum(saiMonthly.map(row=>row[m])));
@@ -2236,18 +2249,28 @@ VIEWS.oxr = function(){
 };
 
 /* ================= FLUXO DE CAIXA ================= */
-function pctMonthTable(title, labels, keys, storePath){
+function pctMonthTable(title, labels, keys, storePath, datedByKey){
   const rows = keys.map((k,ri)=>{
     const vals = MESES.map((_,m)=> Math.round((getPath(state, `${storePath}.${k}.${m}`.split('.'))||0)*1000)/10);
+    const dated = datedByKey && datedByKey[ri];
     const cells = MESES.map((_,m)=>{
       const path = `${storePath}.${k}.${m}`;
-      return `<td><input id="${mkId(path)}" type="number" step="1" data-bind="${path}" data-kind="pct" value="${vals[m]}" style="width:52px; padding:4px 5px; font-size:11.5px;"></td>`;
+      const realValor = dated ? dated[m] : 0;
+      // mes com pagamento real ja confirmado (data preenchida em Custos/Patrocinio/Bateria) —
+      // o % aqui do lado continua sendo so a ESTIMATIVA manual, o valor real some por cima dela
+      // automaticamente no grafico; isso so avisa visualmente que esse mes ja tem dinheiro de
+      // verdade entrando, pra nao confundir com "só projeção"
+      const cls = realValor>0 ? ' class="fc-real-cell"' : '';
+      const title = realValor>0 ? ` title="Já tem ${fmtCur(realValor)} real confirmado neste mês (de um pagamento com data) — isso entra à parte da % ao lado, automaticamente."` : '';
+      return `<td${cls}${title}><input id="${mkId(path)}" type="number" step="1" data-bind="${path}" data-kind="pct" value="${vals[m]}" style="width:52px; padding:4px 5px; font-size:11.5px;"></td>`;
     }).join('');
     // total lançado nessa linha — deixa claro se já distribuiu os 100% ou ainda falta/sobrou
     const total = Math.round(sum(vals)*10)/10;
     const ok = Math.abs(total-100)<0.05;
     const totalCell = `<td class="num mono" style="font-weight:700; white-space:nowrap; color:${ok?'var(--good)':'var(--warn)'};">${fmtNum(total,1)}%</td>`;
-    return `<tr><td style="white-space:nowrap;">${labels[ri]}</td>${cells}${totalCell}</tr>`;
+    const temReal = dated && sum(dated)>0;
+    const labelCell = `<td style="white-space:nowrap;">${labels[ri]}${temReal?` <span class="hint" title="Esta linha tem pelo menos um pagamento real com data — os meses marcados em destaque já têm valor confirmado, além da % que você definiu.">💰</span>`:''}</td>`;
+    return `<tr>${labelCell}${cells}${totalCell}</tr>`;
   }).join('');
   return `<div class="tablewrap" style="margin-bottom:10px;"><table>
     <thead><tr><th>${title}</th>${MESES.map(m=>`<th class="num">${m}</th>`).join('')}<th class="num">Total</th></tr></thead>
@@ -2298,9 +2321,10 @@ VIEWS.fluxo = function(){
 
   <div class="section">
     <h2>Entradas <span class="hint">% do total anual em cada mês</span></h2>
-    ${pctMonthTable('Linha', FC_ENT_LABELS, FC_ENT_KEYS, 'fluxo.pctEnt')}
+    <div class="hint" style="margin-bottom:8px;">Os % abaixo são a SUA estimativa manual de distribuição ao longo do ano — eles não mudam sozinhos. Onde já existe um pagamento real com data (parcela de patrocínio paga, pagamento de integrante da Bateria), esse valor entra automaticamente no mês certo, <em>além</em> da % que você definiu — a célula fica marcada em verde (💰 na linha) pra avisar que ali já tem algo confirmado, mas a % mostrada continua sendo só a sua projeção, não o realizado.</div>
+    ${pctMonthTable('Linha', FC_ENT_LABELS, FC_ENT_KEYS, 'fluxo.pctEnt', FC_ENT_KEYS.map(k=> datedAmountsToMonthly(entDatedAmountsForKey(k, scen))))}
     <h2 style="margin-top:20px;">Saídas <span class="hint">% do total anual em cada mês</span></h2>
-    ${pctMonthTable('Linha', FC_SAI_LABELS, FC_SAI_KEYS, 'fluxo.pctSai')}
+    ${pctMonthTable('Linha', FC_SAI_LABELS, FC_SAI_KEYS, 'fluxo.pctSai', FC_SAI_KEYS.map(k=> datedAmountsToMonthly(custosDatedAmounts(k, computeCustosSummary().rows))))}
   </div>
 
   <div class="section">
