@@ -398,7 +398,7 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
           <span id="rec-upload-status"></span>
         </div>
         <div class="grid">
-          <label class="field">Valor Medido no Período (R$)<input type="number" step="any" name="rec_valor_medido_periodo" /></label>
+          <label class="field">Valor Medido no Período (R$) <small>(preenchido a partir do "Valor da Medição" da seção 2 — edite aqui só se for diferente)</small><input type="number" step="any" name="rec_valor_medido_periodo" id="rec_valor_medido_periodo" /></label>
           <label class="field">Valor Previsto no Período (R$)<input type="number" step="any" name="rec_valor_previsto_periodo" /></label>
           <label class="field">Valor Medido Acumulado (R$)<input type="number" step="any" name="rec_valor_medido_acumulado" /></label>
           <label class="field">Valor Previsto Acumulado (R$)<input type="number" step="any" name="rec_valor_previsto_acumulado" /></label>
@@ -434,6 +434,7 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
         <label class="field">Doença profissional<input type="number" name="seg_tipo_doenca" value="0" /></label>
         <label class="field">HHT (Homens-Hora Trabalhadas)<input type="number" name="seg_hht" value="0" /></label>
         <label class="field">Taxa de Gravidade <small>(0 = calcular automaticamente pela NBR 14280)</small><input type="number" step="any" name="seg_taxa_gravidade" value="0" /></label>
+        <div id="seguranca-canvas-holder" style="grid-column:1/-1"><canvas id="seguranca-canvas" height="110"></canvas></div>
       </div>
     </section>
 
@@ -693,6 +694,7 @@ const itensBody = document.querySelector("#itens-table tbody");
 const curvaBody = document.querySelector("#curva-table tbody");
 const totalPreviewEl = document.getElementById("total-preview");
 const valorMedicaoInput = document.getElementById("valor_medicao");
+const recValorMedidoPeriodoInput = document.getElementById("rec_valor_medido_periodo");
 
 function escAttr(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -709,18 +711,14 @@ function lookupItem(rawCode) {
   // filtro/autocomplete ("010101 — Remoção de forro de gesso") — usa só
   // os dígitos do INÍCIO da string, nunca todos os dígitos do texto,
   // senão números dentro da própria descrição contaminariam o código.
+  // Só casamento EXATO: nunca completa com zeros à esquerda para
+  // "adivinhar" um código — isso já causou itens errados sendo puxados
+  // de uma base antiga quando a planilha atual usa outra numeração.
   const m = String(rawCode || "").trim().match(/^\d+/);
   if (!m) return null;
   const digits = m[0];
   if (DYNAMIC_ITEMS_DB[digits]) return DYNAMIC_ITEMS_DB[digits];
   if (ITEMS_DB[digits]) return ITEMS_DB[digits];
-  for (const len of [2, 4, 6, 8]) {
-    if (digits.length < len) {
-      const padded = digits.padStart(len, "0");
-      if (DYNAMIC_ITEMS_DB[padded]) return DYNAMIC_ITEMS_DB[padded];
-      if (ITEMS_DB[padded]) return ITEMS_DB[padded];
-    }
-  }
   return null;
 }
 
@@ -783,6 +781,122 @@ function normHeaderText(s) {
   return String(s ?? "")
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase().trim();
+}
+
+/* ---------------------------------------------------------------------
+   Importa\u00e7\u00e3o a partir da aba "MEDICAO" (formato largo, uma coluna de
+   quantidade + uma de valor por medi\u00e7\u00e3o, com pre\u00e7o unit\u00e1rio pr\u00f3prio) \u2014
+   muito mais confi\u00e1vel que a antiga leitura por blocos das abas
+   "Mem\u00f3ria MED.0X", que n\u00e3o tinha pre\u00e7o e dependia de adivinhar a
+   coluna certa. Esta \u00e9 tentada primeiro; o modo antigo s\u00f3 entra em
+   cena se nenhuma aba tiver este formato.
+--------------------------------------------------------------------- */
+function findMedicaoSheetFormat(rows) {
+  const limit = Math.min(rows.length, 40);
+  for (let r = 0; r < limit; r++) {
+    const row = rows[r] || [];
+    let itemCol = -1, descCol = -1, undCol = -1, qtdContratadaCol = -1, valorUnitCol = -1;
+    row.forEach((cell, c) => {
+      const h = normHeaderText(cell);
+      if (h === "item") itemCol = c;
+      else if (h.startsWith("descri")) descCol = c;
+      else if (h.startsWith("und")) undCol = c;
+      else if (h.includes("quantidade") && h.includes("total")) qtdContratadaCol = c;
+      else if (h.includes("valor") && h.includes("unit")) valorUnitCol = c;
+    });
+    if (itemCol < 0 || descCol < 0 || undCol < 0 || qtdContratadaCol < 0) continue;
+
+    const medCols = {};
+    for (let rr = r; rr <= r + 1 && rr < rows.length; rr++) {
+      const hrow = rows[rr] || [];
+      hrow.forEach((cell, c) => {
+        const h = normHeaderText(cell);
+        const m = h.match(/medi[c\u00e7][a\u00e3]o\s*0*(\d+)/);
+        if (m) {
+          const num = parseInt(m[1], 10);
+          if (!(num in medCols)) medCols[num] = { qty: c, val: c + 1 };
+        }
+      });
+    }
+    if (Object.keys(medCols).length > 0) {
+      return { headerRow: r, itemCol, descCol, undCol, qtdContratadaCol, valorUnitCol, medCols };
+    }
+  }
+  return null;
+}
+
+function parseMedicaoSheetItems(rows, fmt) {
+  const items = [];
+  for (let r = fmt.headerRow + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const codeRaw = row[fmt.itemCol];
+    const desc = row[fmt.descCol];
+    const und = row[fmt.undCol];
+    if (codeRaw == null || desc == null || und == null || String(und).trim() === "") continue;
+    const codigo = String(codeRaw).replace(/^'/, "").trim();
+    // linhas de se\u00e7\u00e3o/subse\u00e7\u00e3o ("01", "1010") n\u00e3o t\u00eam unidade/pre\u00e7o \u2014 s\u00f3
+    // itens de verdade t\u00eam c\u00f3digo com 4+ d\u00edgitos.
+    if (!/^\d{4,}$/.test(codigo)) continue;
+    const qtdContratada = typeof row[fmt.qtdContratadaCol] === "number" ? row[fmt.qtdContratadaCol] : 0;
+    const precoUnitario = fmt.valorUnitCol >= 0 && typeof row[fmt.valorUnitCol] === "number" ? row[fmt.valorUnitCol] : 0;
+    const porMedicao = {};
+    for (const [numStr, cols] of Object.entries(fmt.medCols)) {
+      const v = row[cols.qty];
+      porMedicao[numStr] = typeof v === "number" ? v : 0;
+    }
+    items.push({ codigo, descricao: String(desc).trim(), unidade: String(und).trim(), qtd_contratada: qtdContratada, preco_unitario: precoUnitario, por_medicao: porMedicao });
+  }
+  return items;
+}
+
+function importarItensMedicaoSheet(items, medicaoAtual, sheetName, statusEl) {
+  const medsOrdenadas = [...new Set(items.flatMap((it) => Object.keys(it.por_medicao).map(Number)))].sort((a, b) => a - b);
+  const anteriores = medsOrdenadas.filter((n) => n < medicaoAtual);
+
+  itensBody.innerHTML = "";
+  let count = 0;
+  items.forEach((it) => {
+    const atual = it.por_medicao[String(medicaoAtual)] || 0;
+    if (!atual) return;
+    const anterior = anteriores.reduce((s, n) => s + (it.por_medicao[String(n)] || 0), 0);
+    DYNAMIC_ITEMS_DB[it.codigo] = {
+      descricao: it.descricao, unidade: it.unidade, qtd_contratada: it.qtd_contratada,
+      qtd_acumulada_anterior: anterior, preco_unitario: it.preco_unitario,
+    };
+    addItemRow({
+      item: it.codigo, descricao: it.descricao, unidade: it.unidade,
+      qtd_contratada: it.qtd_contratada, qtd_anterior: anterior,
+      qtd_atual: atual, preco_unitario: it.preco_unitario,
+    });
+    count += 1;
+  });
+  refreshItemsDatalist();
+  statusEl.innerHTML = "";
+  if (count) {
+    statusEl.textContent = `${count} itens com lan\u00e7amento na Medi\u00e7\u00e3o ${medicaoAtual} importados da aba "${sheetName}" (de ${items.length} itens no total da planilha), com pre\u00e7o unit\u00e1rio j\u00e1 preenchido pela planilha.`;
+    statusEl.className = "ok";
+  } else {
+    statusEl.textContent = `Nenhum item tem quantidade lan\u00e7ada na Medi\u00e7\u00e3o ${medicaoAtual}, na aba "${sheetName}". Confira se escolheu o n\u00famero certo.`;
+    statusEl.className = "error";
+  }
+}
+
+function showMedicaoNumeroPicker(items, sheetName, statusEl) {
+  const medsOrdenadas = [...new Set(items.flatMap((it) => Object.keys(it.por_medicao).map(Number)))].sort((a, b) => a - b);
+  const sugerida = medsOrdenadas[medsOrdenadas.length - 1];
+  statusEl.className = "";
+  statusEl.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span>Qual \u00e9 a <strong>medi\u00e7\u00e3o atual</strong> (a que est\u00e1 sendo lan\u00e7ada agora)?</span>
+      <select id="bm-medicao-choice">
+        ${medsOrdenadas.map((n) => `<option value="${n}" ${n === sugerida ? "selected" : ""}>${n}\u00aa Medi\u00e7\u00e3o</option>`).join("")}
+      </select>
+      <button type="button" class="btn" id="bm-medicao-confirm">Importar</button>
+    </div>`;
+  document.getElementById("bm-medicao-confirm").addEventListener("click", () => {
+    const n = Number(document.getElementById("bm-medicao-choice").value);
+    importarItensMedicaoSheet(items, n, sheetName, statusEl);
+  });
 }
 
 function findBMHeaderCols(rows) {
@@ -942,6 +1056,20 @@ document.getElementById("bm-file-input").addEventListener("change", async (e) =>
     if (typeof XLSX === "undefined") throw new Error("biblioteca de leitura de planilhas não carregou");
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: "array" });
+
+    // Tenta primeiro o formato largo da aba "MEDICAO" (com preço unitário
+    // e uma coluna por medição) — muito mais confiável. Só cai no modo
+    // antigo (abas "Memória MED.0X", sem preço) se nenhuma aba tiver isso.
+    for (const sheetName of wb.SheetNames) {
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
+      const fmt = findMedicaoSheetFormat(rows);
+      if (!fmt) continue;
+      const items = parseMedicaoSheetItems(rows, fmt);
+      if (items.length) {
+        showMedicaoNumeroPicker(items, sheetName, statusEl);
+        return;
+      }
+    }
 
     const candidates = [];
     for (const sheetName of wb.SheetNames) {
@@ -1126,6 +1254,7 @@ document.getElementById("rec-file-input").addEventListener("change", async (e) =
       const el = form.elements["rec_" + key];
       if (el) el.value = val;
     }
+    recValorMedidoPeriodoInput.dataset.touched = "1";
     statusEl.textContent = "Campos preenchidos a partir da planilha REC.";
     statusEl.className = "success";
   } catch (err) {
@@ -1160,8 +1289,21 @@ function recalcTotal() {
   });
   totalPreviewEl.textContent = fmtBRL(total);
   if (!valorMedicaoInput.dataset.userEdited) valorMedicaoInput.value = total ? total.toFixed(2) : "";
+  sincronizarValorMedidoPeriodoRec();
 }
-valorMedicaoInput.addEventListener("input", () => { valorMedicaoInput.dataset.userEdited = "1"; });
+valorMedicaoInput.addEventListener("input", () => { valorMedicaoInput.dataset.userEdited = "1"; sincronizarValorMedidoPeriodoRec(); });
+
+// O "Valor Medido no Período" do REC é o mesmo número do "Valor da
+// Medição" (seção 2) — evita ter que digitar/conferir o mesmo valor em
+// dois lugares, o que já causou divergência entre o Relatório Técnico e
+// o RMAA. Só auto-preenche enquanto o usuário (ou uma planilha REC
+// anexada) não tiver digitado um valor diferente manualmente ali.
+function sincronizarValorMedidoPeriodoRec() {
+  if (recValorMedidoPeriodoInput.dataset.touched) return;
+  recValorMedidoPeriodoInput.value = valorMedicaoInput.value;
+}
+recValorMedidoPeriodoInput.addEventListener("input", () => { recValorMedidoPeriodoInput.dataset.touched = "1"; });
+
 
 /* ---------------------------------------------------------------------
    Curva S — gráfico ao vivo (Chart.js) reaproveitado como fonte da
@@ -1204,6 +1346,45 @@ function redrawCurva() {
   };
   if (curvaChart) { curvaChart.data = cfg.data; curvaChart.update(); }
   else { curvaChart = new Chart(ctx, cfg); }
+}
+
+/* ---------------------------------------------------------------------
+   Gráfico de Segurança do Trabalho — barras com as contagens de
+   acidentes por tipo, igual em espírito ao painel "GRÁFICOS
+   ESTATÍSTICOS" que a Contratada já costuma anexar nos relatórios
+--------------------------------------------------------------------- */
+let segurancaChart = null;
+function coletarSegurancaForm() {
+  const g = (name) => parseFloat(form.elements[name]?.value) || 0;
+  return {
+    com_afastamento: g("seg_com_afastamento"), sem_afastamento: g("seg_sem_afastamento"),
+    tipo_tipico: g("seg_tipo_tipico"), tipo_trajeto: g("seg_tipo_trajeto"), tipo_doenca: g("seg_tipo_doenca"),
+  };
+}
+function redrawSegurancaChart() {
+  const seg = coletarSegurancaForm();
+  const ctx = document.getElementById("seguranca-canvas").getContext("2d");
+  const cfg = {
+    type: "bar",
+    data: {
+      labels: ["Com\nAfastam.", "Sem\nAfastam.", "Típico", "Trajeto", "Doença\nProfiss."],
+      datasets: [{
+        label: "Acidentes no período",
+        data: [seg.com_afastamento, seg.sem_afastamento, seg.tipo_tipico, seg.tipo_trajeto, seg.tipo_doenca],
+        backgroundColor: ["#1F6EB1", "#5B9AD4", "#B5443D", "#D98C4A", "#8E6AB8"],
+      }],
+    },
+    options: {
+      responsive: true, animation: false,
+      plugins: { legend: { display: false }, title: { display: true, text: "Estatística de Acidentes no Período", color: "#0E4D79", font: { size: 13, weight: "bold" } } },
+      scales: {
+        x: { ticks: { color: "#0E4D79", font: { size: 10 } }, grid: { display: false } },
+        y: { beginAtZero: true, ticks: { color: "#0E4D79", font: { size: 10 }, precision: 0 }, grid: { color: "#D8EBF6" } },
+      },
+    },
+  };
+  if (segurancaChart) { segurancaChart.data = cfg.data; segurancaChart.update(); }
+  else { segurancaChart = new Chart(ctx, cfg); }
 }
 
 document.getElementById("add-item").addEventListener("click", () => addItemRow());
@@ -1524,6 +1705,7 @@ function captureDraft() {
     },
     mesReferencia: mesReferenciaSelect.value,
     valorMedicaoUserEdited: !!valorMedicaoInput.dataset.userEdited,
+    recValorMedidoPeriodoTouched: !!recValorMedidoPeriodoInput.dataset.touched,
     itens: captureItensRaw(),
     curva: coletarCurva(),
     equipeContratada: equipeContratadaMgr.collect(),
@@ -1587,6 +1769,8 @@ function restoreDraft(snap) {
   if (snap.mesReferencia) mesReferenciaSelect.value = snap.mesReferencia;
   if (snap.valorMedicaoUserEdited) valorMedicaoInput.dataset.userEdited = "1";
   else delete valorMedicaoInput.dataset.userEdited;
+  if (snap.recValorMedidoPeriodoTouched) recValorMedidoPeriodoInput.dataset.touched = "1";
+  else delete recValorMedidoPeriodoInput.dataset.touched;
 
   recalcTotal();
   redrawCurva();
@@ -2336,6 +2520,12 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
     children.push(caption("Indicadores de segurança do trabalho no período"));
     children.push(segurancaTable(seg));
     children.push(tableSource("Controle estatístico de acidentes da Contratada."));
+    if (data.segurancaChartBuf) {
+      children.push(new Paragraph({
+        alignment: AlignmentType.CENTER, spacing: { before: 160 },
+        children: [new ImageRun({ data: data.segurancaChartBuf, type: "png", transformation: { width: data.segurancaChartWidth, height: data.segurancaChartHeight } })],
+      }));
+    }
   }
 
   children.push(sectionHeading("9. PRINCIPAIS CORRESPONDÊNCIAS DO MÊS DE REFERÊNCIA"));
@@ -2519,6 +2709,19 @@ form.addEventListener("submit", async (e) => {
       const targetWidth = 600;
       data.curvaChartWidth = targetWidth;
       data.curvaChartHeight = Math.round(targetWidth * (canvas.height / canvas.width));
+    }
+
+    if (data.seguranca) {
+      const totalAcidentes = [data.seguranca.com_afastamento, data.seguranca.sem_afastamento].reduce((s, v) => s + (Number(v) || 0), 0);
+      if (totalAcidentes > 0) {
+        redrawSegurancaChart();
+        await new Promise((r) => setTimeout(r, 60));
+        const segCanvas = document.getElementById("seguranca-canvas");
+        data.segurancaChartBuf = await canvasToArrayBuffer(segCanvas);
+        const targetWidth = 500;
+        data.segurancaChartWidth = targetWidth;
+        data.segurancaChartHeight = Math.round(targetWidth * (segCanvas.height / segCanvas.width));
+      }
     }
 
     const gerados = [];
