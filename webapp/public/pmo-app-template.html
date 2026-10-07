@@ -241,9 +241,14 @@ button.mesa-btn.selected{outline:3px solid var(--accent); outline-offset:2px;}
 .mesa-legend .sw{display:inline-block; width:12px; height:12px; border-radius:50%; margin-right:5px; vertical-align:middle;}
 .mesa-layout{display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap;}
 .mesa-layout .mesa-wrap{flex:1 1 480px;}
-.mesa-3d-ref{flex:1 1 320px; min-width:280px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); padding:14px; align-self:stretch;}
-.mesa-3d-ref img{width:100%; height:auto; border-radius:8px; display:block;}
+.mesa-3d-ref{flex:2 1 560px; min-width:320px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); padding:14px; align-self:stretch;}
+.mesa-3d-ref img{width:100%; height:auto; border-radius:8px; display:block; cursor:zoom-in;}
 .mesa-3d-ref .cap{font-size:11px; color:var(--text-faint); margin-top:8px; line-height:1.4;}
+.mesa-3d-lightbox{position:fixed; inset:0; z-index:200; background:rgba(10,6,10,.88); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px;}
+.mesa-3d-lightbox .lb-bar{display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; justify-content:center;}
+.mesa-3d-lightbox .lb-viewport{flex:1 1 auto; width:100%; max-width:1400px; overflow:auto; border-radius:10px; background:rgba(0,0,0,.25);}
+.mesa-3d-lightbox .lb-viewport img{display:block; transform-origin:top left; border-radius:0;}
+.mesa-3d-lightbox .lb-close{cursor:pointer;}
 
 button.btn{
   font-family:inherit; font-size:12.5px; font-weight:600; padding:8px 14px; border-radius:8px; cursor:pointer;
@@ -1477,7 +1482,7 @@ function onEnterCommit(e){
 // nativos, que o navegador BLOQUEIA silenciosamente dentro do iframe do Artifact (o clique parecia
 // "não fazer nada" porque a caixa de dialogo nunca aparecia e a funcao nunca era chamada)
 // acoes que so navegam a tela (nao alteram dados do projeto) — continuam liberadas em modo convidado
-const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom']);
+const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom']);
 function onAction(e){
   const el = e.currentTarget || e.target.closest('[data-action]');
   const [action, ...args] = el.dataset.action.split(':');
@@ -2501,8 +2506,8 @@ VIEWS.mesas = function(){
         </div>
       </div>
       <div class="mesa-3d-ref">
-        <img src="/mesas-3d-referencia.jpg" alt="Referência 3D do salão de eventos" loading="lazy">
-        <div class="cap">Referência 3D do salão — só pra visualização e localização, não é interativa. A reserva é feita no mapa numerado ao lado.</div>
+        <img src="/mesas-3d-referencia.jpg" alt="Referência 3D do salão de eventos" loading="lazy" data-action="openMesa3d">
+        <div class="cap">Referência 3D do salão — clique na imagem pra ampliar e dar zoom. Só pra visualização e localização, não é interativa: a reserva é feita no mapa numerado ao lado.</div>
       </div>
     </div>
     <div class="mesa-legend">
@@ -2510,8 +2515,27 @@ VIEWS.mesas = function(){
       <span><span class="sw" style="background:var(--warn-soft); border:2px solid var(--warn);"></span>Reservada</span>
       <span><span class="sw" style="background:var(--good-soft); border:2px solid var(--good);"></span>Paga</span>
     </div>
-  </div>`;
+  </div>
+  ${state.ui.mesa3dOpen ? mesa3dLightbox() : ''}`;
 };
+const MESA_3D_LIGHTBOX_BASE_PX = 1400; // = max-width da .lb-viewport; zoom 2x = 2800px = resolução nativa da imagem (sem perda de qualidade)
+function mesa3dLightbox(){
+  const z = state.ui.mesa3dZoom || 1;
+  const widthPx = Math.round(MESA_3D_LIGHTBOX_BASE_PX * z);
+  return `
+  <div class="mesa-3d-lightbox" data-action="closeMesa3d">
+    <div class="lb-bar" onclick="event.stopPropagation();">
+      <button class="btn small" data-action="mesa3dZoom:out">− Zoom</button>
+      <span class="hint">${Math.round(z*100)}%</span>
+      <button class="btn small" data-action="mesa3dZoom:in">+ Zoom</button>
+      <button class="btn small" data-action="mesa3dZoom:reset">Redefinir</button>
+      <button class="btn small lb-close" data-action="closeMesa3d">Fechar ✕</button>
+    </div>
+    <div class="lb-viewport" onclick="event.stopPropagation();">
+      <img src="/mesas-3d-referencia.jpg" alt="Referência 3D do salão de eventos — ampliada" style="width:${widthPx}px;">
+    </div>
+  </div>`;
+}
 ACTIONS.selectMesa = (numero)=>{
   state.ui.mesaSelecionada = Number(numero);
   render(); // so muda a tela (qual mesa esta aberta no painel nao e um dado do projeto) — nao chama saveState
@@ -2525,6 +2549,22 @@ ACTIONS.mesaZoom = (dir)=>{
   if(dir==='in') state.ui.mesasZoom = Math.min(2, Math.round((cur+0.15)*100)/100);
   else if(dir==='out') state.ui.mesasZoom = Math.max(0.4, Math.round((cur-0.15)*100)/100);
   else state.ui.mesasZoom = 1;
+  render();
+};
+ACTIONS.openMesa3d = ()=>{
+  state.ui.mesa3dOpen = true;
+  state.ui.mesa3dZoom = 1;
+  render();
+};
+ACTIONS.closeMesa3d = ()=>{
+  state.ui.mesa3dOpen = false;
+  render();
+};
+ACTIONS.mesa3dZoom = (dir)=>{
+  const cur = state.ui.mesa3dZoom || 1;
+  if(dir==='in') state.ui.mesa3dZoom = Math.min(2, Math.round((cur+0.25)*100)/100);
+  else if(dir==='out') state.ui.mesa3dZoom = Math.max(0.5, Math.round((cur-0.25)*100)/100);
+  else state.ui.mesa3dZoom = 1;
   render();
 };
 ACTIONS.addPessoaMesa = (idx)=>{
