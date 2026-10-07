@@ -223,6 +223,23 @@ tfoot td{font-weight:700; border-top:1px solid var(--border); border-bottom:none
 .heatcell{display:flex; align-items:center; justify-content:center; height:44px; border-radius:6px; font-weight:700; font-size:13px;}
 .heataxis{display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--text-dim);}
 
+/* mapa de mesas (Feijoada do Bloco) */
+.mesa-wrap{overflow:auto; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); padding:18px;}
+.mesa-grid{display:grid; grid-template-columns:repeat(11, 54px); grid-auto-rows:54px; gap:8px; transform-origin:top left; width:max-content;}
+.mesa-slot{visibility:hidden;}
+.mesa-hole{display:flex; align-items:center; justify-content:center; background:var(--surface-2); border-radius:8px; font-size:9px; color:var(--text-faint); text-align:center; line-height:1.2; text-transform:uppercase; letter-spacing:.04em;}
+button.mesa-btn{width:54px; height:54px; border-radius:50%; border:2px solid var(--border); background:var(--surface-2); color:var(--text); font-weight:700; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;}
+button.mesa-btn:hover{border-color:var(--accent);}
+button.mesa-btn.livre{background:var(--surface-2); border-color:var(--border); color:var(--text-dim);}
+button.mesa-btn.reservada{background:var(--warn-soft); border-color:var(--warn); color:var(--warn);}
+button.mesa-btn.paga{background:var(--good-soft); border-color:var(--good); color:var(--good);}
+button.mesa-btn.selected{outline:3px solid var(--accent); outline-offset:2px;}
+.mesa-bar-row{margin-top:18px; padding-top:14px; border-top:1px dashed var(--border);}
+.mesa-bar-row .lbl-row{font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-faint); margin-bottom:8px; text-align:center;}
+.mesa-bar-row .row-tables{display:flex; gap:8px; justify-content:center;}
+.mesa-legend{display:flex; gap:16px; flex-wrap:wrap; margin-top:10px; font-size:11.5px; color:var(--text-dim);}
+.mesa-legend .sw{display:inline-block; width:12px; height:12px; border-radius:50%; margin-right:5px; vertical-align:middle;}
+
 button.btn{
   font-family:inherit; font-size:12.5px; font-weight:600; padding:8px 14px; border-radius:8px; cursor:pointer;
   border:1px solid var(--border); background:var(--surface); color:var(--text);
@@ -552,6 +569,14 @@ const FC_SAI_DEFAULT_PCT = [
 const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez','Jan (pós)','Fev (pós)','Mar (pós)'];
 
 /* ---------------- state ---------------- */
+// 100 mesas da Feijoada do Bloco (só usado nesse domínio) — gera o número 1..100, o resto some
+// vazio/livre até alguém reservar. Mesma estrutura pra cada mesa, independente do status.
+function freshMesa(numero){
+  return {numero, status:'livre', reservadoPor:'', telefone:'', dataReserva:'', dataPagamento:'', valorPago:0, pessoas:[], obs:''};
+}
+function freshMesasFeijoada(){
+  return Array.from({length:100}, (_,i)=> freshMesa(i+1));
+}
 function freshState(){
   const entradas = {}; const vendas = {}; const patrocinios = {};
   SCEN.forEach((s,i)=>{ entradas[s]=entradaDefaults(i,s); vendas[s]=vendaDefaults(s); patrocinios[s]=patrocinioDefaults(s); });
@@ -572,6 +597,8 @@ function freshState(){
     // rastreio de pagamentos por pessoa — só usado no domínio Bateria Piquinzada (custos
     // rateados entre integrantes: camisas, instrumentos etc.)
     contribuintesBateria: [],
+    // mapa de reservas de mesa — só usado no domínio Feijoada do Bloco
+    mesasFeijoada: freshMesasFeijoada(),
     fluxo: {
       saldoInicial:0, scen:'base',
       pctEnt: FC_ENT_KEYS.reduce((acc,k,i)=>(acc[k]=FC_ENT_DEFAULT_PCT[i].map(x=>x/100),acc),{}),
@@ -701,6 +728,11 @@ function migrateState(){
   if(state.venda && state.venda.valorRecebido===undefined) state.venda.valorRecebido = 0;
   // rastreio de pagamentos por pessoa (Bateria) — estados salvos antes disso nao tem essa lista
   if(!state.contribuintesBateria) state.contribuintesBateria = [];
+  // mapa de mesas (Feijoada do Bloco) — estados salvos antes disso nao tem essa lista; se ja
+  // existir mas com menos de 100 (ex.: versao antiga com outro numero), completa o que falta
+  if(!state.mesasFeijoada) state.mesasFeijoada = freshMesasFeijoada();
+  else { for(let n=state.mesasFeijoada.length+1; n<=100; n++) state.mesasFeijoada.push(freshMesa(n)); }
+
   // Fluxo de Caixa: cada linha (entrada ou saida) precisa de 1 valor por mes em MESES.
   // Sempre que MESES ganha uma linha nova (ex.: "Restituições de caixa aprovadas") ou
   // fica mais longo (ex.: meses extras pos-evento), estados salvos antes disso ficam
@@ -1342,6 +1374,7 @@ const NAV = [
     {id:'vendas', label:'Vendas', ic:'🎟'},
     {id:'patrocinios', label:'Patrocínios', ic:'◈'},
     {id:'custos', label:'Custos', ic:'▦'},
+    {id:'mesas', label:'Mesas', ic:'🪑', only:'feijoada-bloco'},
   ]},
   {group:'Controle financeiro', items:[
     {id:'oxr', label:'Orçamento x Real', ic:'⇄'},
@@ -1358,11 +1391,15 @@ if(!state.ui) state.ui = { scenTab:{ entradas:'base', vendas:'base', patrocinios
 let currentView = 'dashboard';
 
 function renderNav(){
-  $('#navgroups').innerHTML = NAV.map(g=>`
+  $('#navgroups').innerHTML = NAV.map(g=>{
+    const items = g.items.filter(it=> !it.only || it.only===PROJECT_ID);
+    if(!items.length) return '';
+    return `
     <div class="navgroup">
       <div class="label">${g.group}</div>
-      ${g.items.map(it=>`<button class="navitem ${it.id===currentView?'active':''}" data-nav="${it.id}"><span class="ic">${it.ic}</span>${it.label}</button>`).join('')}
-    </div>`).join('');
+      ${items.map(it=>`<button class="navitem ${it.id===currentView?'active':''}" data-nav="${it.id}"><span class="ic">${it.ic}</span>${it.label}</button>`).join('')}
+    </div>`;
+  }).join('');
 }
 
 const VIEWS = {}; // preenchido pelas proximas partes
@@ -1435,7 +1472,7 @@ function onEnterCommit(e){
 // nativos, que o navegador BLOQUEIA silenciosamente dentro do iframe do Artifact (o clique parecia
 // "não fazer nada" porque a caixa de dialogo nunca aparecia e a funcao nunca era chamada)
 // acoes que so navegam a tela (nao alteram dados do projeto) — continuam liberadas em modo convidado
-const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection']);
+const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom']);
 function onAction(e){
   const el = e.currentTarget || e.target.closest('[data-action]');
   const [action, ...args] = el.dataset.action.split(':');
@@ -2349,6 +2386,145 @@ ACTIONS.rmComprovanteCusto = (itemId,ci)=>{
   const row = state.custos.find(c=>c.id===itemId);
   if(!row || !row.comprovantes) return;
   row.comprovantes.splice(Number(ci),1);
+  saveState(); render();
+};
+
+/* ================= MESAS (Feijoada do Bloco) ================= */
+const MESA_STATUS = ['livre','reservada','paga'];
+const MESA_STATUS_LABEL = {livre:'Livre', reservada:'Reservada', paga:'Paga'};
+function computeMesasSummary(){
+  const mesas = state.mesasFeijoada||[];
+  const livres = mesas.filter(m=>m.status==='livre').length;
+  const reservadas = mesas.filter(m=>m.status==='reservada').length;
+  const pagas = mesas.filter(m=>m.status==='paga').length;
+  const totalPago = sum(mesas.map(m=> Number(m.valorPago)||0));
+  return {livres, reservadas, pagas, totalPago, total: mesas.length};
+}
+// gera a sequência de células do mapa (11 colunas) deixando um "buraco" de 3x3 no meio pro
+// palco/pista — igual ao salão de referência, que tem a área de mesas em volta de um centro
+// vazio. As mesas 96-100 ficam numa fileira separada embaixo (perto da fila do bar).
+function mesaGridCells(){
+  const COLS = 11;
+  const HOLE_ROWS = [3,4,5], HOLE_COLS = [4,5,6];
+  const cells = [];
+  let tableNum = 0, flat = 0;
+  while(tableNum < 95){
+    const row = Math.floor(flat/COLS), col = flat%COLS;
+    const isHole = HOLE_ROWS.includes(row) && HOLE_COLS.includes(col);
+    if(isHole) cells.push({type:'hole'});
+    else { tableNum++; cells.push({type:'table', numero:tableNum}); }
+    flat++;
+  }
+  return cells;
+}
+function mesaBtn(numero, selNum){
+  const m = state.mesasFeijoada[numero-1];
+  const status = m.status||'livre';
+  const cls = status + (selNum===numero?' selected':'');
+  const title = m.reservadoPor ? `Mesa ${numero} — ${m.reservadoPor} (${MESA_STATUS_LABEL[status]})` : `Mesa ${numero} — livre`;
+  return `<button class="mesa-btn ${cls}" data-action="selectMesa:${numero}" title="${esc(title)}">${numero}</button>`;
+}
+function mesaPanel(m){
+  const idx = m.numero-1;
+  const pessoasRows = (m.pessoas||[]).map((p,pi)=> `<tr>
+      <td>${tblInput(`mesasFeijoada.${idx}.pessoas.${pi}.nome`, p.nome)}</td>
+      <td><button class="rm" data-action="rmPessoaMesa:${idx}:${pi}">✕</button></td>
+    </tr>`).join('');
+  const statusSelect = `<label class="field"><span class="lbl">Status</span>
+    <select id="${mkId('mesasFeijoada.'+idx+'.status')}" data-bind="mesasFeijoada.${idx}.status">
+      ${MESA_STATUS.map(s=>`<option value="${s}" ${s===m.status?'selected':''}>${MESA_STATUS_LABEL[s]}</option>`).join('')}
+    </select>
+  </label>`;
+  return `<div class="section" style="border:2px solid var(--accent); background:var(--accent-soft);">
+    <div class="topline" style="margin-bottom:10px;"><div><h2 style="margin:0;">Mesa ${m.numero}</h2></div>
+      <button class="btn small" data-action="closeMesaPanel">Fechar</button></div>
+    <div class="gridN">
+      ${fld('Reservado por', `mesasFeijoada.${idx}.reservadoPor`, {kind:'text'})}
+      ${fld('Telefone', `mesasFeijoada.${idx}.telefone`, {kind:'text'})}
+      ${statusSelect}
+      ${fld('Data da reserva', `mesasFeijoada.${idx}.dataReserva`, {kind:'date'})}
+      ${fld('Data de pagamento', `mesasFeijoada.${idx}.dataPagamento`, {kind:'date'})}
+      ${fld('Valor pago', `mesasFeijoada.${idx}.valorPago`, {kind:'currency'})}
+    </div>
+    <div style="margin-top:12px;">
+      <p class="lbl" style="margin-bottom:6px;">Pessoas da mesa</p>
+      <table style="max-width:420px;"><tbody>${pessoasRows || `<tr><td class="hint">Nenhuma pessoa cadastrada ainda.</td><td></td></tr>`}</tbody></table>
+      <button class="btn small" style="margin-top:8px;" data-action="addPessoaMesa:${idx}">+ Adicionar pessoa</button>
+    </div>
+    <div style="margin-top:12px;">
+      ${fld('Observação', `mesasFeijoada.${idx}.obs`, {kind:'text'})}
+    </div>
+  </div>`;
+}
+VIEWS.mesas = function(){
+  const ms = computeMesasSummary();
+  const zoom = state.ui.mesasZoom || 1;
+  const selNum = state.ui.mesaSelecionada;
+  const selMesa = selNum ? state.mesasFeijoada[selNum-1] : null;
+
+  const gridCells = mesaGridCells().map(c=> c.type==='hole'
+    ? `<div class="mesa-hole">Palco /<br>pista</div>`
+    : mesaBtn(c.numero, selNum)
+  ).join('');
+  const barRow = Array.from({length:5}, (_,i)=> mesaBtn(96+i, selNum)).join('');
+
+  return `
+  <div class="topline"><div><h1>Mesas — Feijoada do Bloco${infoIcon('Mapa de reserva das 100 mesas do salão. Clique numa mesa pra ver/editar a reserva: quem reservou, telefone, status, data de pagamento e os nomes das pessoas da mesa.')}</h1><div class="desc">Clique numa mesa pra reservar ou editar os dados de quem já reservou.</div></div></div>
+
+  <div class="gridN" style="margin-bottom:16px;">
+    <div class="kpi"><div class="lbl">Mesas livres</div><div class="kpi-value">${fmtInt(ms.livres)}</div></div>
+    <div class="kpi"><div class="lbl">Mesas reservadas</div><div class="kpi-value" style="color:var(--warn)">${fmtInt(ms.reservadas)}</div></div>
+    <div class="kpi"><div class="lbl">Mesas pagas</div><div class="kpi-value" style="color:var(--good)">${fmtInt(ms.pagas)}</div></div>
+    <div class="kpi"><div class="lbl">Total arrecadado</div><div class="kpi-value">${fmtCur(ms.totalPago)}</div></div>
+  </div>
+
+  ${selMesa ? mesaPanel(selMesa) : ''}
+
+  <div class="section">
+    <h2>Mapa de mesas <span class="hint">clique numa mesa pra reservar/editar</span></h2>
+    <div class="row" style="margin-bottom:10px;">
+      <button class="btn small" data-action="mesaZoom:out">− Zoom</button>
+      <button class="btn small" data-action="mesaZoom:reset">Redefinir zoom</button>
+      <button class="btn small" data-action="mesaZoom:in">+ Zoom</button>
+    </div>
+    <div class="mesa-wrap">
+      <div class="mesa-grid" style="transform:scale(${zoom});">${gridCells}</div>
+      <div class="mesa-bar-row">
+        <div class="lbl-row">Fila do bar</div>
+        <div class="row-tables">${barRow}</div>
+      </div>
+    </div>
+    <div class="mesa-legend">
+      <span><span class="sw" style="background:var(--surface-2); border:2px solid var(--border);"></span>Livre</span>
+      <span><span class="sw" style="background:var(--warn-soft); border:2px solid var(--warn);"></span>Reservada</span>
+      <span><span class="sw" style="background:var(--good-soft); border:2px solid var(--good);"></span>Paga</span>
+    </div>
+  </div>`;
+};
+ACTIONS.selectMesa = (numero)=>{
+  state.ui.mesaSelecionada = Number(numero);
+  render(); // so muda a tela (qual mesa esta aberta no painel nao e um dado do projeto) — nao chama saveState
+};
+ACTIONS.closeMesaPanel = ()=>{
+  state.ui.mesaSelecionada = null;
+  render();
+};
+ACTIONS.mesaZoom = (dir)=>{
+  const cur = state.ui.mesasZoom || 1;
+  if(dir==='in') state.ui.mesasZoom = Math.min(2, Math.round((cur+0.15)*100)/100);
+  else if(dir==='out') state.ui.mesasZoom = Math.max(0.4, Math.round((cur-0.15)*100)/100);
+  else state.ui.mesasZoom = 1;
+  render();
+};
+ACTIONS.addPessoaMesa = (idx)=>{
+  const m = state.mesasFeijoada[Number(idx)]; if(!m) return;
+  if(!m.pessoas) m.pessoas=[];
+  m.pessoas.push({nome:''});
+  saveState(); render();
+};
+ACTIONS.rmPessoaMesa = (idx,pi)=>{
+  const m = state.mesasFeijoada[Number(idx)]; if(!m || !m.pessoas) return;
+  m.pessoas.splice(Number(pi),1);
   saveState(); render();
 };
 
