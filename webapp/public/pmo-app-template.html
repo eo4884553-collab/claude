@@ -1189,12 +1189,20 @@ function monthlyDatedPlusRemainder(totalAnnual, datedAmounts, pctRow){
 function entDatedAmountsForKey(k, scen, kind){
   return k==='patrocinio' ? patrocinioDatedAmounts(scen, kind) : k==='contribuicoesBateria' ? contribuintesBateriaDatedAmounts(kind) : [];
 }
+// valor anual total de cada linha de ENTRADA/SAÍDA do cenário — extraído à parte pra ser
+// reaproveitado no cálculo do fluxo e no "% do total já previsto/realizado" da tela
+function entAnnualByKey(cs){
+  return {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras, contribuicoesBateria: contribuintesBateriaTotalAnual()};
+}
+function saiAnnualByKey(cs){
+  return {subAtracoes:cs.subAtracoes, subEstrutura:cs.subEstrutura, subOperacao:cs.subOperacao, subMarketing:cs.subMarketing,
+    subLogistica:cs.subLogistica, subExtra:cs.subExtra, despesasAdm:cs.despesasAdm, custoTaxaIngressos:cs.custoTaxaIngressos, openBar:cs.openBar, contingenciaValor:cs.contingenciaValor, restituicoesAprovadas:cs.restituicoesAprovadas};
+}
 function computeMonthlyFlow(scen){
   const cs = computeScenario(scen);
   const custosRows = computeCustosSummary().rows;
-  const entAnnual = {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras, contribuicoesBateria: contribuintesBateriaTotalAnual()};
-  const saiAnnual = {subAtracoes:cs.subAtracoes, subEstrutura:cs.subEstrutura, subOperacao:cs.subOperacao, subMarketing:cs.subMarketing,
-    subLogistica:cs.subLogistica, subExtra:cs.subExtra, despesasAdm:cs.despesasAdm, custoTaxaIngressos:cs.custoTaxaIngressos, openBar:cs.openBar, contingenciaValor:cs.contingenciaValor, restituicoesAprovadas:cs.restituicoesAprovadas};
+  const entAnnual = entAnnualByKey(cs);
+  const saiAnnual = saiAnnualByKey(cs);
   const entMonthly = FC_ENT_KEYS.map(k=> monthlyDatedPlusRemainder(entAnnual[k], entDatedAmountsForKey(k, scen), state.fluxo.pctEnt[k]));
   const saiMonthly = FC_SAI_KEYS.map(k=> monthlyDatedPlusRemainder(saiAnnual[k], custosDatedAmounts(k, custosRows), state.fluxo.pctSai[k]));
   const totalEnt = MESES.map((_,m)=> sum(entMonthly.map(row=>row[m])));
@@ -2302,14 +2310,19 @@ VIEWS.oxr = function(){
 
 /* ================= FLUXO DE CAIXA ================= */
 // linha auxiliar (Previsto ou Realizado) embaixo da linha principal de uma categoria — mostra o
-// valor em R$ já contratado/pago mês a mês, sem % nenhum (vem direto dos dados de Patrocínio/
-// Custos/Bateria). So renderiza se a categoria tiver pelo menos 1 valor datado desse tipo.
-function datedSubRow(label, monthlyArr, colorVar, bgVar){
+// valor em R$ já contratado/pago mês a mês (sem % nenhum, vem direto dos dados de Patrocínio/
+// Custos/Bateria), e no fim da linha quanto isso representa do total anual da categoria — é essa
+// coluna que mostra "quanto dos 100% já é previsto/realizado", ao lado do 100% da linha principal.
+// So renderiza se a categoria tiver pelo menos 1 valor datado desse tipo.
+function datedSubRow(label, monthlyArr, colorVar, bgVar, annualTotal){
   if(!monthlyArr || sum(monthlyArr)<=0) return '';
   const cells = monthlyArr.map(v=> `<td class="num mono" style="font-size:10.5px; padding:3px 5px; color:${v>0?colorVar:'var(--text-faint)'}; background:${v>0?bgVar:'transparent'};">${v>0?fmtInt(v):''}</td>`).join('');
-  return `<tr><td style="padding-left:22px; font-size:11px; color:${colorVar}; white-space:nowrap;">↳ ${label}</td>${cells}<td></td></tr>`;
+  const subTotal = sum(monthlyArr);
+  const pct = annualTotal>0 ? Math.round((subTotal/annualTotal)*1000)/10 : 0;
+  const totalCell = `<td class="num mono" style="font-weight:700; white-space:nowrap; color:${colorVar}; font-size:11px;">${fmtNum(pct,1)}%</td>`;
+  return `<tr><td style="padding-left:22px; font-size:11px; color:${colorVar}; white-space:nowrap;">↳ ${label}</td>${cells}${totalCell}</tr>`;
 }
-function pctMonthTable(title, labels, keys, storePath, datedByKey, previstoByKey, realByKey){
+function pctMonthTable(title, labels, keys, storePath, datedByKey, previstoByKey, realByKey, annualByKey){
   const rows = keys.map((k,ri)=>{
     const vals = MESES.map((_,m)=> Math.round((getPath(state, `${storePath}.${k}.${m}`.split('.'))||0)*1000)/10);
     const dated = datedByKey && datedByKey[ri];
@@ -2335,8 +2348,9 @@ function pctMonthTable(title, labels, keys, storePath, datedByKey, previstoByKey
     // pode fechar e não pagar, então isso é só expectativa); "Realizado" = já pago de verdade.
     // Calculadas automaticamente a partir do que foi preenchido em Patrocínios/Custos/Bateria —
     // não se digita nada aqui, é só leitura, pra comparar o que era esperado com o que aconteceu.
-    const previstoRow = datedSubRow('Previsto (contratado)', previstoByKey && previstoByKey[ri], 'var(--text-dim)', 'var(--surface-2)');
-    const realRow = datedSubRow('Realizado (pago)', realByKey && realByKey[ri], 'var(--good)', 'var(--good-soft)');
+    const annualTotal = annualByKey && annualByKey[ri];
+    const previstoRow = datedSubRow('Previsto (contratado)', previstoByKey && previstoByKey[ri], 'var(--text-dim)', 'var(--surface-2)', annualTotal);
+    const realRow = datedSubRow('Realizado (pago)', realByKey && realByKey[ri], 'var(--good)', 'var(--good-soft)', annualTotal);
     return mainRow + previstoRow + realRow;
   }).join('');
   return `<div class="tablewrap" style="margin-bottom:10px;"><table>
@@ -2388,20 +2402,24 @@ VIEWS.fluxo = function(){
 
   <div class="section">
     <h2>Entradas <span class="hint">% do total anual em cada mês</span></h2>
-    <div class="hint" style="margin-bottom:8px;">Os % abaixo são a SUA estimativa manual de distribuição ao longo do ano — eles não mudam sozinhos, e continuam servindo pra cobrir só a parte do valor anual que ainda não tem nenhuma parcela/pagamento com data. Onde já existe dado datado (Patrocínios, Bateria, e qualquer item de Custos), a linha ganha automaticamente duas sublinhas só de leitura: <strong>Previsto</strong> (contratado, com data esperada, mas ainda sem pagamento — pode não se confirmar) e <strong>Realizado</strong> (já pago de verdade) — calculadas a partir do que você preenche em Patrocínios/Custos/Bateria, sem digitar nada aqui.</div>
+    <div class="hint" style="margin-bottom:8px;">Os % abaixo são a SUA estimativa manual de distribuição ao longo do ano — eles não mudam sozinhos, e continuam servindo pra cobrir só a parte do valor anual que ainda não tem nenhuma parcela/pagamento com data. Onde já existe dado datado (Patrocínios, Bateria, e qualquer item de Custos), a linha ganha automaticamente duas sublinhas só de leitura: <strong>Previsto</strong> (contratado, com data esperada, mas ainda sem pagamento — pode não se confirmar) e <strong>Realizado</strong> (já pago de verdade) — cada uma com seu próprio % do total anual da categoria, na coluna Total, pra mostrar quanto dos 100% já é expectativa confirmada e quanto já é dinheiro de verdade.</div>
     ${(()=>{
+      const entAnnual = entAnnualByKey(cs);
+      const entAnnualArr = FC_ENT_KEYS.map(k=> entAnnual[k]);
       const entPrevisto = FC_ENT_KEYS.map(k=> datedAmountsToMonthly(entDatedAmountsForKey(k, scen, 'previsto')));
       const entReal = FC_ENT_KEYS.map(k=> datedAmountsToMonthly(entDatedAmountsForKey(k, scen, 'real')));
       const entDated = FC_ENT_KEYS.map((k,i)=> MESES.map((_,m)=> entPrevisto[i][m]+entReal[i][m]));
-      return pctMonthTable('Linha', FC_ENT_LABELS, FC_ENT_KEYS, 'fluxo.pctEnt', entDated, entPrevisto, entReal);
+      return pctMonthTable('Linha', FC_ENT_LABELS, FC_ENT_KEYS, 'fluxo.pctEnt', entDated, entPrevisto, entReal, entAnnualArr);
     })()}
     <h2 style="margin-top:20px;">Saídas <span class="hint">% do total anual em cada mês</span></h2>
     ${(()=>{
       const custosRows = computeCustosSummary().rows;
+      const saiAnnual = saiAnnualByKey(cs);
+      const saiAnnualArr = FC_SAI_KEYS.map(k=> saiAnnual[k]);
       const saiPrevisto = FC_SAI_KEYS.map(k=> datedAmountsToMonthly(custosDatedAmounts(k, custosRows, 'previsto')));
       const saiReal = FC_SAI_KEYS.map(k=> datedAmountsToMonthly(custosDatedAmounts(k, custosRows, 'real')));
       const saiDated = FC_SAI_KEYS.map((k,i)=> MESES.map((_,m)=> saiPrevisto[i][m]+saiReal[i][m]));
-      return pctMonthTable('Linha', FC_SAI_LABELS, FC_SAI_KEYS, 'fluxo.pctSai', saiDated, saiPrevisto, saiReal);
+      return pctMonthTable('Linha', FC_SAI_LABELS, FC_SAI_KEYS, 'fluxo.pctSai', saiDated, saiPrevisto, saiReal, saiAnnualArr);
     })()}
   </div>
 
