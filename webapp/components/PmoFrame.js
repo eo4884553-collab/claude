@@ -5,6 +5,7 @@ import { PROJECTS } from '../lib/projects';
 import { approvedReimbursementsTotal } from '../lib/reimbursements';
 import { fetchEffectiveRole } from '../lib/roles';
 import { fetchSharedCashBalance, setSharedCashSaldoInicial } from '../lib/cash';
+import { fetchMesasFeijoada, reservarMesa, atualizarMinhaMesa, cancelarMesa, adminSalvarMesa } from '../lib/mesas';
 
 const SEED_MARKER = '/* __PIQUINZADA_STATE_SEED__ */';
 
@@ -45,9 +46,9 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
 
   const buildSrcDoc = useCallback((template, dataObj, roleForFrame) => {
     const safeJson = JSON.stringify(dataObj || {}).replace(/</g, '\\u003c');
-    const seedScript = `<\/script><script>window.__PIQUINZADA_ROLE__=${JSON.stringify(roleForFrame)};window.__PIQUINZADA_PROJECT_ID__=${JSON.stringify(project.id)};window.__PIQUINZADA_STATE__=${safeJson};<\/script><script>`;
+    const seedScript = `<\/script><script>window.__PIQUINZADA_ROLE__=${JSON.stringify(roleForFrame)};window.__PIQUINZADA_PROJECT_ID__=${JSON.stringify(project.id)};window.__PIQUINZADA_USER_ID__=${JSON.stringify(auth.user.id)};window.__PIQUINZADA_USER_EMAIL__=${JSON.stringify(auth.user.email || '')};window.__PIQUINZADA_STATE__=${safeJson};<\/script><script>`;
     return template.replace(SEED_MARKER, SEED_MARKER + seedScript);
-  }, [project.id]);
+  }, [project.id, auth.user?.id, auth.user?.email]);
 
   const mount = useCallback(async () => {
     setStatus('loading'); setErrMsg('');
@@ -83,6 +84,14 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
           },
         });
       } catch (_) { /* se falhar, o app abre normalmente so sem esse saldo (fica 0) */ }
+      // mesas da Feijoada do Bloco vivem na tabela mesa_reservas (não no project_state) —
+      // qualquer aprovado pode reservar, não só admin (ver seção 11 do schema.sql)
+      if (project.id === 'feijoada-bloco') {
+        try {
+          const mesasFeijoada = await fetchMesasFeijoada(project.id);
+          seed = Object.assign({}, seed, { mesasFeijoada });
+        } catch (_) { /* se falhar, a aba Mesas abre com o que tinha salvo antes (pode ficar desatualizada) */ }
+      }
       const doc = buildSrcDoc(templateRef.current, seed, effectiveRole);
       if (iframeRef.current) iframeRef.current.srcdoc = doc;
     } catch (e) {
@@ -95,9 +104,12 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
 
   // grava no Supabase com um pequeno debounce (varias mudancas seguidas viram 1 escrita só)
   const flushSave = useCallback(async (stateObj) => {
+    // mesasFeijoada não é mais gravado aqui — mora na tabela mesa_reservas (ver fetchMesasFeijoada),
+    // que é a fonte de verdade; manter essa chave no project_state só deixaria um resíduo obsoleto
+    const { mesasFeijoada, ...toSave } = stateObj || {};
     const { error } = await supabase
       .from('project_state')
-      .update({ data: stateObj, updated_at: new Date().toISOString(), updated_by: auth.user.id })
+      .update({ data: toSave, updated_at: new Date().toISOString(), updated_by: auth.user.id })
       .eq('id', project.id);
     lastLocalWrite.current = Date.now();
     iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:save-ack', ok: !error }, '*');
@@ -115,6 +127,15 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
       } catch (_) { /* se falhar, o saldo so fica desatualizado ate o proximo save ou recarregar */ }
     }
   }, [auth.user?.id, project.id]);
+
+  // busca as mesas de novo e empurra pro iframe — usado depois de qualquer ação de mesa (própria
+  // ou de outra pessoa chegando pelo realtime) pra tela atualizar sem precisar recarregar a página
+  const refreshMesas = useCallback(async () => {
+    try {
+      const mesasFeijoada = await fetchMesasFeijoada(project.id);
+      iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:mesas-result', ok: true, mesasFeijoada }, '*');
+    } catch (_) { /* se falhar, a tela so fica desatualizada ate a proxima acao ou recarregar */ }
+  }, [project.id]);
 
   useEffect(() => {
     function onMessage(ev) {
@@ -169,10 +190,55 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
           }
         })();
       }
+      // reserva de mesas (Feijoada do Bloco) — QUALQUER usuário aprovado pode reservar, não só
+      // admin (diferente do resto do app); pode reservar mais de uma mesa. O RLS no banco é quem
+      // de fato garante isso (ver seção 11 do schema.sql); aqui só repassamos pro Supabase e
+      // devolvemos a lista atualizada pro iframe — nunca passa pelo flushSave() admin-only.
+      if (d.type === 'piquinzada:mesa-reservar') {
+        (async () => {
+          try {
+            await reservarMesa(project.id, Number(d.numero), auth.user.id, auth.user.email, d.nome, d.telefone);
+            await refreshMesas();
+          } catch (e) {
+            iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:mesas-result', ok: false, error: e.message || String(e) }, '*');
+          }
+        })();
+      }
+      if (d.type === 'piquinzada:mesa-atualizar') {
+        (async () => {
+          try {
+            await atualizarMinhaMesa(project.id, Number(d.numero), d.nome, d.telefone, d.pessoas, d.obs);
+            await refreshMesas();
+          } catch (e) {
+            iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:mesas-result', ok: false, error: e.message || String(e) }, '*');
+          }
+        })();
+      }
+      if (d.type === 'piquinzada:mesa-cancelar') {
+        (async () => {
+          try {
+            await cancelarMesa(project.id, Number(d.numero));
+            await refreshMesas();
+          } catch (e) {
+            iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:mesas-result', ok: false, error: e.message || String(e) }, '*');
+          }
+        })();
+      }
+      if (d.type === 'piquinzada:mesa-admin-save') {
+        if (roleRef.current !== 'admin') return; // so admin confirma pagamento/troca status — o RLS tambem recusaria
+        (async () => {
+          try {
+            await adminSalvarMesa(project.id, Number(d.numero), d.nome, d.telefone, d.pessoas, d.obs, d.status, d.dataPagamento, d.valorPago);
+            await refreshMesas();
+          } catch (e) {
+            iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:mesas-result', ok: false, error: e.message || String(e) }, '*');
+          }
+        })();
+      }
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [flushSave, project.id, auth.isAdmin, auth.user?.id]);
+  }, [flushSave, refreshMesas, project.id, auth.isAdmin, auth.user?.id, auth.user?.email]);
 
   // realtime: se OUTRO usuario salvar enquanto esta tela esta aberta, avisa em vez de sobrescrever
   // silenciosamente o que esta sendo visto/editado agora
@@ -187,6 +253,20 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [project.id]);
+
+  // realtime: reservas de mesa são feitas por QUALQUER usuário, então duas pessoas podem estar
+  // olhando o mapa ao mesmo tempo — isso atualiza a tela de todo mundo assim que alguém reserva,
+  // cancela ou tem o pagamento confirmado, sem precisar de aviso/recarregar (não é "sobrescrever
+  // o que você está editando", é só mais uma mesa mudando de cor no mapa)
+  useEffect(() => {
+    if (project.id !== 'feijoada-bloco') return;
+    const channel = supabase.channel(`mesa_reservas_changes_${project.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mesa_reservas', filter: `project_id=eq.${project.id}` }, () => {
+        refreshMesas();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [project.id, refreshMesas]);
 
   function reload() {
     setStaleNotice(false);
