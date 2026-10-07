@@ -2159,9 +2159,13 @@ ACTIONS.rmParcela = (scen,i,pi)=>{
 const CUSTO_STATUS = ['Não iniciado','Em cotação','Contratado','Pago Parcial','Pago Total','Cancelado'];
 VIEWS.custos = function(){
   const cs = computeCustosSummary();
+  if(!state.ui.custosSelected) state.ui.custosSelected = {};
+  const selected = state.ui.custosSelected;
+  const selectedIds = Object.keys(selected).filter(id=>selected[id] && cs.rows.some(r=>r.id===id));
+  const allSelected = cs.rows.length>0 && cs.rows.every(r=>selected[r.id]);
   let lastGroup = null;
   const rows = cs.rows.map((r,i)=>{
-    const groupHdr = r.grupo!==lastGroup ? `<tr class="section-hdr-row"><td colspan="12">${r.grupo}</td></tr>` : '';
+    const groupHdr = r.grupo!==lastGroup ? `<tr class="section-hdr-row"><td colspan="13">${r.grupo}</td></tr>` : '';
     lastGroup = r.grupo;
     const comprovantes = r.comprovantes||[];
     const comprovantesList = comprovantes.map((path,ci)=>`<span style="display:flex; align-items:center; gap:3px;">
@@ -2173,6 +2177,7 @@ VIEWS.custos = function(){
         <button class="btn small" data-action="attachComprovanteCusto:${r.id}" title="Anexar mais um comprovante de pagamento">+ Anexar</button>
       </div>`;
     return groupHdr + `<tr>
+      <td><input type="checkbox" data-action="toggleCustoSelect:${r.id}" ${selected[r.id]?'checked':''} title="Selecionar pra replicar data em lote"></td>
       <td>${r.subcategoria}</td>
       <td>${tblInput(`custos.${i}.fornecedor`, r.fornecedor)}</td>
       <td class="num mono">${fmtCur(r.orcInicial)}</td>
@@ -2202,14 +2207,46 @@ VIEWS.custos = function(){
     <div class="kpi"><div class="lbl">% pago</div><div class="kpi-value">${fmtPct(cs.pctPago)}</div></div>
   </div>
 
+  <div class="card" style="padding:12px 16px; margin-bottom:12px; display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
+    <strong style="font-size:12.5px; white-space:nowrap;">Replicar data em lote ${infoIcon('Marque os itens que vão ter a mesma data (ex.: todos os itens de Estrutura previstos pra mesma semana) e aplique de uma vez, em vez de preencher um por um.')}</strong>
+    <button class="btn small" data-action="toggleCustoSelectAll">${allSelected ? 'Limpar seleção' : 'Selecionar todos'}</button>
+    <span class="hint">${selectedIds.length} selecionado(s)</span>
+    <input type="date" id="custoBulkDateInput" style="width:150px;">
+    <button class="btn small" data-action="applyCustoBulkDate:dataPrevista" ${selectedIds.length?'':'disabled'}>Aplicar como Data prevista</button>
+    <button class="btn small" data-action="applyCustoBulkDate:dataPagamento" ${selectedIds.length?'':'disabled'}>Aplicar como Data de pagamento</button>
+  </div>
+
   <div class="tablewrap">
     <table>
-      <thead><tr><th>Subcategoria</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th><th>Data de pagamento</th><th>Comprovante</th></tr></thead>
+      <thead><tr><th><input type="checkbox" data-action="toggleCustoSelectAll" ${allSelected?'checked':''} title="Selecionar/limpar todos"></th><th>Subcategoria</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th><th>Data de pagamento</th><th>Comprovante</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>
-  <div class="hint" style="margin-top:8px;">Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Preencher "Pago" + "Data de pagamento" faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento.</div>
+  <div class="hint" style="margin-top:8px;">Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Preencher "Pago" + "Data de pagamento" faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
   <input type="file" id="custoComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
+};
+ACTIONS.toggleCustoSelect = (id)=>{
+  if(!state.ui.custosSelected) state.ui.custosSelected = {};
+  if(state.ui.custosSelected[id]) delete state.ui.custosSelected[id];
+  else state.ui.custosSelected[id] = true;
+  render(); // so muda a tela (selecao e so pra replicar data, nao e um dado do projeto) — nao chama saveState
+};
+ACTIONS.toggleCustoSelectAll = ()=>{
+  const allIds = state.custos.map(c=>c.id);
+  const allSelected = allIds.length>0 && allIds.every(id=> state.ui.custosSelected && state.ui.custosSelected[id]);
+  state.ui.custosSelected = allSelected ? {} : allIds.reduce((acc,id)=>(acc[id]=true,acc),{});
+  render();
+};
+ACTIONS.applyCustoBulkDate = (field)=>{
+  if(READONLY) return;
+  const input = document.getElementById('custoBulkDateInput');
+  const val = input && input.value;
+  if(!val) return;
+  const selected = state.ui.custosSelected || {};
+  const ids = Object.keys(selected).filter(id=>selected[id]);
+  if(!ids.length) return;
+  state.custos.forEach(c=>{ if(selected[c.id]) c[field] = val; });
+  saveState(); render();
 };
 ACTIONS.attachComprovanteCusto = (itemId)=>{
   if(READONLY) return;
