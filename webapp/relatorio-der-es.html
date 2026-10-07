@@ -1899,9 +1899,48 @@ const {
 // tabelas de dados em creme — não em azul claro.
 const DARK_BLUE = "1F3864", TEXT_BLUE = "16294A", LIGHT_1 = "F2F2F2", LIGHT_2 = "FBEFD9",
       BORDER_BLUE = "D9D9D9", WHITE = "FFFFFF", RED = "C0504D",
-      BODY_TEXT = "1A1A1A", FOOTER_GRAY = "595959", ACCENT_GOLD = "F0DCA8";
+      BODY_TEXT = "1A1A1A", FOOTER_GRAY = "595959", ACCENT_GOLD = "F0DCA8", GOLD_TEXT = "B08D57";
 const FONT = "Calibri";
 const cm = (v) => Math.round(v * 566.9291339);
+// Margem e layout extraídos do document.xml real (RMAA com anexos
+// entregue): A4 retrato, margens uniformes de 1100 twips (~1,94cm) nos
+// dois documentos — nada de paisagem nem logotipo no cabeçalho: o
+// cabeçalho/rodapé reais são só texto, com uma régua de tabulação à
+// direita para alinhar o lado esquerdo e direito na mesma linha.
+const PAGE_MARGIN = 1100;
+const PAGE_W = cm(21.0), PAGE_H = cm(29.7);
+const CONTENT_WIDTH = PAGE_W - PAGE_MARGIN * 2;
+
+// Cabeçalho/rodapé reais: só texto, alinhado à esquerda e à direita na
+// mesma linha com tabulação (sem logotipo nenhum), com uma régua fina
+// separando do corpo da página.
+function runningHeader(leftText, rightText) {
+  return new Header({
+    children: [new Paragraph({
+      tabStops: [{ type: TabStopType.RIGHT, position: CONTENT_WIDTH }],
+      border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: DARK_BLUE, space: 1 } },
+      children: [
+        new TextRun({ text: leftText, bold: true, color: TEXT_BLUE, size: 16, font: FONT }),
+        new TextRun({ text: `\t${rightText}`, color: FOOTER_GRAY, size: 16, font: FONT }),
+      ],
+    })],
+  });
+}
+function runningFooter(contratada) {
+  return new Footer({
+    children: [new Paragraph({
+      tabStops: [{ type: TabStopType.RIGHT, position: CONTENT_WIDTH }],
+      border: { top: { style: BorderStyle.SINGLE, size: 6, color: BORDER_BLUE, space: 1 } },
+      children: [
+        new TextRun({ text: `${contratada} · Vitória/ES`, color: FOOTER_GRAY, size: 16, font: FONT }),
+        new TextRun({ text: "\tPágina ", color: FOOTER_GRAY, size: 16, font: FONT }),
+        new TextRun({ children: [PageNumber.CURRENT], color: FOOTER_GRAY, size: 16, font: FONT }),
+        new TextRun({ text: " de ", color: FOOTER_GRAY, size: 16, font: FONT }),
+        new TextRun({ children: [PageNumber.TOTAL_PAGES], color: FOOTER_GRAY, size: 16, font: FONT }),
+      ],
+    })],
+  });
+}
 
 function cellBorders(color = BORDER_BLUE, size = 4) {
   const b = { style: BorderStyle.SINGLE, size, color };
@@ -1921,12 +1960,11 @@ function cell(text, { fill, bold, color, size = 18, align = AlignmentType.CENTER
 }
 function infoTable(pairs, widthsCm = [4.5, 9.0]) {
   const [w1, w2] = widthsCm.map(cm);
-  const rows = pairs.map(([label, value], i) => {
-    const fill = i % 2 === 0 ? LIGHT_1 : LIGHT_2;
+  const rows = pairs.map(([label, value]) => {
     return new TableRow({
       children: [
-        cell(label, { fill, bold: true, widthDxa: w1 }),
-        cell(value, { fill, widthDxa: w2 }),
+        cell(label, { fill: LIGHT_1, bold: true, widthDxa: w1 }),
+        cell(value, { fill: LIGHT_1, widthDxa: w2 }),
       ],
     });
   });
@@ -2038,7 +2076,7 @@ function itemsTable(itens) {
     const acumAtual = qtdAnterior + qtdAtual;
     const valor = qtdAtual * preco;
     totalValor += valor;
-    const fill = i % 2 === 0 ? LIGHT_1 : LIGHT_2;
+    const fill = undefined;
     const vals = [it.item, it.descricao, it.unidade, fmtNum(it.qtd_contratada), fmtNum(qtdAnterior), fmtNum(qtdAtual), fmtNum(acumAtual), fmtNum(preco), fmtNum(valor)];
     // Alinhamento no padrão ABNT para tabelas técnicas: texto à esquerda,
     // códigos/unidades centralizados, valores numéricos à direita.
@@ -2089,7 +2127,7 @@ function segurancaTable(seg) {
     fmtNum(tfComAf, 2), fmtNum(tfSemAf, 2), fmtNum(taxaGravidade, 2),
   ];
   const dataRow = new TableRow({
-    children: vals.map((v, j) => cell(v, { fill: LIGHT_1, size: 17, align: AlignmentType.RIGHT, widthDxa: widthsDxa[j] })),
+    children: vals.map((v, j) => cell(v, { size: 17, align: AlignmentType.RIGHT, widthDxa: widthsDxa[j] })),
   });
 
   const table = new Table({ width: { size: totalWidth, type: WidthType.DXA }, columnWidths: widthsDxa, rows: [headerRow, dataRow], alignment: AlignmentType.CENTER });
@@ -2131,7 +2169,7 @@ function raoTable(rows, medicaoAtual) {
   const bodyRows = rows.map((r, i) => {
     const numero = i + 1;
     const isCurrent = String(numero) === String(medicaoAtual);
-    const fill = isCurrent ? ACCENT_GOLD : (i % 2 === 0 ? LIGHT_1 : LIGHT_2);
+    const fill = isCurrent ? ACCENT_GOLD : undefined;
     return new TableRow({ children: raoRowCells(numero, r, fill, isCurrent) });
   });
   return new Table({ width: { size: totalWidth, type: WidthType.DXA }, columnWidths: widthsDxa, rows: [headerRow, ...bodyRows], alignment: AlignmentType.CENTER });
@@ -2218,46 +2256,27 @@ function recSectionChildren(rec) {
    Montagem do documento
 --------------------------------------------------------------------- */
 async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", assinaturaType = "png") {
-  const logoDims = await fitImage(logoBuf, 150, 55);
   const assinaturaDims = assinaturaBuf ? await fitImage(assinaturaBuf, 220, 110) : null;
-  const pageW = cm(21.0), pageH = cm(29.7);
-  // Margens idênticas às do documento de referência (Relatorio_Tecnico.docx):
-  // topo 2,5cm, base 2,0cm, esquerda 1,5cm, direita 1,0cm.
-  const marginTop = cm(2.5), marginBottom = cm(2.0), marginLeft = cm(1.5), marginRight = cm(1.0);
+  // A4 retrato, margens de 1100 twips (~1,94cm) — igual ao documento
+  // real entregue (não há logotipo no cabeçalho: só texto).
+  const pageW = PAGE_W, pageH = PAGE_H;
+  const marginTop = PAGE_MARGIN, marginBottom = PAGE_MARGIN, marginLeft = PAGE_MARGIN, marginRight = PAGE_MARGIN;
 
-  const footerText = `${data.contrato.contratada} · Contrato ${data.contrato.contrato} · RELATÓRIO TÉCNICO – ${data.medicao.numero}ª Medição · ${data.medicao.periodo_faturamento}`;
-
-  const header = new Header({
-    children: [
-      new Paragraph({
-        alignment: AlignmentType.RIGHT,
-        children: [new ImageRun({ data: logoBuf, type: logoType, transformation: logoDims })],
-      }),
-    ],
-  });
-
-  const footer = new Footer({
-    children: [
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        border: { top: { style: BorderStyle.SINGLE, size: 4, color: BORDER_BLUE, space: 4 } },
-        children: [new TextRun({ text: footerText, size: 18, color: FOOTER_GRAY, font: FONT })],
-      }),
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        children: [
-          new TextRun({ text: "Página ", size: 18, color: FOOTER_GRAY, font: FONT }),
-          new TextRun({ children: [PageNumber.CURRENT], size: 18, color: FOOTER_GRAY, font: FONT }),
-          new TextRun({ text: " de ", size: 18, color: FOOTER_GRAY, font: FONT }),
-          new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 18, color: FOOTER_GRAY, font: FONT }),
-        ],
-      }),
-    ],
-  });
+  const header = runningHeader(`RELATÓRIO TÉCNICO — ${data.medicao.numero}ª Medição — ${data.medicao.periodo_faturamento}`, `Contrato ${data.contrato.contrato}`);
+  const footer = runningFooter(data.contrato.contratada);
 
   const children = [];
   const caption = makeCaptioner();
 
+  children.push(new Paragraph({
+    alignment: AlignmentType.CENTER,
+    children: [new TextRun({ text: data.contrato.contratada, bold: true, size: 22, color: TEXT_BLUE, font: FONT })],
+  }));
+  children.push(new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 200 },
+    children: [new TextRun({ text: `Contrato n° ${data.contrato.contrato}  ·  Ordem de Serviço n° ${data.contrato.os}`, size: 18, color: FOOTER_GRAY, font: FONT })],
+  }));
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
     spacing: { after: 40 },
@@ -2289,10 +2308,9 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
   ]));
   children.push(new Paragraph({ spacing: { before: 160, after: 160 }, children: [] }));
 
-  children.push(new Paragraph({
-    alignment: AlignmentType.CENTER,
-    children: [new TextRun({ text: `Fiscalização: ${data.contrato.fiscalizacao}`, bold: true, size: 20, color: TEXT_BLUE, font: FONT })],
-  }));
+  children.push(infoTable([["FISCALIZAÇÃO", data.contrato.fiscalizacao]]));
+  children.push(new Paragraph({ spacing: { before: 160, after: 160 }, children: [] }));
+
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
     children: [new TextRun({ text: `${data.contrato.contratada} · Contrato ${data.contrato.contrato} · Vitória/ES · ${data.medicao.periodo_faturamento}`, size: 18, color: FOOTER_GRAY, font: FONT })],
@@ -2377,7 +2395,7 @@ function simpleTable(headers, rows, widthsCm, emptyMessage, aligns) {
     children: headers.map((h, i) => cell(h, { fill: DARK_BLUE, bold: true, color: WHITE, size: 16, widthDxa: widthsDxa[i] })),
   });
   const bodyRows = rows.map((r, i) => {
-    const fill = i % 2 === 0 ? LIGHT_1 : LIGHT_2;
+    const fill = undefined;
     return new TableRow({
       children: r.map((v, j) => cell(v, { fill, size: 16, align: colAligns[j], widthDxa: widthsDxa[j] })),
     });
@@ -2396,44 +2414,33 @@ function labelValueParagraph(label, value) {
 }
 
 async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png", assinaturaType = "png") {
-  const pageW = cm(27.94), pageH = cm(21.59); // Letter paisagem, como no modelo de referência
-  const marginTop = cm(3.0), marginBottom = cm(3.0), marginLeft = cm(2.5), marginRight = cm(2.5);
-  const logoDims = await fitImage(logoBuf, 150, 55);
+  // A4 retrato, margens de 1100 twips (~1,94cm) — igual ao RMAA real
+  // entregue (o modelo em branco usava paisagem, mas o documento que a
+  // Contratada efetivamente entrega é retrato, sem logotipo no cabeçalho).
+  const pageW = PAGE_W, pageH = PAGE_H;
+  const marginTop = PAGE_MARGIN, marginBottom = PAGE_MARGIN, marginLeft = PAGE_MARGIN, marginRight = PAGE_MARGIN;
   const assinaturaDims = assinaturaBuf ? await fitImage(assinaturaBuf, 220, 110) : null;
 
-  const footerText = `${data.contrato.contratada} · Contrato ${data.contrato.contrato} · RELATÓRIO MENSAL DE ANDAMENTO DAS ATIVIDADES – RMAA – ${data.medicao.numero}ª Medição · ${data.medicao.periodo_faturamento}`;
-
-  const header = new Header({
-    children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new ImageRun({ data: logoBuf, type: logoType, transformation: logoDims })] })],
-  });
-  const footer = new Footer({
-    children: [
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        border: { top: { style: BorderStyle.SINGLE, size: 4, color: BORDER_BLUE, space: 4 } },
-        children: [new TextRun({ text: footerText, size: 18, color: FOOTER_GRAY, font: FONT })],
-      }),
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        children: [
-          new TextRun({ text: "Página ", size: 18, color: FOOTER_GRAY, font: FONT }),
-          new TextRun({ children: [PageNumber.CURRENT], size: 18, color: FOOTER_GRAY, font: FONT }),
-          new TextRun({ text: " de ", size: 18, color: FOOTER_GRAY, font: FONT }),
-          new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 18, color: FOOTER_GRAY, font: FONT }),
-        ],
-      }),
-    ],
-  });
+  const header = runningHeader(`RMAA — ${data.medicao.numero}ª Medição — ${data.medicao.periodo_faturamento}`, `Contrato ${data.contrato.contrato}`);
+  const footer = runningFooter(data.contrato.contratada);
 
   const children = [];
   const caption = makeCaptioner();
   children.push(new Paragraph({
-    alignment: AlignmentType.CENTER, spacing: { after: 60 },
-    children: [new TextRun({ text: "RELATÓRIO MENSAL DE ANDAMENTO DAS ATIVIDADES", bold: true, size: 36, color: DARK_BLUE, font: FONT })],
+    alignment: AlignmentType.CENTER,
+    children: [new TextRun({ text: data.contrato.contratada, bold: true, size: 22, color: TEXT_BLUE, font: FONT })],
+  }));
+  children.push(new Paragraph({
+    alignment: AlignmentType.CENTER, spacing: { after: 200 },
+    children: [new TextRun({ text: `Contrato n° ${data.contrato.contrato}  ·  Ordem de Serviço n° ${data.contrato.os}`, size: 18, color: FOOTER_GRAY, font: FONT })],
   }));
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER, spacing: { after: 60 },
-    children: [new TextRun({ text: "RMAA", bold: true, size: 36, color: DARK_BLUE, font: FONT })],
+    children: [new TextRun({ text: "RELATÓRIO MENSAL DE ANDAMENTO DAS ATIVIDADES", bold: true, size: 44, color: DARK_BLUE, font: FONT })],
+  }));
+  children.push(new Paragraph({
+    alignment: AlignmentType.CENTER, spacing: { after: 60 },
+    children: [new TextRun({ text: "RMAA", bold: true, size: 32, color: GOLD_TEXT, font: FONT })],
   }));
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER, spacing: { after: 200 },
@@ -2451,8 +2458,8 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
     ["PERÍODO (FATURAMENTO)", data.medicao.periodo_faturamento], ["PERÍODO (DOCUMENTAÇÃO)", data.medicao.periodo_documentacao],
   ]));
   children.push(new Paragraph({ spacing: { before: 160, after: 160 }, children: [] }));
-  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `Fiscalização: ${data.contrato.fiscalizacao}`, bold: true, size: 20, color: TEXT_BLUE, font: FONT })] }));
-  children.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `${data.contrato.contratada} · Contrato ${data.contrato.contrato} · Vitória/ES · ${data.medicao.periodo_faturamento}`, size: 18, color: FOOTER_GRAY, font: FONT })] }));
+  children.push(infoTable([["FISCALIZAÇÃO", data.contrato.fiscalizacao]]));
+  children.push(new Paragraph({ spacing: { before: 160, after: 160 }, children: [] }));
   children.push(new Paragraph({ children: [new PageBreak()] }));
 
   children.push(new Paragraph({
