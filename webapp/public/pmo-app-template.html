@@ -1189,17 +1189,70 @@ function monthlyDatedPlusRemainder(totalAnnual, datedAmounts, pctRow){
 function entDatedAmountsForKey(k, scen, kind){
   return k==='patrocinio' ? patrocinioDatedAmounts(scen, kind) : k==='contribuicoesBateria' ? contribuintesBateriaDatedAmounts(kind) : [];
 }
+// valor anual total de cada linha de ENTRADA/SAÍDA do cenário — extraído à parte pra ser
+// reaproveitado no cálculo do fluxo e no "% do total já previsto/realizado" da tela
+function entAnnualByKey(cs){
+  return {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras, contribuicoesBateria: contribuintesBateriaTotalAnual()};
+}
+function saiAnnualByKey(cs){
+  return {subAtracoes:cs.subAtracoes, subEstrutura:cs.subEstrutura, subOperacao:cs.subOperacao, subMarketing:cs.subMarketing,
+    subLogistica:cs.subLogistica, subExtra:cs.subExtra, despesasAdm:cs.despesasAdm, custoTaxaIngressos:cs.custoTaxaIngressos, openBar:cs.openBar, contingenciaValor:cs.contingenciaValor, restituicoesAprovadas:cs.restituicoesAprovadas};
+}
 function computeMonthlyFlow(scen){
   const cs = computeScenario(scen);
   const custosRows = computeCustosSummary().rows;
-  const entAnnual = {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras, contribuicoesBateria: contribuintesBateriaTotalAnual()};
-  const saiAnnual = {subAtracoes:cs.subAtracoes, subEstrutura:cs.subEstrutura, subOperacao:cs.subOperacao, subMarketing:cs.subMarketing,
-    subLogistica:cs.subLogistica, subExtra:cs.subExtra, despesasAdm:cs.despesasAdm, custoTaxaIngressos:cs.custoTaxaIngressos, openBar:cs.openBar, contingenciaValor:cs.contingenciaValor, restituicoesAprovadas:cs.restituicoesAprovadas};
+  const entAnnual = entAnnualByKey(cs);
+  const saiAnnual = saiAnnualByKey(cs);
   const entMonthly = FC_ENT_KEYS.map(k=> monthlyDatedPlusRemainder(entAnnual[k], entDatedAmountsForKey(k, scen), state.fluxo.pctEnt[k]));
   const saiMonthly = FC_SAI_KEYS.map(k=> monthlyDatedPlusRemainder(saiAnnual[k], custosDatedAmounts(k, custosRows), state.fluxo.pctSai[k]));
   const totalEnt = MESES.map((_,m)=> sum(entMonthly.map(row=>row[m])));
   const totalSai = MESES.map((_,m)=> sum(saiMonthly.map(row=>row[m])));
   return {entMonthly, saiMonthly, totalEnt, totalSai};
+}
+// mes de HOJE na mesma grade de 15 meses do Fluxo de Caixa (ancorada na data do evento) — usado
+// pra saber "até que mês já passou" na comparação Previsto x Realizado do Dashboard. Se hoje cai
+// fora da janela de 15 meses, assume -1 (projeto ainda não começou, nada planejado ainda) ou o
+// último mês (janela inteira já passou), dependendo de qual lado hoje está.
+function currentMonthIdxClamped(){
+  const todayIdx = monthIndexForDate(todayISO());
+  if(todayIdx!=null) return todayIdx;
+  const d = new Date(todayISO()+'T00:00:00');
+  const evt = new Date((state.venda.dataEvento||todayISO())+'T00:00:00');
+  const diff = (evt.getFullYear()-d.getFullYear())*12 + (evt.getMonth()-d.getMonth());
+  const idx = 11-diff;
+  return idx<0 ? -1 : MESES.length-1;
+}
+// comparação PMO "previsto x realizado": o que a % que você definiu dizia que já devia ter
+// acontecido até o mês de hoje (linha de base do plano) contra o que já foi de fato pago/recebido
+// com data (realizado) — alimenta o alerta de "ofensores" no Dashboard. Usa sempre o cenário Base,
+// igual ao resto do Dashboard.
+function computePrevistoRealizadoStatus(scen){
+  const cs = computeScenario(scen);
+  const custosRows = computeCustosSummary().rows;
+  const curIdx = currentMonthIdxClamped();
+  const entAnnual = entAnnualByKey(cs);
+  const saiAnnual = saiAnnualByKey(cs);
+  function rowStatus(label, tipo, annualTotal, pctRow, realDatedList){
+    const plannedToDate = sum((pctRow||[]).slice(0, curIdx+1).map(p=> (p||0)*(annualTotal||0)));
+    const executado = sum(datedAmountsToMonthly(realDatedList));
+    const gap = plannedToDate - executado;
+    const gapPct = plannedToDate>0 ? gap/plannedToDate : 0;
+    return {label, tipo, annualTotal, plannedToDate, executado, gap, gapPct};
+  }
+  const entRows = FC_ENT_KEYS.map((k,i)=> rowStatus(FC_ENT_LABELS[i], 'receita', entAnnual[k], state.fluxo.pctEnt[k], entDatedAmountsForKey(k, scen, 'real')));
+  const saiRows = FC_SAI_KEYS.map((k,i)=> rowStatus(FC_SAI_LABELS[i], 'custo', saiAnnual[k], state.fluxo.pctSai[k], custosDatedAmounts(k, custosRows, 'real')));
+  const entPlanned = sum(entRows.map(r=>r.plannedToDate));
+  const entExecutado = sum(entRows.map(r=>r.executado));
+  const saiPlanned = sum(saiRows.map(r=>r.plannedToDate));
+  const saiExecutado = sum(saiRows.map(r=>r.executado));
+  // ofensor: categoria com planejado relevante até agora (ignora ruído de valores quase zero) e
+  // realizado pelo menos 30% atrás do que já era esperado nesse ponto do cronograma
+  const OFENSOR_MIN_PLANNED = 300;
+  const OFENSOR_MIN_GAP_PCT = 0.3;
+  const ofensores = entRows.concat(saiRows)
+    .filter(r=> r.plannedToDate>=OFENSOR_MIN_PLANNED && r.gapPct>=OFENSOR_MIN_GAP_PCT)
+    .sort((a,b)=> b.gap-a.gap);
+  return {curIdx, entPlanned, entExecutado, saiPlanned, saiExecutado, ofensores};
 }
 function computeFluxoCaixa(){
   const scen = state.fluxo.scen;
@@ -1583,6 +1636,7 @@ VIEWS.dashboard = function(){
   const scoreRes = computeScore();
   const risco = maiorRiscoAtual();
   const patroGap = Math.max(0, base.patroMin - base.patroContratado);
+  const pmoStatus = computePrevistoRealizadoStatus('base');
 
   const acaoPrioritaria = base.classif==='NO-GO'
     ? 'Revisar premissas comerciais e de custo do cenário Base antes de assumir novos compromissos financeiros.'
@@ -1655,6 +1709,31 @@ VIEWS.dashboard = function(){
     <h2>Indicadores de venda${infoIcon('Ritmo real de vendas: quantos dias faltam, quantos ingressos ainda faltam vender e quantos por dia você precisa vender a partir de hoje para bater a meta do cenário Base.')}</h2>
     <div class="gridN">${vendaKpis.map(([l,v])=>`<div class="kpi"><div class="lbl">${l}</div><div class="kpi-value">${v}</div></div>`).join('')}</div>
     <div class="hint" style="margin-top:8px;">Atualize "Ingressos vendidos até hoje" e as datas na aba Vendas.</div>
+  </div>
+
+  <div class="section">
+    <h2>📊 Status PMO: Previsto x Realizado${infoIcon('Compara o que a % que você definiu no Fluxo de Caixa dizia que já devia ter acontecido até o mês de hoje (linha de base do plano) contra o que já foi de fato pago/recebido com data — cenário Base. Ajuda a enxergar atraso de receita ou pagamento antes que vire problema de caixa.')} <span class="hint">cenário Base · até ${pmoStatus.curIdx>=0 ? MESES[Math.min(pmoStatus.curIdx, MESES.length-1)] : 'o projeto ainda não começou'}</span></h2>
+    <div class="gridN">
+      <div class="kpi"><div class="lbl">Receitas planejadas até hoje</div><div class="kpi-value">${fmtCur(pmoStatus.entPlanned)}</div></div>
+      <div class="kpi"><div class="lbl">Receitas realizadas até hoje</div><div class="kpi-value" style="color:${pmoStatus.entExecutado>=pmoStatus.entPlanned*0.7?'var(--good)':'var(--warn)'}">${fmtCur(pmoStatus.entExecutado)}</div></div>
+      <div class="kpi"><div class="lbl">Custos planejados até hoje</div><div class="kpi-value">${fmtCur(pmoStatus.saiPlanned)}</div></div>
+      <div class="kpi"><div class="lbl">Custos realizados até hoje</div><div class="kpi-value">${fmtCur(pmoStatus.saiExecutado)}</div></div>
+    </div>
+    ${pmoStatus.ofensores.length ? `
+    <div style="margin-top:16px;">
+      <h3 style="font-size:12.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-faint); margin:0 0 8px;">⚠ Ofensores — atrás do planejado até agora</h3>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Categoria</th><th>Tipo</th><th class="num">Planejado até hoje</th><th class="num">Realizado</th><th class="num">Atraso</th></tr></thead>
+        <tbody>${pmoStatus.ofensores.map(o=>`<tr>
+          <td>${o.label}</td>
+          <td>${o.tipo==='receita'?'Receita':'Custo'}</td>
+          <td class="num mono">${fmtCur(o.plannedToDate)}</td>
+          <td class="num mono">${fmtCur(o.executado)}</td>
+          <td class="num mono" style="color:var(--bad); font-weight:700;">${fmtCur(o.gap)} (${fmtPct(o.gapPct)})</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+      <div class="hint" style="margin-top:6px;">Considera só categorias com planejamento relevante até agora (acima de ${fmtCur(300)}) e pelo menos 30% de atraso em relação ao que a % mensal previa.</div>
+    </div>` : `<div class="callout" style="margin-top:14px; border-color:var(--good); background:var(--good-soft); color:var(--good);"><strong>✓ Nenhum ofensor identificado — o realizado está acompanhando o planejado até agora.</strong></div>`}
   </div>
 
   <div class="section">
@@ -2302,14 +2381,19 @@ VIEWS.oxr = function(){
 
 /* ================= FLUXO DE CAIXA ================= */
 // linha auxiliar (Previsto ou Realizado) embaixo da linha principal de uma categoria — mostra o
-// valor em R$ já contratado/pago mês a mês, sem % nenhum (vem direto dos dados de Patrocínio/
-// Custos/Bateria). So renderiza se a categoria tiver pelo menos 1 valor datado desse tipo.
-function datedSubRow(label, monthlyArr, colorVar, bgVar){
+// valor em R$ já contratado/pago mês a mês (sem % nenhum, vem direto dos dados de Patrocínio/
+// Custos/Bateria), e no fim da linha quanto isso representa do total anual da categoria — é essa
+// coluna que mostra "quanto dos 100% já é previsto/realizado", ao lado do 100% da linha principal.
+// So renderiza se a categoria tiver pelo menos 1 valor datado desse tipo.
+function datedSubRow(label, monthlyArr, colorVar, bgVar, annualTotal){
   if(!monthlyArr || sum(monthlyArr)<=0) return '';
   const cells = monthlyArr.map(v=> `<td class="num mono" style="font-size:10.5px; padding:3px 5px; color:${v>0?colorVar:'var(--text-faint)'}; background:${v>0?bgVar:'transparent'};">${v>0?fmtInt(v):''}</td>`).join('');
-  return `<tr><td style="padding-left:22px; font-size:11px; color:${colorVar}; white-space:nowrap;">↳ ${label}</td>${cells}<td></td></tr>`;
+  const subTotal = sum(monthlyArr);
+  const pct = annualTotal>0 ? Math.round((subTotal/annualTotal)*1000)/10 : 0;
+  const totalCell = `<td class="num mono" style="font-weight:700; white-space:nowrap; color:${colorVar}; font-size:11px;">${fmtNum(pct,1)}%</td>`;
+  return `<tr><td style="padding-left:22px; font-size:11px; color:${colorVar}; white-space:nowrap;">↳ ${label}</td>${cells}${totalCell}</tr>`;
 }
-function pctMonthTable(title, labels, keys, storePath, datedByKey, previstoByKey, realByKey){
+function pctMonthTable(title, labels, keys, storePath, datedByKey, previstoByKey, realByKey, annualByKey){
   const rows = keys.map((k,ri)=>{
     const vals = MESES.map((_,m)=> Math.round((getPath(state, `${storePath}.${k}.${m}`.split('.'))||0)*1000)/10);
     const dated = datedByKey && datedByKey[ri];
@@ -2335,8 +2419,9 @@ function pctMonthTable(title, labels, keys, storePath, datedByKey, previstoByKey
     // pode fechar e não pagar, então isso é só expectativa); "Realizado" = já pago de verdade.
     // Calculadas automaticamente a partir do que foi preenchido em Patrocínios/Custos/Bateria —
     // não se digita nada aqui, é só leitura, pra comparar o que era esperado com o que aconteceu.
-    const previstoRow = datedSubRow('Previsto (contratado)', previstoByKey && previstoByKey[ri], 'var(--text-dim)', 'var(--surface-2)');
-    const realRow = datedSubRow('Realizado (pago)', realByKey && realByKey[ri], 'var(--good)', 'var(--good-soft)');
+    const annualTotal = annualByKey && annualByKey[ri];
+    const previstoRow = datedSubRow('Previsto (contratado)', previstoByKey && previstoByKey[ri], 'var(--text-dim)', 'var(--surface-2)', annualTotal);
+    const realRow = datedSubRow('Realizado (pago)', realByKey && realByKey[ri], 'var(--good)', 'var(--good-soft)', annualTotal);
     return mainRow + previstoRow + realRow;
   }).join('');
   return `<div class="tablewrap" style="margin-bottom:10px;"><table>
@@ -2388,20 +2473,24 @@ VIEWS.fluxo = function(){
 
   <div class="section">
     <h2>Entradas <span class="hint">% do total anual em cada mês</span></h2>
-    <div class="hint" style="margin-bottom:8px;">Os % abaixo são a SUA estimativa manual de distribuição ao longo do ano — eles não mudam sozinhos, e continuam servindo pra cobrir só a parte do valor anual que ainda não tem nenhuma parcela/pagamento com data. Onde já existe dado datado (Patrocínios, Bateria, e qualquer item de Custos), a linha ganha automaticamente duas sublinhas só de leitura: <strong>Previsto</strong> (contratado, com data esperada, mas ainda sem pagamento — pode não se confirmar) e <strong>Realizado</strong> (já pago de verdade) — calculadas a partir do que você preenche em Patrocínios/Custos/Bateria, sem digitar nada aqui.</div>
+    <div class="hint" style="margin-bottom:8px;">Os % abaixo são a SUA estimativa manual de distribuição ao longo do ano — eles não mudam sozinhos, e continuam servindo pra cobrir só a parte do valor anual que ainda não tem nenhuma parcela/pagamento com data. Onde já existe dado datado (Patrocínios, Bateria, e qualquer item de Custos), a linha ganha automaticamente duas sublinhas só de leitura: <strong>Previsto</strong> (contratado, com data esperada, mas ainda sem pagamento — pode não se confirmar) e <strong>Realizado</strong> (já pago de verdade) — cada uma com seu próprio % do total anual da categoria, na coluna Total, pra mostrar quanto dos 100% já é expectativa confirmada e quanto já é dinheiro de verdade.</div>
     ${(()=>{
+      const entAnnual = entAnnualByKey(cs);
+      const entAnnualArr = FC_ENT_KEYS.map(k=> entAnnual[k]);
       const entPrevisto = FC_ENT_KEYS.map(k=> datedAmountsToMonthly(entDatedAmountsForKey(k, scen, 'previsto')));
       const entReal = FC_ENT_KEYS.map(k=> datedAmountsToMonthly(entDatedAmountsForKey(k, scen, 'real')));
       const entDated = FC_ENT_KEYS.map((k,i)=> MESES.map((_,m)=> entPrevisto[i][m]+entReal[i][m]));
-      return pctMonthTable('Linha', FC_ENT_LABELS, FC_ENT_KEYS, 'fluxo.pctEnt', entDated, entPrevisto, entReal);
+      return pctMonthTable('Linha', FC_ENT_LABELS, FC_ENT_KEYS, 'fluxo.pctEnt', entDated, entPrevisto, entReal, entAnnualArr);
     })()}
     <h2 style="margin-top:20px;">Saídas <span class="hint">% do total anual em cada mês</span></h2>
     ${(()=>{
       const custosRows = computeCustosSummary().rows;
+      const saiAnnual = saiAnnualByKey(cs);
+      const saiAnnualArr = FC_SAI_KEYS.map(k=> saiAnnual[k]);
       const saiPrevisto = FC_SAI_KEYS.map(k=> datedAmountsToMonthly(custosDatedAmounts(k, custosRows, 'previsto')));
       const saiReal = FC_SAI_KEYS.map(k=> datedAmountsToMonthly(custosDatedAmounts(k, custosRows, 'real')));
       const saiDated = FC_SAI_KEYS.map((k,i)=> MESES.map((_,m)=> saiPrevisto[i][m]+saiReal[i][m]));
-      return pctMonthTable('Linha', FC_SAI_LABELS, FC_SAI_KEYS, 'fluxo.pctSai', saiDated, saiPrevisto, saiReal);
+      return pctMonthTable('Linha', FC_SAI_LABELS, FC_SAI_KEYS, 'fluxo.pctSai', saiDated, saiPrevisto, saiReal, saiAnnualArr);
     })()}
   </div>
 
