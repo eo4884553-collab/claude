@@ -463,3 +463,149 @@ create policy "org_cash_update_global_admin" on public.org_cash
   for update using (
     exists (select 1 from public.profiles p where p.id = auth.uid() and p.status = 'approved' and p.role = 'admin')
   );
+
+-- ============================================================
+-- 11) RESERVA DE MESAS (Feijoada do Bloco) — qualquer aprovado reserva, não só admin
+-- ============================================================
+-- Diferente do resto do app (onde só admin grava em project_state — ver seção 8), aqui
+-- QUALQUER usuário aprovado (admin ou convidado) pode reservar uma mesa livre pra si, e
+-- pode reservar MAIS DE UMA (não tem limite de 1 reserva por pessoa). Por isso mesa vive
+-- numa tabela própria, não dentro do project_state — assim o RLS consegue liberar a escrita
+-- só da própria reserva, sem abrir escrita no resto dos dados financeiros do projeto.
+-- Mesa "livre" = simplesmente não tem linha aqui pra aquele número; reservar = inserir uma
+-- linha; a PRIMARY KEY (project_id, numero) garante que duas pessoas não conseguem reservar
+-- a mesma mesa ao mesmo tempo (quem perder a corrida recebe erro de violação de unicidade).
+create table if not exists public.mesa_reservas (
+  project_id text not null references public.project_state(id),
+  numero int not null check (numero between 1 and 100),
+  user_id uuid not null references auth.users(id),
+  user_email text not null,
+  reservado_por text not null,
+  telefone text not null default '',
+  pessoas jsonb not null default '[]'::jsonb,
+  obs text not null default '',
+  status text not null default 'reservada' check (status in ('reservada','paga')),
+  data_reserva date not null default current_date,
+  data_pagamento date,
+  valor_pago numeric not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (project_id, numero)
+);
+
+alter table public.mesa_reservas enable row level security;
+
+-- todo aprovado vê todas as reservas (mapa de mesas é público pra quem está logado)
+drop policy if exists "mesa_reservas_select_approved" on public.mesa_reservas;
+create policy "mesa_reservas_select_approved" on public.mesa_reservas
+  for select using (
+    exists (select 1 from public.profiles p where p.id = auth.uid() and p.status = 'approved')
+  );
+
+-- qualquer aprovado reserva uma mesa LIVRE pra si (sempre como pendente de pagamento —
+-- confirmar "paga" é sempre função de admin, nunca o próprio cliente manda esse status)
+drop policy if exists "mesa_reservas_insert_approved" on public.mesa_reservas;
+create policy "mesa_reservas_insert_approved" on public.mesa_reservas
+  for insert with check (
+    user_id = auth.uid() and status = 'reservada' and valor_pago = 0 and data_pagamento is null
+    and exists (select 1 from public.profiles p where p.id = auth.uid() and p.status = 'approved')
+  );
+
+-- o próprio autor cancela a reserva enquanto ainda não foi confirmada como paga; admin do
+-- domínio cancela qualquer uma (ex.: liberar mesa de quem desistiu)
+drop policy if exists "mesa_reservas_delete_owner_pending_or_admin" on public.mesa_reservas;
+create policy "mesa_reservas_delete_owner_pending_or_admin" on public.mesa_reservas
+  for delete using (
+    (user_id = auth.uid() and status = 'reservada')
+    or public.effective_role(project_id, auth.uid()) = 'admin'
+  );
+
+-- sem policy de UPDATE direto — editar os dados da própria reserva (o dono) ou confirmar
+-- pagamento/trocar status/reatribuir (admin) é sempre por uma das funções abaixo
+
+-- o próprio dono ajusta nome/telefone/acompanhantes/obs da reserva — NUNCA status nem
+-- valor pago (isso é sempre confirmação de admin, assim como em todo o resto do app)
+create or replace function public.update_my_mesa_reserva(
+  p_project text,
+  p_numero int,
+  p_nome text,
+  p_telefone text,
+  p_pessoas jsonb,
+  p_obs text
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if p_nome is null or length(trim(p_nome)) = 0 then
+    raise exception 'Informe o nome de quem reservou.';
+  end if;
+
+  update public.mesa_reservas
+    set reservado_por = p_nome, telefone = coalesce(p_telefone,''),
+        pessoas = coalesce(p_pessoas, '[]'::jsonb), obs = coalesce(p_obs,''),
+        updated_at = now()
+    where project_id = p_project and numero = p_numero and user_id = auth.uid();
+
+  if not found then
+    raise exception 'Reserva não encontrada ou você não é o dono dela.';
+  end if;
+end;
+$$;
+
+-- só admin do domínio confirma pagamento, troca status ou reatribui/edita qualquer mesa
+-- (inclusive criar a reserva direto por ela, sem depender de alguém ter se auto-reservado)
+create or replace function public.admin_save_mesa_reserva(
+  p_project text,
+  p_numero int,
+  p_nome text,
+  p_telefone text,
+  p_pessoas jsonb,
+  p_obs text,
+  p_status text,
+  p_data_pagamento date,
+  p_valor_pago numeric
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if public.effective_role(p_project, auth.uid()) is distinct from 'admin' then
+    raise exception 'Apenas administradores deste domínio podem editar reservas de mesa.';
+  end if;
+  if p_status not in ('reservada','paga') then
+    raise exception 'status inválido';
+  end if;
+  if p_nome is null or length(trim(p_nome)) = 0 then
+    raise exception 'Informe o nome de quem reservou.';
+  end if;
+
+  insert into public.mesa_reservas
+    (project_id, numero, user_id, user_email, reservado_por, telefone, pessoas, obs, status, data_pagamento, valor_pago)
+  values (
+    p_project, p_numero, auth.uid(), coalesce((select email from public.profiles where id = auth.uid()), ''),
+    p_nome, coalesce(p_telefone,''), coalesce(p_pessoas,'[]'::jsonb), coalesce(p_obs,''),
+    p_status, p_data_pagamento, coalesce(p_valor_pago,0)
+  )
+  on conflict (project_id, numero) do update
+    set reservado_por = excluded.reservado_por, telefone = excluded.telefone,
+        pessoas = excluded.pessoas, obs = excluded.obs, status = excluded.status,
+        data_pagamento = excluded.data_pagamento, valor_pago = excluded.valor_pago,
+        updated_at = now();
+end;
+$$;
+
+-- garante que mudanças em mesa_reservas chegam ao vivo pra todo mundo olhando o mapa ao
+-- mesmo tempo (duas pessoas reservando mesas diferentes na mesma hora, por exemplo)
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+     and not exists (
+       select 1 from pg_publication_tables
+       where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'mesa_reservas'
+     ) then
+    alter publication supabase_realtime add table public.mesa_reservas;
+  end if;
+end $$;
