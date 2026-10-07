@@ -144,6 +144,10 @@ td.valcell{ text-align:right; font-weight:700; color:var(--blue-900); }
 .btn.ghost{ background:transparent; border-color:var(--line); }
 .btn.small{ font-size:11px; padding:4px 10px; border-radius:5px; display:inline-block; margin:4px 0 6px; }
 
+#atraso-kpis .field{ display:flex; flex-direction:column; gap:3px; font-size:12px; font-weight:700; color:var(--blue-900); background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+#atraso-kpis .field label{ font-weight:500; color:var(--blue-500); text-transform:none; letter-spacing:0; font-size:11px; }
+#atraso-kpis .field strong{ font-size:14px; }
+
 .hidden{ display:none !important; }
 
 .example-tag{
@@ -412,11 +416,11 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
           <label class="field">Valor Previsto Acumulado (R$)<input type="number" step="any" name="rec_valor_previsto_acumulado" /></label>
         </div>
         <label class="field" style="margin-top:14px">Etapas Macro Previstas para o Período
-          <button type="button" class="btn small" id="copy-etapas-previstas">↺ Copiar da seção 11.1 (Atividades no mês)</button>
+          <button type="button" class="btn small" id="copy-etapas-previstas">↺ Copiar da seção 14.1 (Atividades no mês)</button>
           <textarea name="rec_etapas_previstas" rows="3"></textarea>
         </label>
         <label class="field" style="margin-top:14px">Etapas Macro Executadas no Período
-          <button type="button" class="btn small" id="copy-etapas-executadas">↺ Copiar da seção 11.1 (Atividades no mês)</button>
+          <button type="button" class="btn small" id="copy-etapas-executadas">↺ Copiar da seção 14.1 (Atividades no mês)</button>
           <textarea name="rec_etapas_executadas" rows="3"></textarea>
         </label>
         <label class="field" style="margin-top:14px">Análise dos Desvios<textarea name="rec_analise_desvios" rows="2"></textarea></label>
@@ -430,7 +434,7 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
           <label class="field">Prazo para entrega da revisão (se aplicável)<input type="text" name="rec_revisao_prazo" /></label>
         </div>
         <label class="field" style="margin-top:14px">Etapas Macro Previstas para o Próximo Período
-          <button type="button" class="btn small" id="copy-etapas-proximo">↺ Copiar da seção 11.3 (Mês +1)</button>
+          <button type="button" class="btn small" id="copy-etapas-proximo">↺ Copiar da seção 14.3 (Mês +1)</button>
           <textarea name="rec_etapas_proximo" rows="3"></textarea>
         </label>
       </div>
@@ -438,7 +442,23 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
 
     <section class="card">
       <div class="sec-head">
-        <span class="num">7</span><h2>Segurança do Trabalho</h2>
+        <span class="num">7</span><h2>Análise de Atraso e Impacto Financeiro</h2>
+        <label class="chk"><input type="checkbox" id="toggle-atraso" checked /> incluir</label>
+      </div>
+      <div id="atraso-fields">
+        <p class="report-type-note" style="margin:-8px 0 12px">Calculado automaticamente a partir da planilha RAO (seção 5) — não precisa lançar nada de novo aqui. Clique em "Calcular" sempre que atualizar o RAO.</p>
+        <button type="button" class="btn" id="calcular-atraso">🔄 Calcular atraso e impacto financeiro</button>
+        <div class="grid" id="atraso-kpis" style="margin-top:14px"></div>
+        <label class="field" style="margin-top:14px">Plano de Ação para Reequilíbrio Financeiro e Retirada de Atrasos
+          <button type="button" class="btn small" id="gerar-plano-acao">↺ Gerar automaticamente a partir dos números acima</button>
+          <textarea name="atraso_plano_acao" rows="7"></textarea>
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="sec-head">
+        <span class="num">8</span><h2>Segurança do Trabalho</h2>
         <label class="chk"><input type="checkbox" id="toggle-seguranca" /> incluir</label>
       </div>
       <div class="grid hidden" id="seguranca-fields">
@@ -456,14 +476,14 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
     </section>
 
     <section class="card">
-      <div class="sec-head"><span class="num">8</span><h2>Observações e Considerações Finais</h2></div>
+      <div class="sec-head"><span class="num">9</span><h2>Observações e Considerações Finais</h2></div>
       <label class="field">
         <textarea name="observacoes" rows="4"></textarea>
       </label>
     </section>
 
     <section class="card">
-      <div class="sec-head"><span class="num">9</span><h2>Responsável Técnico</h2></div>
+      <div class="sec-head"><span class="num">10</span><h2>Responsável Técnico</h2></div>
       <div class="grid">
         <label class="field">Nome<input type="text" name="resp_nome" required /></label>
         <label class="field">Cargo<input type="text" name="resp_cargo" /></label>
@@ -472,7 +492,7 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
     </section>
 
     <section class="card">
-      <div class="sec-head"><span class="num">10</span><h2>Personalização</h2><span class="opt">opcional</span></div>
+      <div class="sec-head"><span class="num">11</span><h2>Personalização</h2><span class="opt">opcional</span></div>
       <div class="grid">
         <label class="field">Logotipo (substitui o padrão AIR MINAS)
           <input type="file" id="logo-file" accept="image/png,image/jpeg" />
@@ -486,7 +506,7 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
     <div id="rmaa-sections">
 
       <section class="card">
-        <div class="sec-head"><span class="num">11</span><h2>Apresentação<span class="rmaa-badge">RMAA</span></h2></div>
+        <div class="sec-head"><span class="num">12</span><h2>Apresentação<span class="rmaa-badge">RMAA</span></h2></div>
         <label class="field">
           <textarea name="rmaa_apresentacao" rows="3"></textarea>
           <small>Em branco = texto padrão gerado a partir dos dados do contrato.</small>
@@ -494,7 +514,7 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
       </section>
 
       <section class="card">
-        <div class="sec-head"><span class="num">12</span><h2>Relação da Equipe<span class="rmaa-badge">RMAA</span></h2></div>
+        <div class="sec-head"><span class="num">13</span><h2>Relação da Equipe<span class="rmaa-badge">RMAA</span></h2></div>
 
         <p class="subtable-title">10.1 Equipe da Contratada</p>
         <div class="table-wrap">
@@ -525,7 +545,7 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
       </section>
 
       <section class="card">
-        <div class="sec-head"><span class="num">13</span><h2>Atividades Programadas<span class="rmaa-badge">RMAA</span></h2></div>
+        <div class="sec-head"><span class="num">14</span><h2>Atividades Programadas<span class="rmaa-badge">RMAA</span></h2></div>
 
         <p class="subtable-title">11.1 Atividades programadas no mês de referência</p>
         <div class="table-wrap">
@@ -570,7 +590,7 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
       </section>
 
       <section class="card">
-        <div class="sec-head"><span class="num">14</span><h2>Cronogramas e Previsão de Desembolso<span class="rmaa-badge">RMAA</span></h2></div>
+        <div class="sec-head"><span class="num">15</span><h2>Cronogramas e Previsão de Desembolso<span class="rmaa-badge">RMAA</span></h2></div>
         <p class="subtable-title">12.1 Gráfico Previsto x Executado — reaproveita a Curva S informada acima</p>
         <p class="subtable-title">12.2 Previsão de desembolso</p>
         <div class="table-wrap">
@@ -583,7 +603,7 @@ footer.pagefoot{ text-align:center; font-size:11.5px; color:var(--blue-500); pad
       </section>
 
       <section class="card">
-        <div class="sec-head"><span class="num">15</span><h2>Ensaios e Correspondências<span class="rmaa-badge">RMAA</span></h2></div>
+        <div class="sec-head"><span class="num">16</span><h2>Ensaios e Correspondências<span class="rmaa-badge">RMAA</span></h2></div>
         <label class="field">Ensaios Realizados
           <textarea name="rmaa_ensaios" rows="3"></textarea>
         </label>
@@ -1574,7 +1594,7 @@ document.getElementById("toggle-rec").addEventListener("change", (e) => {
   document.getElementById("rec-fields").classList.toggle("hidden", !e.target.checked);
 });
 
-// A atividade programada no mês de referência (seção 11.1) e a etapa
+// A atividade programada no mês de referência (seção 14.1) e a etapa
 // macro do REC descrevem o mesmo trabalho em dois formatos diferentes
 // (tabela detalhada x resumo executivo) — em vez de digitar duas vezes,
 // um clique copia a lista de atividades como marcadores de texto.
@@ -1670,7 +1690,7 @@ function atualizarDescompasso() {
     alertBox.innerHTML = `
       <strong>⚠ Valor medido abaixo do previsto para ${mesAtual.mes_full}</strong>
       Previsto no cronograma: ${fmtBRL(mesAtual.previsto_mensal)} · Medido: ${fmtBRL(valorMedicao)} · Diferença: ${fmtBRL(diff)}.
-      Lembre-se de registrar a justificativa do descompasso no RMAA (seção 11.2).
+      Lembre-se de registrar a justificativa do descompasso no RMAA (seção 14.2).
       <br><button type="button" id="preencher-justificativa-btn">Sugerir texto na justificativa</button>`;
     document.getElementById("preencher-justificativa-btn").addEventListener("click", () => {
       const ta = form.elements["rmaa_justificativa_atraso"];
@@ -1683,6 +1703,119 @@ function atualizarDescompasso() {
     alertBox.classList.add("hidden");
   }
 }
+
+/* ---------------------------------------------------------------------
+   Análise de Atraso e Impacto Financeiro — a partir do RAO (previsto_pct
+   x executado_pct por medição, já alinhado ao cronograma físico-
+   financeiro), sem precisar lançar nenhum dado novo: evita repetir o
+   mesmo valor em dois lugares, como o usuário pediu.
+--------------------------------------------------------------------- */
+function calcularAtrasoImpacto(raoRows, valorContratualFallback) {
+  const rows = (raoRows || [])
+    .map((r) => ({
+      ate_dia: r.ate_dia,
+      valor_contratual: parseFloat(r.valor_contratual) || valorContratualFallback || 0,
+      previsto_pct: parseFloat(r.previsto_pct),
+      executado_pct: (r.executado_pct === "" || r.executado_pct == null) ? null : parseFloat(r.executado_pct),
+    }))
+    .filter((r) => !isNaN(r.previsto_pct));
+  if (!rows.length) return null;
+
+  let idxAtual = -1;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].executado_pct != null && !isNaN(rows[i].executado_pct)) { idxAtual = i; break; }
+  }
+  if (idxAtual < 0) return null;
+
+  const atual = rows[idxAtual];
+  const valorContratual = atual.valor_contratual || valorContratualFallback || 0;
+  const previstoPct = atual.previsto_pct;
+  const executadoPct = atual.executado_pct;
+  const atrasoPct = previstoPct - executadoPct; // pontos percentuais; negativo = adiantado
+  const atrasoValor = (atrasoPct / 100) * valorContratual;
+
+  // Interpola na curva do previsto para achar a que "mês" equivale o
+  // nível de execução atual — isso vira o "atraso em meses".
+  let fracIdx = null;
+  for (let i = 0; i < rows.length - 1; i++) {
+    const a = rows[i].previsto_pct, b = rows[i + 1].previsto_pct;
+    if ((executadoPct >= a && executadoPct <= b) || (executadoPct <= a && executadoPct >= b)) {
+      fracIdx = b !== a ? i + (executadoPct - a) / (b - a) : i;
+      break;
+    }
+  }
+  if (fracIdx === null) fracIdx = executadoPct <= rows[0].previsto_pct ? 0 : rows.length - 1;
+  const atrasoMeses = Math.max(0, idxAtual - fracIdx);
+
+  const mesesRestantes = Math.max(0, (rows.length - 1) - idxAtual);
+  const valorRestante = valorContratual * (100 - executadoPct) / 100;
+  const taxaNecessariaPct = mesesRestantes > 0 ? (100 - executadoPct) / mesesRestantes : 0;
+  const taxaNecessariaValor = valorContratual * taxaNecessariaPct / 100;
+  const taxaMediaAtualPct = executadoPct / (idxAtual + 1);
+  const taxaMediaAtualValor = valorContratual * taxaMediaAtualPct / 100;
+  const gapPct = taxaNecessariaPct - taxaMediaAtualPct;
+  const gapValor = taxaNecessariaValor - taxaMediaAtualValor;
+  const status = atrasoPct > 0.5 ? "ATRASO" : (atrasoPct < -0.5 ? "ADIANTADO" : "EM DIA");
+
+  return {
+    mesAtual: atual.ate_dia, valorContratual, previstoPct, executadoPct,
+    atrasoPct, atrasoValor, atrasoMeses, mesesRestantes, valorRestante,
+    taxaNecessariaPct, taxaNecessariaValor, taxaMediaAtualPct, taxaMediaAtualValor,
+    gapPct, gapValor, status,
+  };
+}
+
+function gerarPlanoAcaoTexto(k) {
+  if (!k) return "";
+  const dataRef = fmtDateBR(k.mesAtual);
+  if (k.status === "ADIANTADO") {
+    return `Na data de referência (${dataRef}), a execução físico-financeira do contrato está adiantada em relação ao cronograma original, com ${fmtNum(k.executadoPct)}% executado contra ${fmtNum(k.previstoPct)}% previsto (${fmtNum(Math.abs(k.atrasoPct))} pontos percentuais de folga, equivalentes a ${fmtMoney(Math.abs(k.atrasoValor))}). Recomenda-se manter o ritmo atual de produção (média de ${fmtMoney(k.taxaMediaAtualValor)}/mês) e priorizar a consolidação da qualidade dos serviços executados, sem necessidade de medidas de reequilíbrio.`;
+  }
+  if (k.status === "EM DIA") {
+    return `Na data de referência (${dataRef}), a execução físico-financeira do contrato está alinhada ao cronograma original (${fmtNum(k.executadoPct)}% executado contra ${fmtNum(k.previstoPct)}% previsto). Recomenda-se manter o ritmo médio de produção atual (${fmtMoney(k.taxaMediaAtualValor)}/mês) para concluir o contrato dentro do prazo pactuado.`;
+  }
+  const mesesTxt = k.atrasoMeses >= 1 && k.atrasoMeses < 2 ? "mês" : "meses";
+  const restantesTxt = k.mesesRestantes === 1 ? "mês" : "meses";
+  return `Na data de referência (${dataRef}), a obra apresenta atraso de aproximadamente ${fmtNum(k.atrasoMeses, 1)} ${mesesTxt} em relação ao cronograma físico-financeiro original, com ${fmtNum(k.executadoPct)}% executado contra ${fmtNum(k.previstoPct)}% previsto — um descompasso de ${fmtNum(k.atrasoPct)} pontos percentuais, equivalente a ${fmtMoney(k.atrasoValor)}.
+
+Para recuperar o atraso e concluir o contrato no prazo pactuado (faltam ${k.mesesRestantes} ${restantesTxt}, totalizando ${fmtMoney(k.valorRestante)} a executar), será necessária uma produção média de ${fmtMoney(k.taxaNecessariaValor)}/mês (${fmtNum(k.taxaNecessariaPct)}%/mês), ante uma média histórica de ${fmtMoney(k.taxaMediaAtualValor)}/mês (${fmtNum(k.taxaMediaAtualPct)}%/mês) — um incremento necessário de ${fmtMoney(k.gapValor)}/mês (${fmtNum(k.gapPct)} pontos percentuais acima do ritmo atual).
+
+Plano de ação proposto para o reequilíbrio financeiro e retirada do atraso:
+• Reforço de equipe e turnos nas frentes de serviço com maior peso financeiro no cronograma remanescente;
+• Antecipação da aquisição de insumos e materiais críticos para evitar paradas por falta de suprimento;
+• Replanejamento das atividades remanescentes, priorizando itens de maior valor agregado no cronograma;
+• Acompanhamento quinzenal do indicador de aderência ao cronograma (previsto x executado) para correção de rota tempestiva;
+• Comunicação formal à fiscalização sobre o plano de recuperação, com marcos intermediários de verificação.`;
+}
+
+function atualizarPainelAtraso() {
+  const k = calcularAtrasoImpacto(raoMgr.collect(), parseFloat(form.elements.valor_contratual.value) || 0);
+  const panel = document.getElementById("atraso-kpis");
+  if (!k) {
+    panel.innerHTML = `<p class="report-type-note">Preencha o RAO (seção 5) com ao menos uma medição com "Executado (%)" lançado para calcular.</p>`;
+    return null;
+  }
+  const corStatus = k.status === "ATRASO" ? "#B5443D" : (k.status === "ADIANTADO" ? "#2E7D32" : "#0E4D79");
+  panel.innerHTML = `
+    <div class="field"><label>Data de Referência</label><strong>${fmtDateBR(k.mesAtual)}</strong></div>
+    <div class="field"><label>Status</label><strong style="color:${corStatus}">${k.status}</strong></div>
+    <div class="field"><label>Previsto Acumulado</label><strong>${fmtNum(k.previstoPct)}%</strong></div>
+    <div class="field"><label>Executado Acumulado</label><strong>${fmtNum(k.executadoPct)}%</strong></div>
+    <div class="field"><label>Atraso (pontos percentuais)</label><strong>${fmtNum(k.atrasoPct)} p.p.</strong></div>
+    <div class="field"><label>Impacto Financeiro do Atraso</label><strong>${fmtBRL(k.atrasoValor)}</strong></div>
+    <div class="field"><label>Atraso Equivalente (meses)</label><strong>${fmtNum(k.atrasoMeses, 1)}</strong></div>
+    <div class="field"><label>Meses Restantes no Cronograma</label><strong>${k.mesesRestantes}</strong></div>
+    <div class="field"><label>Produção Média Atual</label><strong>${fmtBRL(k.taxaMediaAtualValor)}/mês</strong></div>
+    <div class="field"><label>Produção Necessária p/ Recuperar</label><strong>${fmtBRL(k.taxaNecessariaValor)}/mês</strong></div>`;
+  return k;
+}
+
+document.getElementById("calcular-atraso").addEventListener("click", () => atualizarPainelAtraso());
+document.getElementById("gerar-plano-acao").addEventListener("click", () => {
+  const k = atualizarPainelAtraso();
+  if (k) form.elements.atraso_plano_acao.value = gerarPlanoAcaoTexto(k);
+});
+atualizarPainelAtraso();
 
 mesReferenciaSelect.addEventListener("change", () => {
   atualizarLabelsFuturos();
@@ -2229,6 +2362,51 @@ function bulletParagraphs(text, emptyMessage) {
   }));
 }
 
+function planoAcaoParagraphs(text) {
+  const linhas = String(text ?? "").split("\n");
+  const paras = [];
+  for (const linhaRaw of linhas) {
+    const linha = linhaRaw.trim();
+    if (!linha) continue;
+    const isBullet = /^[•-]\s*/.test(linha);
+    paras.push(new Paragraph({
+      spacing: { after: isBullet ? 40 : 120 },
+      children: [new TextRun({ text: isBullet ? `•  ${linha.replace(/^[•-]\s*/, "")}` : linha, size: 20, font: FONT })],
+    }));
+  }
+  if (!paras.length) {
+    paras.push(new Paragraph({ children: [new TextRun({ text: "Nenhum plano de ação informado.", italics: true, size: 20, font: FONT })] }));
+  }
+  return paras;
+}
+
+// Painel de KPIs calculado a partir do RAO (sem lançamento duplicado):
+// atraso em pontos percentuais, impacto financeiro, atraso equivalente
+// em meses e a produção necessária para recuperar o cronograma, seguido
+// do plano de ação (editável pelo usuário, com sugestão automática).
+function atrasoSectionChildren(atraso) {
+  const children = [];
+  children.push(blockTitle("ANÁLISE DE ATRASO E IMPACTO FINANCEIRO"));
+  children.push(infoTable([
+    ["DATA DE REFERÊNCIA", fmtDateBR(atraso.mesAtual)],
+    ["STATUS", atraso.status],
+    ["PREVISTO ACUMULADO", `${fmtNum(atraso.previstoPct)}%`],
+    ["EXECUTADO ACUMULADO", `${fmtNum(atraso.executadoPct)}%`],
+    ["ATRASO (PONTOS PERCENTUAIS)", `${fmtNum(atraso.atrasoPct)} p.p.`],
+    ["IMPACTO FINANCEIRO DO ATRASO", fmtMoney(atraso.atrasoValor)],
+    ["ATRASO EQUIVALENTE (MESES)", fmtNum(atraso.atrasoMeses, 1)],
+    ["MESES RESTANTES NO CRONOGRAMA", String(atraso.mesesRestantes)],
+    ["PRODUÇÃO MÉDIA ATUAL", `${fmtMoney(atraso.taxaMediaAtualValor)}/mês`],
+    ["PRODUÇÃO NECESSÁRIA P/ RECUPERAR", `${fmtMoney(atraso.taxaNecessariaValor)}/mês`],
+  ], [7.0, 6.5]));
+  children.push(new Paragraph({
+    spacing: { before: 200, after: 80 },
+    children: [new TextRun({ text: "Plano de Ação para Reequilíbrio Financeiro e Retirada do Atraso:", bold: true, size: 21, color: TEXT_BLUE, font: FONT })],
+  }));
+  children.push(...planoAcaoParagraphs(atraso.plano_acao));
+  return children;
+}
+
 function calcDesvioPct(medido, previsto) {
   const p = Number(previsto) || 0;
   if (!p) return null;
@@ -2374,6 +2552,11 @@ async function buildDocument(data, logoBuf, assinaturaBuf, logoType = "png", ass
       children: [new ImageRun({ data: data.curvaChartBuf, type: "png", transformation: { width: data.curvaChartWidth, height: data.curvaChartHeight } })],
     }));
     children.push(figureCaption("Curva S: valores previstos e executados acumulados (calculados a partir dos percentuais da Tabela 1)"));
+  }
+
+  if (data.atraso) {
+    children.push(new Paragraph({ children: [new PageBreak()] }));
+    children.push(...atrasoSectionChildren(data.atraso));
   }
 
   if (data.rec) {
@@ -2588,6 +2771,27 @@ async function buildDocumentRMAA(data, logoBuf, assinaturaBuf, logoType = "png",
     r.desembolso.map((d) => [d.referencia, fmtMoney(d.valor)]),
     [8.0, 6.0], "Nenhuma previsão informada.", [AlignmentType.LEFT, AlignmentType.RIGHT]));
 
+  if (data.atraso) {
+    children.push(new Paragraph({ spacing: { before: 200, after: 80 }, children: [new TextRun({ text: "6.3 Análise de Atraso e Impacto Financeiro", bold: true, size: 21, color: TEXT_BLUE, font: FONT })] }));
+    children.push(infoTable([
+      ["DATA DE REFERÊNCIA", fmtDateBR(data.atraso.mesAtual)],
+      ["STATUS", data.atraso.status],
+      ["PREVISTO ACUMULADO", `${fmtNum(data.atraso.previstoPct)}%`],
+      ["EXECUTADO ACUMULADO", `${fmtNum(data.atraso.executadoPct)}%`],
+      ["ATRASO (PONTOS PERCENTUAIS)", `${fmtNum(data.atraso.atrasoPct)} p.p.`],
+      ["IMPACTO FINANCEIRO DO ATRASO", fmtMoney(data.atraso.atrasoValor)],
+      ["ATRASO EQUIVALENTE (MESES)", fmtNum(data.atraso.atrasoMeses, 1)],
+      ["MESES RESTANTES NO CRONOGRAMA", String(data.atraso.mesesRestantes)],
+      ["PRODUÇÃO MÉDIA ATUAL", `${fmtMoney(data.atraso.taxaMediaAtualValor)}/mês`],
+      ["PRODUÇÃO NECESSÁRIA P/ RECUPERAR", `${fmtMoney(data.atraso.taxaNecessariaValor)}/mês`],
+    ], [7.0, 6.5]));
+    children.push(new Paragraph({
+      spacing: { before: 160, after: 80 },
+      children: [new TextRun({ text: "Plano de Ação para Reequilíbrio Financeiro e Retirada do Atraso:", bold: true, size: 20, color: TEXT_BLUE, font: FONT })],
+    }));
+    children.push(...planoAcaoParagraphs(data.atraso.plano_acao));
+  }
+
   children.push(sectionHeading("7. ENSAIOS REALIZADOS"));
   children.push(new Paragraph({ children: [new TextRun({ text: r.ensaios || "Nenhum ensaio realizado neste período.", size: 20, font: FONT })] }));
 
@@ -2684,6 +2888,12 @@ function collectPayload() {
 
   const rao = document.getElementById("toggle-rao").checked ? raoMgr.collect() : [];
 
+  let atraso = null;
+  if (document.getElementById("toggle-atraso").checked) {
+    const kpis = calcularAtrasoImpacto(rao, parseFloat(f.get("valor_contratual")) || 0);
+    if (kpis) atraso = { ...kpis, plano_acao: f.get("atraso_plano_acao") || gerarPlanoAcaoTexto(kpis) };
+  }
+
   let rec = null;
   if (document.getElementById("toggle-rec").checked) {
     rec = {
@@ -2707,7 +2917,7 @@ function collectPayload() {
       prazo: f.get("prazo"), inicio: f.get("inicio"), termino: f.get("termino"),
     },
     medicao: { numero: f.get("medicao_numero"), valor_medicao: valorMedicao, periodo_faturamento: f.get("periodo_faturamento"), periodo_documentacao },
-    itens, curva_s, seguranca, rao, rec, observacoes: f.get("observacoes"),
+    itens, curva_s, seguranca, rao, rec, atraso, observacoes: f.get("observacoes"),
     responsavel: { nome: f.get("resp_nome"), cargo: f.get("resp_cargo"), crea: f.get("resp_crea") },
     rmaa: {
       apresentacao: f.get("rmaa_apresentacao"),
