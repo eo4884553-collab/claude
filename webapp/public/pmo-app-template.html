@@ -500,11 +500,11 @@ function vendaDefaults(scen){
 }
 function patrocinioDefaults(scen){
   return TIERS.map(([cota,valor,qtd,prob,contra,perfil],i)=>({
-    id:uid(), cota, empresa:'', valorUnit: valor,
+    id:uid(), cota, valorUnit: valor,
     qtd: Math.round(qtd*TIER_QTY_MULT[scen]),
     prob: Math.round(prob*TIER_PROB_MULT[scen]*10000)/10000,
     estagio: 'Negociação', contrapartida:contra, perfil,
-    parcelas: [], // pagamento parcelado (valor + data prevista/paga) — ver Fluxo de Caixa
+    fechamentos: [], // empresas que fecharam essa cota, cada uma com seu nome + parcelas (valor + data) — ver Fluxo de Caixa
   }));
 }
 const CUSTOS_SPEC = (()=>{
@@ -785,9 +785,19 @@ function migrateState(){
     }
     // catalogo detalhado de bebidas — estados salvos antes disso nao tem essa lista ainda
     if(state.entradas && state.entradas[scen] && !state.entradas[scen].bebidas) state.entradas[scen].bebidas = [];
-    // parcelamento do patrocinio (valor + data) — cotas salvas antes disso nao tem essa lista
-    // "empresa" (nome de quem fechou aquela cota) — cotas salvas antes disso nao tem esse campo
-    (state.patrocinios && state.patrocinios[scen] || []).forEach(t=>{ if(!t.parcelas) t.parcelas = []; if(t.empresa===undefined) t.empresa=''; });
+    // uma cota (ex.: "Prata") tem Qtd. alvo > 1, ou seja, varias empresas diferentes podem fechar
+    // a mesma cota — cada uma com seu proprio nome e seu proprio parcelamento. Cotas salvas antes
+    // dessa mudanca tinham 1 "empresa" + 1 lista de "parcelas" direto na cota (so permitia 1
+    // empresa por cota); migra isso pra dentro de "fechamentos" (1 por empresa que fechou).
+    (state.patrocinios && state.patrocinios[scen] || []).forEach(t=>{
+      if(!t.fechamentos){
+        const legacyParcelas = t.parcelas || [];
+        const legacyEmpresa = t.empresa || '';
+        t.fechamentos = (legacyEmpresa || legacyParcelas.length) ? [{id:uid(), empresa:legacyEmpresa, parcelas:legacyParcelas}] : [];
+      }
+      delete t.empresa;
+      delete t.parcelas;
+    });
   });
   // comprovantes de pagamento por item de custo — agora é uma LISTA (item pode ter varios
   // pagamentos parciais, cada um com seu proprio comprovante). Linhas salvas antes disso tem
@@ -1236,7 +1246,7 @@ function custosDatedAmounts(fcKey, custosRows, kind){
 // pagar, então essa parte não entra no caixa real até ter data de pagamento de verdade).
 function patrocinioDatedAmounts(scen, kind){
   const out = [];
-  (state.patrocinios[scen]||[]).forEach(t=> (t.parcelas||[]).forEach(p=>{
+  (state.patrocinios[scen]||[]).forEach(t=> (t.fechamentos||[]).forEach(f=> (f.parcelas||[]).forEach(p=>{
     const valor = Number(p.valor)||0;
     if(!valor) return;
     const isReal = !!p.dataPagamento;
@@ -1244,7 +1254,7 @@ function patrocinioDatedAmounts(scen, kind){
     if(kind==='previsto' && isReal) return;
     const mes = monthIndexForDate(p.dataPagamento || p.dataPrevista);
     if(mes!=null) out.push({mes, valor});
-  }));
+  })));
   return out;
 }
 // contribuições de pessoas da Bateria (só existe nesse domínio) — cada parcela com data (paga ou
@@ -2326,10 +2336,12 @@ function patrocinioParcelasAtrasadas(scen){
   const hoje = todayISO();
   const out = [];
   (state.patrocinios[scen]||[]).forEach(t=>{
-    (t.parcelas||[]).forEach(pc=>{
-      if(!pc.dataPagamento && pc.dataPrevista && pc.dataPrevista<hoje && Number(pc.valor)>0){
-        out.push({cota:t.cota, empresa:t.empresa, valor:Number(pc.valor)||0, dataPrevista:pc.dataPrevista, dias:daysBetween(pc.dataPrevista, hoje)});
-      }
+    (t.fechamentos||[]).forEach(f=>{
+      (f.parcelas||[]).forEach(pc=>{
+        if(!pc.dataPagamento && pc.dataPrevista && pc.dataPrevista<hoje && Number(pc.valor)>0){
+          out.push({cota:t.cota, empresa:f.empresa, valor:Number(pc.valor)||0, dataPrevista:pc.dataPrevista, dias:daysBetween(pc.dataPrevista, hoje)});
+        }
+      });
     });
   });
   return out.sort((a,b)=> b.dias-a.dias);
@@ -2341,45 +2353,74 @@ VIEWS.patrocinios = function(){
 
   const stageRows = STAGE_LIST.map(s=>`<div class="kv"><span class="k">${s}</span><span class="v"><input id="${mkId('stageProb.'+s)}" type="number" step="1" style="width:70px; display:inline-block;" data-bind="stageProb.${s}" data-kind="pct" value="${Math.round(state.stageProb[s]*1000)/10}"> %</span></div>`).join('');
 
-  // soma das parcelas de uma cota: total parcelado, quanto ja foi pago (tem dataPagamento) e quanto falta
-  function parcelaSummary(t){
-    const parcelas = t.parcelas||[];
+  // soma das parcelas de UMA empresa que fechou (fechamento): total parcelado, quanto ja foi pago
+  // (tem dataPagamento) e quanto falta
+  function fechamentoParcelaSummary(f){
+    const parcelas = f.parcelas||[];
     const total = sum(parcelas.map(p=> Number(p.valor)||0));
     const pago = sum(parcelas.filter(p=>p.dataPagamento).map(p=> Number(p.valor)||0));
     return {total, pago, pendente: total-pago, n: parcelas.length};
   }
-  const openSet = state.ui.patrocParcelasOpen || {};
+  // agregado de TODAS as empresas que ja fecharam uma cota (ex.: Prata tem Qtd. alvo = 6, ou seja,
+  // ate 6 empresas diferentes podem fechar essa mesma cota, cada uma com seu proprio parcelamento)
+  function tierFechamentosSummary(t){
+    const fechamentos = t.fechamentos||[];
+    let pago=0, totalParcelado=0;
+    fechamentos.forEach(f=>{ const s=fechamentoParcelaSummary(f); pago+=s.pago; totalParcelado+=s.total; });
+    return {nFechamentos: fechamentos.length, pago, totalParcelado};
+  }
+  const openFech = state.ui.patrocFechamentosOpen || {};
+  const openParc = state.ui.patrocParcelasOpen || {};
   const rows = tiers.map((t,i)=>{
     const alvo = t.valorUnit*t.qtd;
     const prob = Number(t.prob)||0;
     const ponderada = alvo*prob;
-    const ps = parcelaSummary(t);
-    const isOpen = !!openSet[t.id];
+    const fs = tierFechamentosSummary(t);
+    const isFechOpen = !!openFech[t.id];
     const mainRow = `<tr>
       <td>${tblInput(`patrocinios.${scen}.${i}.cota`, t.cota)}</td>
-      <td>${tblInput(`patrocinios.${scen}.${i}.empresa`, t.empresa, {width:'140px'})}</td>
       <td class="num">${tblInput(`patrocinios.${scen}.${i}.valorUnit`, t.valorUnit, {type:'number', step:'500', cls:'num'})}</td>
       <td class="num">${tblInput(`patrocinios.${scen}.${i}.qtd`, t.qtd, {type:'number', cls:'num'})}</td>
       <td><select id="${mkId('patrocinios.'+scen+'.'+i+'.estagio')}" data-bind="patrocinios.${scen}.${i}.estagio">${STAGE_LIST.map(s=>`<option value="${s}" ${s===t.estagio?'selected':''}>${s}</option>`).join('')}</select></td>
       <td class="num">${tblInput(`patrocinios.${scen}.${i}.prob`, Math.round(prob*1000)/10, {type:'number', step:'1', cls:'num', kind:'pct', width:'62px'})}</td>
       <td class="num mono">${fmtCur(alvo)}</td>
       <td class="num mono">${fmtCur(ponderada)}</td>
-      <td><button class="btn small" data-action="togglePatrocParcelas:${t.id}">${ps.n ? `📅 ${ps.n} parcela${ps.n>1?'s':''}` : '📅 Parcelas'}</button></td>
+      <td><button class="btn small" data-action="toggleFechamentos:${t.id}">🏢 ${fs.nFechamentos}/${t.qtd} fechado${fs.nFechamentos!==1?'s':''}</button></td>
       <td><button class="rm" data-action="rmTier:${scen}:${i}">✕</button></td>
     </tr>`;
-    if(!isOpen) return mainRow;
-    const parcelaRows = (t.parcelas||[]).map((pc,pi)=>`<tr>
-      <td class="num">${tblInput(`patrocinios.${scen}.${i}.parcelas.${pi}.valor`, pc.valor, {type:'number', step:'100', cls:'num'})}</td>
-      <td>${tblInput(`patrocinios.${scen}.${i}.parcelas.${pi}.dataPrevista`, pc.dataPrevista, {type:'date'})}</td>
-      <td>${tblInput(`patrocinios.${scen}.${i}.parcelas.${pi}.dataPagamento`, pc.dataPagamento, {type:'date'})}</td>
-      <td>${parcelaStatusBadge(pc)}</td>
-      <td><button class="rm" data-action="rmParcela:${scen}:${i}:${pi}">✕</button></td>
-    </tr>`).join('');
-    return mainRow + `<tr><td colspan="10" style="background:var(--surface-2); padding:10px 14px;">
-      <div style="font-size:12.5px; font-weight:700; margin-bottom:6px;">Parcelas de "${esc(t.cota)}"${t.empresa?` — ${esc(t.empresa)}`:''} ${ps.n?`<span class="hint" style="font-weight:400;">— pago ${fmtCur(ps.pago)} de ${fmtCur(ps.total)}</span>`:''}</div>
-      <table style="width:auto; min-width:560px;"><thead><tr><th class="num">Valor</th><th>Data prevista</th><th>Data de pagamento</th><th>Status</th><th></th></tr></thead>
-      <tbody>${parcelaRows || `<tr><td colspan="5" class="hint">Nenhuma parcela ainda.</td></tr>`}</tbody></table>
-      <button class="btn small" style="margin-top:8px;" data-action="addParcela:${scen}:${i}">+ Adicionar parcela</button>
+    if(!isFechOpen) return mainRow;
+
+    const fechRows = (t.fechamentos||[]).map((f,fi)=>{
+      const fsum = fechamentoParcelaSummary(f);
+      const isParcOpen = !!openParc[f.id];
+      const fRow = `<tr>
+        <td>${tblInput(`patrocinios.${scen}.${i}.fechamentos.${fi}.empresa`, f.empresa, {width:'160px'})}</td>
+        <td class="num mono">${fmtCur(fsum.pago)}</td>
+        <td class="num mono">${fmtCur(fsum.pendente)}</td>
+        <td><button class="btn small" data-action="toggleFechamentoParcelas:${f.id}">${fsum.n ? `📅 ${fsum.n} parcela${fsum.n>1?'s':''}` : '📅 Parcelas'}</button></td>
+        <td><button class="rm" data-action="rmFechamento:${scen}:${i}:${fi}">✕</button></td>
+      </tr>`;
+      if(!isParcOpen) return fRow;
+      const parcelaRows = (f.parcelas||[]).map((pc,pi)=>`<tr>
+        <td class="num">${tblInput(`patrocinios.${scen}.${i}.fechamentos.${fi}.parcelas.${pi}.valor`, pc.valor, {type:'number', step:'100', cls:'num'})}</td>
+        <td>${tblInput(`patrocinios.${scen}.${i}.fechamentos.${fi}.parcelas.${pi}.dataPrevista`, pc.dataPrevista, {type:'date'})}</td>
+        <td>${tblInput(`patrocinios.${scen}.${i}.fechamentos.${fi}.parcelas.${pi}.dataPagamento`, pc.dataPagamento, {type:'date'})}</td>
+        <td>${parcelaStatusBadge(pc)}</td>
+        <td><button class="rm" data-action="rmParcela:${scen}:${i}:${fi}:${pi}">✕</button></td>
+      </tr>`).join('');
+      return fRow + `<tr><td colspan="5" style="background:var(--surface-1, #fff); padding:8px 12px;">
+        <div style="font-size:12px; font-weight:700; margin-bottom:6px;">Parcelas de "${esc(f.empresa||'(sem nome)')}" ${fsum.n?`<span class="hint" style="font-weight:400;">— pago ${fmtCur(fsum.pago)} de ${fmtCur(fsum.total)}</span>`:''}</div>
+        <table style="width:auto; min-width:560px;"><thead><tr><th class="num">Valor</th><th>Data prevista</th><th>Data de pagamento</th><th>Status</th><th></th></tr></thead>
+        <tbody>${parcelaRows || `<tr><td colspan="5" class="hint">Nenhuma parcela ainda.</td></tr>`}</tbody></table>
+        <button class="btn small" style="margin-top:8px;" data-action="addParcela:${scen}:${i}:${fi}">+ Adicionar parcela</button>
+      </td></tr>`;
+    }).join('');
+
+    return mainRow + `<tr><td colspan="9" style="background:var(--surface-2); padding:10px 14px;">
+      <div style="font-size:12.5px; font-weight:700; margin-bottom:6px;">Empresas que fecharam "${esc(t.cota)}" <span class="hint" style="font-weight:400;">(meta: ${t.qtd})</span> ${fs.nFechamentos?`<span class="hint" style="font-weight:400;">— pago ${fmtCur(fs.pago)} de ${fmtCur(fs.totalParcelado)} parcelado</span>`:''}</div>
+      <table style="width:auto; min-width:620px;"><thead><tr><th>Empresa</th><th class="num">Pago</th><th class="num">Pendente</th><th>Parcelas</th><th></th></tr></thead>
+      <tbody>${fechRows || `<tr><td colspan="5" class="hint">Nenhuma empresa fechou essa cota ainda.</td></tr>`}</tbody></table>
+      <button class="btn small" style="margin-top:8px;" data-action="addFechamento:${scen}:${i}">+ Adicionar empresa</button>
     </td></tr>`;
   }).join('');
 
@@ -2392,7 +2433,7 @@ VIEWS.patrocinios = function(){
   </div>`;
 
   return `
-  <div class="topline"><div><h1>Patrocínios ${infoIcon('Pipeline comercial de cotas de patrocínio. A Probabilidade é editável linha a linha — o Estágio é só uma etiqueta de acompanhamento (não altera o cálculo). Receita ponderada = Valor × Qtd × Probabilidade. As parcelas (valor + data) de cada cota alimentam o Fluxo de Caixa automaticamente, no mês certo — confirma com data de pagamento é "Realizado"; só com data prevista é "Previsto".')}</h1><div class="desc">Pipeline comercial por cenário. A probabilidade de fechamento é editável cota a cota.</div></div></div>
+  <div class="topline"><div><h1>Patrocínios ${infoIcon('Pipeline comercial de cotas de patrocínio. A Probabilidade é editável linha a linha — o Estágio é só uma etiqueta de acompanhamento (não altera o cálculo). Receita ponderada = Valor × Qtd × Probabilidade. Qtd. alvo é quantas empresas podem fechar aquela mesma cota (ex.: Prata com alvo 6 pode ter até 6 empresas diferentes) — clique em "Fechados" pra cadastrar cada empresa com seu nome e suas próprias parcelas. As parcelas (valor + data) de cada empresa alimentam o Fluxo de Caixa automaticamente, no mês certo — com data de pagamento é "Realizado"; só com data prevista é "Previsto".')}</h1><div class="desc">Pipeline comercial por cenário. A probabilidade de fechamento é editável cota a cota.</div></div></div>
 
   ${alertaAtrasados}
 
@@ -2404,9 +2445,9 @@ VIEWS.patrocinios = function(){
   ${scenPills('ui.scenTab.patrocinios', scen, replicateControl('patrocinios', scen))}
   <div class="tablewrap">
     <table>
-      <thead><tr><th>Cota</th><th>Empresa</th><th class="num">Valor unitário</th><th class="num">Qtd. alvo</th><th>Estágio</th><th class="num">Prob. %</th><th class="num">Receita alvo</th><th class="num">Receita ponderada</th><th>Parcelas</th><th></th></tr></thead>
+      <thead><tr><th>Cota</th><th class="num">Valor unitário</th><th class="num">Qtd. alvo</th><th>Estágio</th><th class="num">Prob. %</th><th class="num">Receita alvo</th><th class="num">Receita ponderada</th><th>Fechados</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr><td colspan="3">Total</td><td class="num mono">${fmtInt(p.nCotas)}</td><td></td><td></td><td class="num mono">${fmtCur(p.nominal)}</td><td class="num mono">${fmtCur(p.esperado)}</td><td></td><td></td></tr></tfoot>
+      <tfoot><tr><td colspan="2">Total</td><td class="num mono">${fmtInt(p.nCotas)}</td><td></td><td></td><td class="num mono">${fmtCur(p.nominal)}</td><td class="num mono">${fmtCur(p.esperado)}</td><td></td><td></td></tr></tfoot>
     </table>
   </div>
   <button class="btn small" style="margin-top:10px;" data-action="addTier:${scen}">+ Adicionar cota</button>
@@ -2417,22 +2458,40 @@ VIEWS.patrocinios = function(){
     <div class="kpi"><div class="lbl">Receita ponderada (esperado)</div><div class="kpi-value">${fmtCur(p.esperado)}</div></div>
   </div>`;
 };
-ACTIONS.addTier = (scen)=>{ state.patrocinios[scen].push({id:uid(), cota:'Nova cota', empresa:'', valorUnit:5000, qtd:1, estagio:'Prospecção', prob:state.stageProb['Prospecção']||0.15, contrapartida:'', perfil:'', parcelas:[]}); saveState(); render(); };
+ACTIONS.addTier = (scen)=>{ state.patrocinios[scen].push({id:uid(), cota:'Nova cota', valorUnit:5000, qtd:1, estagio:'Prospecção', prob:state.stageProb['Prospecção']||0.15, contrapartida:'', perfil:'', fechamentos:[]}); saveState(); render(); };
 ACTIONS.rmTier = (scen,i)=>{ state.patrocinios[scen].splice(Number(i),1); saveState(); render(); };
-ACTIONS.togglePatrocParcelas = (tierId)=>{
-  if(!state.ui.patrocParcelasOpen) state.ui.patrocParcelasOpen = {};
-  state.ui.patrocParcelasOpen[tierId] = !state.ui.patrocParcelasOpen[tierId];
+ACTIONS.toggleFechamentos = (tierId)=>{
+  if(!state.ui.patrocFechamentosOpen) state.ui.patrocFechamentosOpen = {};
+  state.ui.patrocFechamentosOpen[tierId] = !state.ui.patrocFechamentosOpen[tierId];
   render(); // so muda a tela (o que esta aberto/fechado nao e um dado do projeto) — nao chama saveState
 };
-ACTIONS.addParcela = (scen,i)=>{
+ACTIONS.addFechamento = (scen,i)=>{
   const t = state.patrocinios[scen][Number(i)]; if(!t) return;
-  if(!t.parcelas) t.parcelas=[];
-  t.parcelas.push({id:uid(), valor:0, dataPrevista:'', dataPagamento:''});
+  if(!t.fechamentos) t.fechamentos=[];
+  t.fechamentos.push({id:uid(), empresa:'', parcelas:[]});
   saveState(); render();
 };
-ACTIONS.rmParcela = (scen,i,pi)=>{
-  const t = state.patrocinios[scen][Number(i)]; if(!t || !t.parcelas) return;
-  t.parcelas.splice(Number(pi),1);
+ACTIONS.rmFechamento = (scen,i,fi)=>{
+  const t = state.patrocinios[scen][Number(i)]; if(!t || !t.fechamentos) return;
+  t.fechamentos.splice(Number(fi),1);
+  saveState(); render();
+};
+ACTIONS.toggleFechamentoParcelas = (fechamentoId)=>{
+  if(!state.ui.patrocParcelasOpen) state.ui.patrocParcelasOpen = {};
+  state.ui.patrocParcelasOpen[fechamentoId] = !state.ui.patrocParcelasOpen[fechamentoId];
+  render(); // so muda a tela — nao chama saveState
+};
+ACTIONS.addParcela = (scen,i,fi)=>{
+  const t = state.patrocinios[scen][Number(i)]; if(!t) return;
+  const f = t.fechamentos && t.fechamentos[Number(fi)]; if(!f) return;
+  if(!f.parcelas) f.parcelas=[];
+  f.parcelas.push({id:uid(), valor:0, dataPrevista:'', dataPagamento:''});
+  saveState(); render();
+};
+ACTIONS.rmParcela = (scen,i,fi,pi)=>{
+  const t = state.patrocinios[scen][Number(i)]; if(!t) return;
+  const f = t.fechamentos && t.fechamentos[Number(fi)]; if(!f || !f.parcelas) return;
+  f.parcelas.splice(Number(pi),1);
   saveState(); render();
 };
 
