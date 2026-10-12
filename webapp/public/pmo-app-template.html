@@ -1550,6 +1550,13 @@ function onGenericBind(e){
   else if(kind==='pct') val = val===''?0:Number(val)/100;
   setPath(state, path, val);
   if(isUiOnly){
+    // preencher Data de pagamento ou Valor pago no formulario admin de mesa implica que o
+    // pagamento foi confirmado — muda o Status pra "Paga" sozinho, senao a mesa fica com os
+    // dados de pagamento preenchidos mas continua aparecendo "reservada" (laranja) no mapa
+    if(path[0]==='ui' && path[1]==='mesaForm' && (path[2]==='dataPagamento' || path[2]==='valorPago') && state.ui.mesaForm){
+      const temPagamento = !!state.ui.mesaForm.dataPagamento || Number(state.ui.mesaForm.valorPago)>0;
+      if(temPagamento && state.ui.mesaForm.status==='reservada') state.ui.mesaForm.status = 'paga';
+    }
     if(!el.dataset.norerender) render();
     return;
   }
@@ -2636,11 +2643,19 @@ ACTIONS.rmComprovanteCusto = (itemId,ci)=>{
 const MESA_STATUS = ['livre','reservada','paga'];
 const MESA_STATUS_LABEL = {livre:'Livre', reservada:'Reservada', paga:'Paga'};
 const MESA_ADMIN_STATUS = ['reservada','paga']; // "livre" nao e um status gravado — e so a mesa nao ter linha na tabela (ver "Liberar mesa")
+// mesa com data de pagamento + valor pago ja registrados conta como "paga" pra exibicao (cor no
+// mapa, rotulo, contadores), mesmo que o campo status em si ainda esteja "reservada" — cobre
+// mesas que ficaram com esse descompasso antes do status passar a se auto-ajustar (ver
+// onGenericBind/mesaFormInit). Nunca grava nada sozinho, só decide o que mostrar na tela.
+function mesaEffectiveStatus(m){
+  if(m.status==='paga' || m.status==='livre') return m.status;
+  return (m.dataPagamento || Number(m.valorPago)>0) ? 'paga' : m.status;
+}
 function computeMesasSummary(){
   const mesas = state.mesasFeijoada||[];
-  const livres = mesas.filter(m=>m.status==='livre').length;
-  const reservadas = mesas.filter(m=>m.status==='reservada').length;
-  const pagas = mesas.filter(m=>m.status==='paga').length;
+  const livres = mesas.filter(m=>mesaEffectiveStatus(m)==='livre').length;
+  const reservadas = mesas.filter(m=>mesaEffectiveStatus(m)==='reservada').length;
+  const pagas = mesas.filter(m=>mesaEffectiveStatus(m)==='paga').length;
   const totalPago = sum(mesas.map(m=> Number(m.valorPago)||0));
   return {livres, reservadas, pagas, totalPago, total: mesas.length};
 }
@@ -2663,7 +2678,7 @@ function mesaGridCells(){
 }
 function mesaBtn(numero, selNum){
   const m = state.mesasFeijoada[numero-1];
-  const status = m.status||'livre';
+  const status = mesaEffectiveStatus(m)||'livre';
   const cls = status + (selNum===numero?' selected':'');
   const title = m.reservadoPor ? `Mesa ${numero} — ${m.reservadoPor} (${MESA_STATUS_LABEL[status]})` : `Mesa ${numero} — livre`;
   return `<button class="mesa-btn ${cls} guest-ok" data-action="selectMesa:${numero}" title="${esc(title)}">${numero}</button>`;
@@ -2675,11 +2690,15 @@ function mesaIsMinha(m){ return !!USER_ID && m.reservadoPorUserId===USER_ID; }
 // rascunho da reserva fica em state.ui (nunca salvo) — só vira gravação de verdade quando a
 // pessoa clica em "Confirmar reserva" / "Salvar", que manda tudo junto pro Supabase de uma vez
 function mesaFormInit(m){
+  // auto-corrige o rascunho do formulario se a mesa ja tem pagamento registrado (data e/ou valor)
+  // mas o status ainda ficou "reservada" — so abrir o painel admin e clicar Salvar ja resolve a
+  // cor no mapa, sem apagar nem mudar nenhum dado de pagamento que ja estava la.
+  const statusForm = mesaEffectiveStatus(m);
   state.ui.mesaForm = {
     nome: m.reservadoPor||'', telefone: m.telefone||'',
     pessoas: (m.pessoas||[]).map(p=>({nome:p.nome||''})),
     obs: m.obs||'',
-    status: m.status==='livre' ? 'reservada' : m.status,
+    status: statusForm==='livre' ? 'reservada' : statusForm,
     dataPagamento: m.dataPagamento||'', valorPago: m.valorPago||0,
   };
   state.ui.mesaErro = '';
@@ -2719,8 +2738,9 @@ function mesaPanelClaim(m){
   </div>`;
 }
 function mesaPanelOwner(m){
+  const effStatus = mesaEffectiveStatus(m);
   return `<div class="section mesa-guest-form" style="border:2px solid var(--accent); background:var(--accent-soft);">
-    <div class="topline" style="margin-bottom:10px;"><div><h2 style="margin:0;">Mesa ${m.numero} — sua reserva</h2><div class="desc">Status: ${MESA_STATUS_LABEL[m.status]}</div></div>
+    <div class="topline" style="margin-bottom:10px;"><div><h2 style="margin:0;">Mesa ${m.numero} — sua reserva</h2><div class="desc">Status: ${MESA_STATUS_LABEL[effStatus]}</div></div>
       <button class="btn small guest-ok" data-action="closeMesaPanel">Fechar</button></div>
     <div class="gridN">
       ${fld('Reservado por', 'ui.mesaForm.nome', {kind:'text'})}
@@ -2730,17 +2750,17 @@ function mesaPanelOwner(m){
     <div style="margin-top:12px;">
       ${fld('Observação', 'ui.mesaForm.obs', {kind:'text'})}
     </div>
-    ${m.status==='paga' ? `<div class="hint" style="margin-top:10px;">Pagamento já confirmado pela organização (${fmtCur(m.valorPago)}${m.dataPagamento?' em '+esc(m.dataPagamento):''}) — fale com um administrador pra alterar isso.</div>` : ''}
+    ${effStatus==='paga' ? `<div class="hint" style="margin-top:10px;">Pagamento já confirmado pela organização (${fmtCur(m.valorPago)}${m.dataPagamento?' em '+esc(m.dataPagamento):''}) — fale com um administrador pra alterar isso.</div>` : ''}
     ${mesaErroBox()}
     <div class="row" style="margin-top:10px; gap:8px;">
       <button class="btn primary guest-ok" data-action="saveMyMesa:${m.numero}" ${state.ui.mesaFormBusy?'disabled':''}>Salvar alterações</button>
-      ${m.status==='reservada' ? `<button class="btn danger guest-ok" data-action="cancelMyMesa:${m.numero}" data-confirm="Confirmar cancelamento">Cancelar minha reserva</button>` : ''}
+      ${effStatus==='reservada' ? `<button class="btn danger guest-ok" data-action="cancelMyMesa:${m.numero}" data-confirm="Confirmar cancelamento">Cancelar minha reserva</button>` : ''}
     </div>
   </div>`;
 }
 function mesaPanelReadonly(m){
   return `<div class="section">
-    <div class="topline" style="margin-bottom:10px;"><div><h2 style="margin:0;">Mesa ${m.numero}</h2><div class="desc">Status: ${MESA_STATUS_LABEL[m.status]}</div></div>
+    <div class="topline" style="margin-bottom:10px;"><div><h2 style="margin:0;">Mesa ${m.numero}</h2><div class="desc">Status: ${MESA_STATUS_LABEL[mesaEffectiveStatus(m)]}</div></div>
       <button class="btn small guest-ok" data-action="closeMesaPanel">Fechar</button></div>
     <p>Reservada por <strong>${esc(m.reservadoPor||'—')}</strong></p>
     ${(m.pessoas&&m.pessoas.length) ? `<p class="lbl" style="margin-top:10px;">Pessoas da mesa</p><ul>${m.pessoas.map(p=>`<li>${esc(p.nome||'—')}</li>`).join('')}</ul>` : ''}
@@ -2750,8 +2770,9 @@ function mesaPanelReadonly(m){
 function mesaPanelAdmin(m){
   const curStatus = (state.ui.mesaForm && state.ui.mesaForm.status) || 'reservada';
   const statusOptions = MESA_ADMIN_STATUS.map(s=>`<option value="${s}" ${s===curStatus?'selected':''}>${MESA_STATUS_LABEL[s]}</option>`).join('');
+  const effStatus = mesaEffectiveStatus(m);
   return `<div class="section" style="border:2px solid var(--accent); background:var(--accent-soft);">
-    <div class="topline" style="margin-bottom:10px;"><div><h2 style="margin:0;">Mesa ${m.numero}${m.status!=='livre' ? ' — '+MESA_STATUS_LABEL[m.status] : ' — livre'}</h2>${m.reservadoPorEmail?`<div class="desc">Login de quem reservou: ${esc(m.reservadoPorEmail)}</div>`:''}</div>
+    <div class="topline" style="margin-bottom:10px;"><div><h2 style="margin:0;">Mesa ${m.numero}${effStatus!=='livre' ? ' — '+MESA_STATUS_LABEL[effStatus] : ' — livre'}</h2>${m.reservadoPorEmail?`<div class="desc">Login de quem reservou: ${esc(m.reservadoPorEmail)}</div>`:''}</div>
       <button class="btn small guest-ok" data-action="closeMesaPanel">Fechar</button></div>
     <div class="gridN">
       ${fld('Reservado por', 'ui.mesaForm.nome', {kind:'text'})}
