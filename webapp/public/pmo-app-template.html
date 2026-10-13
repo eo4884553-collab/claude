@@ -550,14 +550,17 @@ const RISCOS_DEFAULT = [
   ['Operação','Acidente de trabalho na montagem/desmontagem','Prazos apertados e equipe terceirizada sem treinamento','Risco jurídico, atraso no cronograma físico',2,4,'Mitigar','Exigir NRs e treinamento de segurança de todos os fornecedores'],
 ].map(r=>({id:uid(), categoria:r[0], risco:r[1], causa:r[2], consequencia:r[3], prob:r[4], impacto:r[5], resposta:r[6], plano:r[7], responsavel:'Produção', prazo:'', status:'Aberto'}));
 
-const FC_ENT_LABELS = ['Ingressos','Patrocínios','Bar / Ativações','Outras receitas','Contribuições (Bateria)'];
-const FC_ENT_KEYS = ['receitaIngressos','patrocinio','receitaConsumo','outras','contribuicoesBateria'];
+const FC_ENT_LABELS = ['Ingressos','Patrocínios','Bar / Ativações','Outras receitas','Contribuições (Bateria)','Mesas (Feijoada)'];
+const FC_ENT_KEYS = ['receitaIngressos','patrocinio','receitaConsumo','outras','contribuicoesBateria','receitaMesas'];
 const FC_ENT_DEFAULT_PCT = [
   [0,5,10,10,10,5,5,5,10,15,15,10, 0,0,0],
   [5,10,15,15,10,5,5,5,10,10,5,5, 0,0,0],
   [0,0,0,0,0,0,0,0,0,0,0,100, 0,0,0],
   [0,0,0,0,0,0,0,0,0,0,50,50, 0,0,0],
   [5,5,5,5,10,10,10,10,10,10,10,10, 0,0,0],
+  // Mesas (Feijoada) não tem "previsto": o total anual já É o que foi pago até agora (ver
+  // mesasFeijoadaTotalAnual), então não sobra resto nenhum pra distribuir por essa % — fica zerada.
+  [0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0],
 ];
 const FC_SAI_LABELS = ['Atrações (cachês)','Estrutura','Operação (produção/segurança/licenças)','Marketing','Logística','Categorias extras','Administrativo','Taxas sobre ingressos','Open bar','Contingência','Restituições de caixa aprovadas'];
 const FC_SAI_KEYS = ['subAtracoes','subEstrutura','subOperacao','subMarketing','subLogistica','subExtra','despesasAdm','custoTaxaIngressos','openBar','contingenciaValor','restituicoesAprovadas'];
@@ -1136,6 +1139,20 @@ function computeVendaTracking(){
   const receitaRealizada = vendidos * cs.ticketMedio;
   return {diasDecorridos, diasRestantes, vendidos, metaVendas, gap, velocidade, vendaDiariaNecessaria, projecaoFinal, pctVendido, receitaRealizada, ingressosDisponiveis: cs.capMax-vendidos};
 }
+// equivalente do computeVendaTracking() acima, mas pra Bateria Piquinzada — lá não tem venda de
+// ingresso, quem "compra" são os próprios integrantes (aba Vendas → "Pagamentos por pessoa"), então
+// o Dashboard precisa mostrar o ritmo de CONTRIBUIÇÃO em vez de ritmo de venda de ingresso
+function computeContribTracking(){
+  const list = state.contribuintesBateria||[];
+  const totalIntegrantes = list.length;
+  const jaContribuiram = list.filter(p=> (p.parcelas||[]).some(pc=>pc.dataPagamento)).length;
+  const faltam = Math.max(0, totalIntegrantes-jaContribuiram);
+  const totalArrecadado = contribuintesBateriaTotalPago();
+  const totalCombinado = contribuintesBateriaTotalAnual();
+  const pendente = Math.max(0, totalCombinado-totalArrecadado);
+  const pctArrecadado = totalCombinado ? totalArrecadado/totalCombinado : 0;
+  return {totalIntegrantes, jaContribuiram, faltam, totalArrecadado, totalCombinado, pendente, pctArrecadado};
+}
 
 function computeBreakEven(scen){
   const cs = computeScenario(scen);
@@ -1282,6 +1299,27 @@ function contribuintesBateriaTotalAnual(){
 function contribuintesBateriaTotalPago(){
   return sum((state.contribuintesBateria||[]).flatMap(p=> (p.parcelas||[]).filter(pc=>pc.dataPagamento).map(pc=> Number(pc.valor)||0)));
 }
+// reserva de mesa (Feijoada do Bloco) só vira dinheiro de verdade quando o admin confirma o
+// pagamento (ver mesaEffectiveStatus) — diferente de Patrocínio/Bateria não existe "data prevista"
+// nem valor combinado antecipado por mesa, só o valor pago quando (e se) a mesa é confirmada; por
+// isso "previsto" aqui é sempre vazio — só existe "realizado", igual ao "recebido em caixa" de Ingressos
+function mesasFeijoadaDatedAmounts(kind){
+  if(kind==='previsto') return [];
+  const out = [];
+  (state.mesasFeijoada||[]).forEach(m=>{
+    const valor = Number(m.valorPago)||0;
+    if(!valor || !m.dataPagamento) return;
+    const mes = monthIndexForDate(m.dataPagamento);
+    if(mes!=null) out.push({mes, valor});
+  });
+  return out;
+}
+// total anual = exatamente o que já foi pago até agora (não existe projeção de mesas que ainda vão
+// fechar, já que não há preço fixo por mesa) — então essa linha no Fluxo de Caixa nunca tem "resto"
+// a distribuir pela %, só mostra o que realmente já entrou, no mês em que entrou
+function mesasFeijoadaTotalAnual(){
+  return sum((state.mesasFeijoada||[]).filter(m=>m.dataPagamento).map(m=> Number(m.valorPago)||0));
+}
 // converte a lista [{mes,valor}] (pagamentos/parcelas já datados) num array de 15 posições,
 // um valor por mês — usado tanto pro calculo do fluxo quanto pra sinalizar na tela quais meses
 // já tem dinheiro real confirmado (em vez de só a estimativa percentual)
@@ -1303,6 +1341,7 @@ function monthlyDatedPlusRemainder(totalAnnual, datedAmounts, pctRow){
 function entDatedAmountsForKey(k, scen, kind){
   if(k==='patrocinio') return patrocinioDatedAmounts(scen, kind);
   if(k==='contribuicoesBateria') return contribuintesBateriaDatedAmounts(kind);
+  if(k==='receitaMesas') return mesasFeijoadaDatedAmounts(kind);
   // Ingressos: diferente de Patrocínio/Custos (que têm data por parcela/item), aqui só existe UM
   // total acumulado ("valor recebido em caixa", aba Vendas) — não dá pra saber o dia exato de cada
   // venda, então tratamos o que já foi recebido como "Realizado" inteiro, caindo no mês de hoje
@@ -1323,7 +1362,7 @@ function entDatedAmountsForKey(k, scen, kind){
 // valor anual total de cada linha de ENTRADA/SAÍDA do cenário — extraído à parte pra ser
 // reaproveitado no cálculo do fluxo e no "% do total já previsto/realizado" da tela
 function entAnnualByKey(cs){
-  return {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras, contribuicoesBateria: contribuintesBateriaTotalAnual()};
+  return {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras, contribuicoesBateria: contribuintesBateriaTotalAnual(), receitaMesas: mesasFeijoadaTotalAnual()};
 }
 function saiAnnualByKey(cs){
   return {subAtracoes:cs.subAtracoes, subEstrutura:cs.subEstrutura, subOperacao:cs.subOperacao, subMarketing:cs.subMarketing,
@@ -1819,6 +1858,13 @@ VIEWS.dashboard = function(){
   const risco = maiorRiscoAtual();
   const patroGap = Math.max(0, base.patroMin - base.patroContratado);
   const pmoStatus = computePrevistoRealizadoStatus('base');
+  // Bateria e Feijoada do Bloco têm fontes de "lançamento real" próprias (contribuição por pessoa
+  // e pagamento de mesa) que não existem no domínio principal — os blocos de KPI abaixo trocam de
+  // conteúdo conforme o domínio pra sempre refletir os lançamentos de verdade daquele domínio.
+  const isBateria = PROJECT_ID==='bateria-piquinzada';
+  const isFeijoada = PROJECT_ID==='feijoada-bloco';
+  const contribTrk = isBateria ? computeContribTracking() : null;
+  const mesasSummary = isFeijoada ? computeMesasSummary() : null;
 
   const acaoPrioritaria = base.classif==='NO-GO'
     ? 'Revisar premissas comerciais e de custo do cenário Base antes de assumir novos compromissos financeiros.'
@@ -1862,13 +1908,29 @@ VIEWS.dashboard = function(){
     ['Receita projetada (Base)', fmtCur(base.receitaTotal)], ['Receita contratada (patrocínio)', fmtCur(base.patroContratado)],
     ['Custo projetado (BAC)', fmtCur(cust.bac)], ['Custo contratado', fmtCur(cust.committed)],
     ['Resultado projetado (Base)', fmtCur(base.resultado)], ['Margem (Base)', fmtPct(base.margem)],
-    ['Break-even (ingressos)', fmtInt(base.beCom)], ['Ingressos vendidos', fmtInt(trk.vendidos)],
-    ['Ingressos restantes (meta)', fmtInt(Math.max(0,trk.gap))], ['Ocupação (Base)', fmtPct(base.ocupacao)],
+    ['Break-even (ingressos)', fmtInt(base.beCom)],
+    isBateria ? ['Integrantes que já contribuíram', `${fmtInt(contribTrk.jaContribuiram)} / ${fmtInt(contribTrk.totalIntegrantes)}`] : ['Ingressos vendidos', fmtInt(trk.vendidos)],
+    isBateria ? ['Total já arrecadado (Bateria)', fmtCur(contribTrk.totalArrecadado)] : ['Ingressos restantes (meta)', fmtInt(Math.max(0,trk.gap))],
+    ['Ocupação (Base)', fmtPct(base.ocupacao)],
     ['Patrocínio pipeline', fmtCur(base.patroPipeline)], ['Cobertura de patrocínio', fmtPct(base.cobertura)],
     ['Capital de giro necessário', fmtCur(capGiroFor('base'))], ['Exposição financeira', fmtCur(cust.bac-base.patroContratado)],
     ['Forecast final (EAC)', fmtCur(cust.eac)], ['Score de viabilidade', fmtNum(scoreRes.score,1)],
   ];
-  const vendaKpis = [
+  if(isFeijoada){
+    execKpis.push(
+      ['Mesas pagas', `${fmtInt(mesasSummary.pagas)} / ${fmtInt(mesasSummary.total)}`],
+      ['Total arrecadado em mesas', fmtCur(mesasSummary.totalPago)],
+    );
+  }
+  const vendaKpis = isBateria ? [
+    ['Integrantes cadastrados', fmtInt(contribTrk.totalIntegrantes)],
+    ['Já contribuíram', fmtInt(contribTrk.jaContribuiram)],
+    ['Ainda faltam contribuir', fmtInt(contribTrk.faltam)],
+    ['Total combinado (todas as parcelas)', fmtCur(contribTrk.totalCombinado)],
+    ['Total já arrecadado', fmtCur(contribTrk.totalArrecadado)],
+    ['Pendente (parcelas em aberto)', fmtCur(contribTrk.pendente)],
+    ['% já arrecadado', fmtPct(contribTrk.pctArrecadado)],
+  ] : [
     ['Data do evento', new Date(state.venda.dataEvento+'T00:00:00').toLocaleDateString('pt-BR')],
     ['Dias restantes', fmtInt(trk.diasRestantes)], ['% vendido (capacidade Base)', fmtPct(trk.pctVendido)],
     ['Gap para a meta', fmtInt(Math.max(0,trk.gap))], ['Velocidade média (ing./dia)', fmtNum(trk.velocidade,2)],
@@ -1888,9 +1950,11 @@ VIEWS.dashboard = function(){
   </div>
 
   <div class="section">
-    <h2>Indicadores de venda${infoIcon('Ritmo real de vendas: quantos dias faltam, quantos ingressos ainda faltam vender e quantos por dia você precisa vender a partir de hoje para bater a meta do cenário Base.')}</h2>
+    <h2>${isBateria ? 'Indicadores de contribuição' : 'Indicadores de venda'}${infoIcon(isBateria
+      ? 'Ritmo real das contribuições dos integrantes: quantos já contribuíram, quanto já foi arrecadado e quanto ainda falta — vem direto dos lançamentos da aba Vendas ("Pagamentos por pessoa").'
+      : 'Ritmo real de vendas: quantos dias faltam, quantos ingressos ainda faltam vender e quantos por dia você precisa vender a partir de hoje para bater a meta do cenário Base.')}</h2>
     <div class="gridN">${vendaKpis.map(([l,v])=>`<div class="kpi"><div class="lbl">${l}</div><div class="kpi-value">${v}</div></div>`).join('')}</div>
-    <div class="hint" style="margin-top:8px;">Atualize "Ingressos vendidos até hoje" e as datas na aba Vendas.</div>
+    <div class="hint" style="margin-top:8px;">${isBateria ? 'Atualize os integrantes e as parcelas de cada um na aba Vendas.' : 'Atualize "Ingressos vendidos até hoje" e as datas na aba Vendas.'}</div>
   </div>
 
   <div class="section">
