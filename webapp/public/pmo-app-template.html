@@ -603,7 +603,7 @@ function mesLabels(){ return MESES.map((_,i)=> mesLabel(i)); }
 // 100 mesas da Feijoada do Bloco (só usado nesse domínio) — gera o número 1..100, o resto some
 // vazio/livre até alguém reservar. Mesma estrutura pra cada mesa, independente do status.
 function freshMesa(numero){
-  return {numero, status:'livre', reservadoPor:'', telefone:'', dataReserva:'', dataPagamento:'', valorPago:0, pessoas:[], obs:'', reservadoPorUserId:null, reservadoPorEmail:''};
+  return {numero, status:'livre', reservadoPor:'', telefone:'', dataReserva:'', dataPagamento:'', valorPago:0, pessoas:[], obs:'', reservadoPorUserId:null, reservadoPorEmail:'', lancadoPorEmail:''};
 }
 function freshMesasFeijoada(){
   return Array.from({length:100}, (_,i)=> freshMesa(i+1));
@@ -743,6 +743,12 @@ function requestMesaCancelar(numero){
 function requestMesaAdminSave(numero, nome, telefone, pessoas, obs, status, dataPagamento, valorPago){
   if(!HOSTED || typeof window==='undefined') return;
   window.parent.postMessage({type:'piquinzada:mesa-admin-save', numero, nome, telefone, pessoas, obs, status, dataPagamento, valorPago}, '*');
+}
+// QUALQUER usuário aprovado pode registrar se a mesa já foi paga ou não (não só admin) — fica
+// registrado quem fez o lançamento (ver lancadoPorEmail em cada mesa)
+function requestMesaPagamento(numero, status, dataPagamento, valorPago){
+  if(!HOSTED || typeof window==='undefined') return;
+  window.parent.postMessage({type:'piquinzada:mesa-pagamento', numero, status, dataPagamento, valorPago}, '*');
 }
 if(HOSTED){
   window.addEventListener('message', (ev)=>{
@@ -1656,7 +1662,7 @@ function onEnterCommit(e){
 // acoes que so navegam a tela (nao alteram dados do projeto) — continuam liberadas em modo convidado
 // reserva de mesa é a UNICA area do app onde convidado tambem grava de verdade (ver schema.sql,
 // secao 11) — por isso essas acoes de mesa entram aqui, mesmo nao sendo "so navegacao"
-const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm']);
+const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa']);
 function onAction(e){
   const el = e.currentTarget || e.target.closest('[data-action]');
   const [action, ...args] = el.dataset.action.split(':');
@@ -2789,6 +2795,27 @@ function mesaPanel(m){
   if(mesaIsMinha(m)) return mesaPanelOwner(m);
   return mesaPanelReadonly(m);
 }
+// QUALQUER usuário aprovado pode registrar se uma mesa já foi paga ou não e o valor — não só
+// quem reservou nem só admin (ex.: alguém ajudando a cobrar na entrada da festa). Reaproveitado
+// no painel de quem reservou e no painel de quem está só olhando a mesa de outra pessoa; fica
+// registrado quem fez o último lançamento (lancadoPorEmail) pra dar pra conferir depois.
+function mesaPagamentoFields(m){
+  const curStatus = (state.ui.mesaForm && state.ui.mesaForm.status) || 'reservada';
+  const statusOptions = MESA_ADMIN_STATUS.map(s=>`<option value="${s}" ${s===curStatus?'selected':''}>${MESA_STATUS_LABEL[s]}</option>`).join('');
+  return `<div style="margin-top:14px; padding-top:14px; border-top:1px dashed var(--border);">
+    <p class="lbl" style="margin-bottom:8px;">Pagamento</p>
+    <div class="gridN">
+      <label class="field"><span class="lbl">Status</span>
+        <select data-bind="ui.mesaForm.status">${statusOptions}</select>
+      </label>
+      ${fld('Data de pagamento', 'ui.mesaForm.dataPagamento', {kind:'date'})}
+      ${fld('Valor pago', 'ui.mesaForm.valorPago', {kind:'currency'})}
+    </div>
+    ${m.lancadoPorEmail ? `<div class="hint" style="margin-top:8px;">Último lançamento de pagamento registrado por: ${esc(m.lancadoPorEmail)}</div>` : ''}
+    ${mesaErroBox()}
+    <button class="btn primary guest-ok" style="margin-top:10px;" data-action="savePagamentoMesa:${m.numero}" ${state.ui.mesaFormBusy?'disabled':''}>Salvar pagamento</button>
+  </div>`;
+}
 function mesaPanelClaim(m){
   return `<div class="section mesa-guest-form" style="border:2px solid var(--accent); background:var(--accent-soft);">
     <div class="topline" style="margin-bottom:10px;"><div><h2 style="margin:0;">Mesa ${m.numero} — livre</h2><div class="desc">Reserve esta mesa pra você.</div></div>
@@ -2814,21 +2841,21 @@ function mesaPanelOwner(m){
     <div style="margin-top:12px;">
       ${fld('Observação', 'ui.mesaForm.obs', {kind:'text'})}
     </div>
-    ${effStatus==='paga' ? `<div class="hint" style="margin-top:10px;">Pagamento já confirmado pela organização (${fmtCur(m.valorPago)}${m.dataPagamento?' em '+esc(m.dataPagamento):''}) — fale com um administrador pra alterar isso.</div>` : ''}
-    ${mesaErroBox()}
     <div class="row" style="margin-top:10px; gap:8px;">
       <button class="btn primary guest-ok" data-action="saveMyMesa:${m.numero}" ${state.ui.mesaFormBusy?'disabled':''}>Salvar alterações</button>
       ${effStatus==='reservada' ? `<button class="btn danger guest-ok" data-action="cancelMyMesa:${m.numero}" data-confirm="Confirmar cancelamento">Cancelar minha reserva</button>` : ''}
     </div>
+    ${mesaPagamentoFields(m)}
   </div>`;
 }
 function mesaPanelReadonly(m){
-  return `<div class="section">
+  return `<div class="section mesa-guest-form">
     <div class="topline" style="margin-bottom:10px;"><div><h2 style="margin:0;">Mesa ${m.numero}</h2><div class="desc">Status: ${MESA_STATUS_LABEL[mesaEffectiveStatus(m)]}</div></div>
       <button class="btn small guest-ok" data-action="closeMesaPanel">Fechar</button></div>
     <p>Reservada por <strong>${esc(m.reservadoPor||'—')}</strong></p>
     ${(m.pessoas&&m.pessoas.length) ? `<p class="lbl" style="margin-top:10px;">Pessoas da mesa</p><ul>${m.pessoas.map(p=>`<li>${esc(p.nome||'—')}</li>`).join('')}</ul>` : ''}
-    <div class="hint" style="margin-top:10px;">Essa mesa já tem dono. Só quem reservou ou um administrador pode alterar.</div>
+    <div class="hint" style="margin-top:10px;">Essa mesa já tem dono — só quem reservou ou um administrador edita nome/telefone/pessoas. Mas qualquer pessoa aprovada pode registrar abaixo se essa mesa já foi paga.</div>
+    ${mesaPagamentoFields(m)}
   </div>`;
 }
 function mesaPanelAdmin(m){
@@ -2847,6 +2874,7 @@ function mesaPanelAdmin(m){
       ${fld('Data de pagamento', 'ui.mesaForm.dataPagamento', {kind:'date'})}
       ${fld('Valor pago', 'ui.mesaForm.valorPago', {kind:'currency'})}
     </div>
+    ${m.lancadoPorEmail ? `<div class="hint" style="margin-top:4px;">Último lançamento de pagamento registrado por: ${esc(m.lancadoPorEmail)}</div>` : ''}
     ${mesaPessoasEditor()}
     <div style="margin-top:12px;">
       ${fld('Observação', 'ui.mesaForm.obs', {kind:'text'})}
@@ -2871,7 +2899,7 @@ VIEWS.mesas = function(){
   const barRow = Array.from({length:5}, (_,i)=> mesaBtn(96+i, selNum)).join('');
 
   return `
-  <div class="topline"><div><h1>Mesas — Feijoada do Bloco${infoIcon('Mapa de reserva das 100 mesas do salão. Clique numa mesa livre pra reservar pra você (qualquer pessoa logada pode reservar, inclusive mais de uma mesa) — quem já reservou pode editar os próprios dados ou cancelar; confirmar o pagamento é sempre um administrador.')}</h1><div class="desc">${READONLY ? 'Clique numa mesa livre pra reservar, ou numa mesa sua pra editar.' : 'Clique numa mesa pra reservar/editar — qualquer pessoa logada também pode reservar a própria mesa.'}</div></div></div>
+  <div class="topline"><div><h1>Mesas — Feijoada do Bloco${infoIcon('Mapa de reserva das 100 mesas do salão. Clique numa mesa livre pra reservar pra você (qualquer pessoa logada pode reservar, inclusive mais de uma mesa) — quem já reservou pode editar os próprios dados ou cancelar. Registrar se uma mesa já foi paga e o valor é liberado pra qualquer pessoa aprovada (não só admin) — fica guardado quem fez cada lançamento.')}</h1><div class="desc">${READONLY ? 'Clique numa mesa livre pra reservar, numa mesa sua pra editar, ou em qualquer mesa pra registrar o pagamento.' : 'Clique numa mesa pra reservar/editar — qualquer pessoa logada também pode reservar a própria mesa e registrar pagamentos.'}</div></div></div>
 
   <div class="gridN" style="margin-bottom:16px;">
     <div class="kpi"><div class="lbl">Mesas livres</div><div class="kpi-value">${fmtInt(ms.livres)}</div></div>
@@ -3009,6 +3037,14 @@ ACTIONS.adminSaveMesa = (numero)=>{
   state.ui.mesaErro = ''; state.ui.mesaFormBusy = true;
   render();
   requestMesaAdminSave(Number(numero), f.nome.trim(), f.telefone||'', f.pessoas||[], f.obs||'', f.status||'reservada', f.dataPagamento||null, f.valorPago||0);
+};
+// QUALQUER usuário aprovado registra se a mesa já foi paga ou não e o valor (não só admin) —
+// diferente de adminSaveMesa, não mexe em nome/telefone/pessoas/obs, só no pagamento
+ACTIONS.savePagamentoMesa = (numero)=>{
+  const f = state.ui.mesaForm || {};
+  state.ui.mesaErro = ''; state.ui.mesaFormBusy = true;
+  render();
+  requestMesaPagamento(Number(numero), f.status||'reservada', f.dataPagamento||null, f.valorPago||0);
 };
 // só admin: libera a mesa (cancela/apaga a reserva), mesmo já paga — ex. desistência confirmada
 ACTIONS.adminCancelMesa = (numero)=>{

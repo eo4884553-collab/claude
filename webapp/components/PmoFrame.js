@@ -5,7 +5,7 @@ import { PROJECTS } from '../lib/projects';
 import { approvedReimbursementsTotal } from '../lib/reimbursements';
 import { fetchEffectiveRole } from '../lib/roles';
 import { fetchSharedCashBalance, setSharedCashSaldoInicial } from '../lib/cash';
-import { fetchMesasFeijoada, reservarMesa, atualizarMinhaMesa, cancelarMesa, adminSalvarMesa } from '../lib/mesas';
+import { fetchMesasFeijoada, reservarMesa, atualizarMinhaMesa, cancelarMesa, adminSalvarMesa, registrarPagamentoMesa } from '../lib/mesas';
 
 const SEED_MARKER = '/* __PIQUINZADA_STATE_SEED__ */';
 
@@ -229,6 +229,19 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
         (async () => {
           try {
             await adminSalvarMesa(project.id, Number(d.numero), d.nome, d.telefone, d.pessoas, d.obs, d.status, d.dataPagamento, d.valorPago);
+            await refreshMesas();
+          } catch (e) {
+            iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:mesas-result', ok: false, error: e.message || String(e) }, '*');
+          }
+        })();
+      }
+      // QUALQUER usuário aprovado registra se a mesa já foi paga ou não (diferente de
+      // mesa-admin-save, que é só admin) — o banco é quem garante a aprovação (ver
+      // registrar_pagamento_mesa no schema.sql); aqui só repassamos e devolvemos a lista atualizada.
+      if (d.type === 'piquinzada:mesa-pagamento') {
+        (async () => {
+          try {
+            await registrarPagamentoMesa(project.id, Number(d.numero), d.status, d.dataPagamento, d.valorPago);
             await refreshMesas();
           } catch (e) {
             iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:mesas-result', ok: false, error: e.message || String(e) }, '*');
