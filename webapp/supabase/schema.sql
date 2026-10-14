@@ -493,6 +493,13 @@ create table if not exists public.mesa_reservas (
   primary key (project_id, numero)
 );
 
+-- quem fez o último lançamento de pagamento (status/data/valor) dessa mesa — qualquer usuário
+-- aprovado pode registrar pagamento agora (não só admin, ver registrar_pagamento_mesa abaixo),
+-- então isso aqui é o jeito de conferir depois quem confirmou cada mesa
+alter table public.mesa_reservas
+  add column if not exists lancado_por_user_id uuid references auth.users(id),
+  add column if not exists lancado_por_email text;
+
 alter table public.mesa_reservas enable row level security;
 
 -- todo aprovado vê todas as reservas (mapa de mesas é público pra quem está logado)
@@ -583,17 +590,56 @@ begin
   end if;
 
   insert into public.mesa_reservas
-    (project_id, numero, user_id, user_email, reservado_por, telefone, pessoas, obs, status, data_pagamento, valor_pago)
+    (project_id, numero, user_id, user_email, reservado_por, telefone, pessoas, obs, status, data_pagamento, valor_pago, lancado_por_user_id, lancado_por_email)
   values (
     p_project, p_numero, auth.uid(), coalesce((select email from public.profiles where id = auth.uid()), ''),
     p_nome, coalesce(p_telefone,''), coalesce(p_pessoas,'[]'::jsonb), coalesce(p_obs,''),
-    p_status, p_data_pagamento, coalesce(p_valor_pago,0)
+    p_status, p_data_pagamento, coalesce(p_valor_pago,0),
+    auth.uid(), coalesce((select email from public.profiles where id = auth.uid()), '')
   )
   on conflict (project_id, numero) do update
     set reservado_por = excluded.reservado_por, telefone = excluded.telefone,
         pessoas = excluded.pessoas, obs = excluded.obs, status = excluded.status,
         data_pagamento = excluded.data_pagamento, valor_pago = excluded.valor_pago,
+        lancado_por_user_id = excluded.lancado_por_user_id, lancado_por_email = excluded.lancado_por_email,
         updated_at = now();
+end;
+$$;
+
+-- qualquer usuário aprovado (não só admin) registra se uma mesa já foi paga ou não e o valor —
+-- diferente do resto do formulário (nome/telefone/pessoas, que continua só do dono ou admin),
+-- confirmar pagamento agora é liberado pra qualquer um que estiver ajudando a cobrar na festa.
+-- Fica gravado quem fez esse lançamento (lancado_por_*) pra dar pra conferir depois. Só funciona
+-- numa mesa que já tem reserva — não cria reserva nova nem mexe em nome/telefone/pessoas/obs.
+create or replace function public.registrar_pagamento_mesa(
+  p_project text,
+  p_numero int,
+  p_status text,
+  p_data_pagamento date,
+  p_valor_pago numeric
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not exists (select 1 from public.profiles where id = auth.uid() and status = 'approved') then
+    raise exception 'Apenas usuários aprovados podem registrar pagamento de mesa.';
+  end if;
+  if p_status not in ('reservada','paga') then
+    raise exception 'status inválido';
+  end if;
+
+  update public.mesa_reservas
+    set status = p_status, data_pagamento = p_data_pagamento, valor_pago = coalesce(p_valor_pago,0),
+        lancado_por_user_id = auth.uid(),
+        lancado_por_email = coalesce((select email from public.profiles where id = auth.uid()), ''),
+        updated_at = now()
+    where project_id = p_project and numero = p_numero;
+
+  if not found then
+    raise exception 'Essa mesa ainda não tem reserva — não é possível registrar pagamento.';
+  end if;
 end;
 $$;
 
