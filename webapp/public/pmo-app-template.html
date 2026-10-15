@@ -257,12 +257,14 @@ button.mesa-btn.selected{outline:3px solid var(--accent); outline-offset:2px;}
 /* marcador vermelho (mesa reservada/paga) sobreposto na foto 3D — igual à bolinha numerada
    original da imagem (mesmo tamanho/traço fino, sem sombra nem borda grossa), só que vermelha
    em vez de amarela, pra parecer que a PRÓPRIA bolinha mudou de cor, não um adesivo por cima.
+   width medido direto nas bolinhas reais da foto (detecção de blobs por cor: ~23px de diâmetro
+   médio numa imagem de 2800px de largura = 0.82% da largura da imagem).
    font-size em "cqw" (% da largura do container .mesa-3d-imgwrap/.lb-imgwrap) pra acompanhar o
    tamanho do marcador (width em %) automaticamente, tanto na miniatura quanto no zoom do lightbox. */
-.mesa-3d-badge{position:absolute; width:2.2%; aspect-ratio:1/1; transform:translate(-50%,-50%); border-radius:50%;
+.mesa-3d-badge{position:absolute; width:0.82%; aspect-ratio:1/1; transform:translate(-50%,-50%); border-radius:50%;
   background:var(--bad); color:#fff; border:1px solid rgba(0,0,0,.3);
   display:flex; align-items:center; justify-content:center; font-weight:700; font-family:'IBM Plex Mono',monospace;
-  line-height:1; pointer-events:none; font-size:1.2cqw;}
+  line-height:1; pointer-events:none; font-size:0.45cqw;}
 
 button.btn{
   font-family:inherit; font-size:12.5px; font-weight:600; padding:8px 14px; border-radius:8px; cursor:pointer;
