@@ -616,7 +616,7 @@ function mesLabels(){ return MESES.map((_,i)=> mesLabel(i)); }
 // 100 mesas da Feijoada do Bloco (só usado nesse domínio) — gera o número 1..100, o resto some
 // vazio/livre até alguém reservar. Mesma estrutura pra cada mesa, independente do status.
 function freshMesa(numero){
-  return {numero, status:'livre', reservadoPor:'', telefone:'', dataReserva:'', dataPagamento:'', valorPago:0, pessoas:[], obs:'', reservadoPorUserId:null, reservadoPorEmail:'', lancadoPorEmail:''};
+  return {numero, status:'livre', reservadoPor:'', telefone:'', dataReserva:'', dataPagamento:'', valorPago:0, pessoas:[], obs:'', reservadoPorUserId:null, reservadoPorEmail:'', lancadoPorEmail:'', comprovantePath:''};
 }
 function freshMesasFeijoada(){
   return Array.from({length:100}, (_,i)=> freshMesa(i+1));
@@ -759,9 +759,30 @@ function requestMesaAdminSave(numero, nome, telefone, pessoas, obs, status, data
 }
 // QUALQUER usuário aprovado pode registrar se a mesa já foi paga ou não (não só admin) — fica
 // registrado quem fez o lançamento (ver lancadoPorEmail em cada mesa)
-function requestMesaPagamento(numero, status, dataPagamento, valorPago){
+function requestMesaPagamento(numero, status, dataPagamento, valorPago, comprovantePath){
   if(!HOSTED || typeof window==='undefined') return;
-  window.parent.postMessage({type:'piquinzada:mesa-pagamento', numero, status, dataPagamento, valorPago}, '*');
+  window.parent.postMessage({type:'piquinzada:mesa-pagamento', numero, status, dataPagamento, valorPago, comprovantePath}, '*');
+}
+// anexa o comprovante do pagamento de uma mesa — QUALQUER usuário aprovado (não só admin),
+// igual ao registro do pagamento em si. Reaproveita a mesma ponte de File clonável via
+// postMessage usada pelos comprovantes de Custos (ver requestComprovanteUpload acima).
+function requestMesaComprovanteUpload(numero, file){
+  if(!HOSTED || typeof window==='undefined') return;
+  window.parent.postMessage({type:'piquinzada:mesa-upload-comprovante', numero, file}, '*');
+}
+if(HOSTED){
+  window.addEventListener('message', (ev)=>{
+    const d = ev.data;
+    if(!d || typeof d!=='object' || d.type!=='piquinzada:mesa-upload-comprovante-result') return;
+    state.ui.mesaUploadBusy = false;
+    if(d.ok && state.ui.mesaForm){
+      state.ui.mesaForm.comprovantePath = d.path;
+      state.ui.mesaErro = '';
+    } else if(!d.ok){
+      state.ui.mesaErro = 'Não consegui enviar o comprovante — tente de novo.';
+    }
+    render();
+  });
 }
 if(HOSTED){
   window.addEventListener('message', (ev)=>{
@@ -1675,7 +1696,7 @@ function onEnterCommit(e){
 // acoes que so navegam a tela (nao alteram dados do projeto) — continuam liberadas em modo convidado
 // reserva de mesa é a UNICA area do app onde convidado tambem grava de verdade (ver schema.sql,
 // secao 11) — por isso essas acoes de mesa entram aqui, mesmo nao sendo "so navegacao"
-const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa']);
+const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento']);
 function onAction(e){
   const el = e.currentTarget || e.target.closest('[data-action]');
   const [action, ...args] = el.dataset.action.split(':');
@@ -2806,9 +2827,11 @@ function mesaFormInit(m){
     obs: m.obs||'',
     status: statusForm==='livre' ? 'reservada' : statusForm,
     dataPagamento: m.dataPagamento||'', valorPago: m.valorPago||0,
+    comprovantePath: m.comprovantePath||'',
   };
   state.ui.mesaErro = '';
   state.ui.mesaFormBusy = false;
+  state.ui.mesaUploadBusy = false;
 }
 function mesaPessoasEditor(){
   const pessoas = (state.ui.mesaForm && state.ui.mesaForm.pessoas) || [];
@@ -2848,9 +2871,17 @@ function mesaPagamentoFields(m){
       ${fld('Valor pago', 'ui.mesaForm.valorPago', {kind:'currency'})}
     </div>
     ${m.lancadoPorEmail ? `<div class="hint" style="margin-top:8px;">Último lançamento de pagamento registrado por: ${esc(m.lancadoPorEmail)}</div>` : ''}
+    <div style="margin-top:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+      ${state.ui.mesaForm.comprovantePath
+        ? `<button class="btn small guest-ok" data-action="viewComprovanteMesaPagamento" title="Ver comprovante anexado">📎 Ver comprovante</button>
+           <button class="rm guest-ok" data-action="rmComprovanteMesaPagamento" title="Remover anexo">✕</button>`
+        : `<button class="btn small guest-ok" data-action="attachComprovanteMesaPagamento:${m.numero}" ${state.ui.mesaUploadBusy?'disabled':''} title="Anexar comprovante do pagamento (ex.: print do PIX)">📎 Anexar comprovante</button>`}
+      ${state.ui.mesaUploadBusy ? `<span class="hint">Enviando…</span>` : ''}
+    </div>
     ${mesaErroBox()}
-    <button class="btn primary guest-ok" style="margin-top:10px;" data-action="savePagamentoMesa:${m.numero}" ${state.ui.mesaFormBusy?'disabled':''}>Salvar pagamento</button>
-  </div>`;
+    <button class="btn primary guest-ok" style="margin-top:10px;" data-action="savePagamentoMesa:${m.numero}" ${(state.ui.mesaFormBusy||state.ui.mesaUploadBusy)?'disabled':''}>Salvar pagamento</button>
+  </div>
+  <input type="file" id="mesaComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
 }
 function mesaPanelClaim(m){
   return `<div class="section mesa-guest-form" style="border:2px solid var(--accent); background:var(--accent-soft);">
@@ -3086,7 +3117,32 @@ ACTIONS.savePagamentoMesa = (numero)=>{
   const f = state.ui.mesaForm || {};
   state.ui.mesaErro = ''; state.ui.mesaFormBusy = true;
   render();
-  requestMesaPagamento(Number(numero), f.status||'reservada', f.dataPagamento||null, f.valorPago||0);
+  requestMesaPagamento(Number(numero), f.status||'reservada', f.dataPagamento||null, f.valorPago||0, f.comprovantePath||null);
+};
+// anexa o comprovante do pagamento — QUALQUER usuário aprovado (igual ao registro do pagamento
+// em si). O arquivo escolhido já sobe na hora (fica em "rascunho" em ui.mesaForm.comprovantePath
+// até a pessoa clicar em "Salvar pagamento", que manda esse caminho junto com status/data/valor).
+ACTIONS.attachComprovanteMesaPagamento = (numero)=>{
+  const input = document.getElementById('mesaComprovanteFileInput');
+  if(!input) return;
+  input.value = '';
+  input.onchange = ()=>{
+    const file = input.files && input.files[0];
+    if(!file) return;
+    state.ui.mesaUploadBusy = true;
+    render();
+    requestMesaComprovanteUpload(Number(numero), file);
+  };
+  input.click();
+};
+ACTIONS.viewComprovanteMesaPagamento = ()=>{
+  const path = state.ui.mesaForm && state.ui.mesaForm.comprovantePath;
+  if(path) requestComprovanteView(path);
+};
+ACTIONS.rmComprovanteMesaPagamento = ()=>{
+  if(!state.ui.mesaForm) return;
+  state.ui.mesaForm.comprovantePath = '';
+  render();
 };
 // só admin: libera a mesa (cancela/apaga a reserva), mesmo já paga — ex. desistência confirmada
 ACTIONS.adminCancelMesa = (numero)=>{

@@ -4,7 +4,7 @@ import { supabase } from './supabaseClient';
 const TOTAL_MESAS = 100;
 
 function freshMesa(numero) {
-  return { numero, status: 'livre', reservadoPor: '', telefone: '', dataReserva: '', dataPagamento: '', valorPago: 0, pessoas: [], obs: '', reservadoPorUserId: null, reservadoPorEmail: '', lancadoPorEmail: '' };
+  return { numero, status: 'livre', reservadoPor: '', telefone: '', dataReserva: '', dataPagamento: '', valorPago: 0, pessoas: [], obs: '', reservadoPorUserId: null, reservadoPorEmail: '', lancadoPorEmail: '', comprovantePath: '' };
 }
 
 // monta as 100 mesas (livre por padrão) e preenche com as linhas que já têm reserva —
@@ -30,6 +30,7 @@ export async function fetchMesasFeijoada(projectId) {
       reservadoPorUserId: row.user_id,
       reservadoPorEmail: row.user_email || '',
       lancadoPorEmail: row.lancado_por_email || '',
+      comprovantePath: row.comprovante_path || '',
     };
   });
 }
@@ -76,10 +77,11 @@ export async function adminSalvarMesa(projectId, numero, nome, telefone, pessoas
 // QUALQUER usuário aprovado (não só admin) registra se a mesa já foi paga ou não e o valor —
 // fica gravado quem fez esse lançamento (ver lancadoPorEmail). Só funciona numa mesa que já
 // tem reserva; não mexe em nome/telefone/pessoas/obs.
-export async function registrarPagamentoMesa(projectId, numero, status, dataPagamento, valorPago) {
+export async function registrarPagamentoMesa(projectId, numero, status, dataPagamento, valorPago, comprovantePath) {
   const { error } = await supabase.rpc('registrar_pagamento_mesa', {
     p_project: projectId, p_numero: numero, p_status: status,
     p_data_pagamento: dataPagamento || null, p_valor_pago: Number(valorPago) || 0,
+    p_comprovante_path: comprovantePath || null,
   });
   if (error) throw error;
 }

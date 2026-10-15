@@ -241,10 +241,29 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
       if (d.type === 'piquinzada:mesa-pagamento') {
         (async () => {
           try {
-            await registrarPagamentoMesa(project.id, Number(d.numero), d.status, d.dataPagamento, d.valorPago);
+            await registrarPagamentoMesa(project.id, Number(d.numero), d.status, d.dataPagamento, d.valorPago, d.comprovantePath);
             await refreshMesas();
           } catch (e) {
             iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:mesas-result', ok: false, error: e.message || String(e) }, '*');
+          }
+        })();
+      }
+      // comprovante do pagamento de uma mesa — QUALQUER usuário aprovado pode anexar (igual ao
+      // registro do pagamento em si, ver mesa-pagamento acima), diferente do upload-comprovante
+      // de Custos (gated a admin). Reaproveita o mesmo bucket 'comprovantes' do Storage.
+      if (d.type === 'piquinzada:mesa-upload-comprovante') {
+        (async () => {
+          try {
+            const file = d.file;
+            const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+            const path = `${project.id}/mesas/${d.numero}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+            const { error } = await supabase.storage.from('comprovantes').upload(path, file);
+            iframeRef.current?.contentWindow?.postMessage({
+              type: 'piquinzada:mesa-upload-comprovante-result', numero: d.numero,
+              ok: !error, path: error ? null : path,
+            }, '*');
+          } catch (_) {
+            iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:mesa-upload-comprovante-result', numero: d.numero, ok: false }, '*');
           }
         })();
       }
