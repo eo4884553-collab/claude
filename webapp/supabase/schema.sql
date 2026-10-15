@@ -655,3 +655,55 @@ begin
     alter publication supabase_realtime add table public.mesa_reservas;
   end if;
 end $$;
+
+-- ============================================================
+-- 12) COMPROVANTE DE PAGAMENTO DE MESA (Feijoada do Bloco)
+-- ============================================================
+-- Quem registra o pagamento de uma mesa (ver registrar_pagamento_mesa, seção 11) pode anexar
+-- o comprovante (ex.: print do PIX). Reaproveita o MESMO bucket de Storage 'comprovantes' já
+-- criado na seção 7 — as policies de lá já liberam insert/select pra QUALQUER usuário aprovado
+-- (não só admin), que é exatamente quem pode chamar esta função, então não precisa de bucket
+-- nem de policy novos aqui.
+alter table public.mesa_reservas
+  add column if not exists comprovante_path text;
+
+-- "create or replace" não troca a assinatura de uma função existente, ele cria uma SEGUNDA
+-- função com o mesmo nome — com as duas no banco, uma chamada com os 5 argumentos antigos fica
+-- ambígua ("Could not choose the best candidate function"). Por isso dropamos a versão de 5
+-- parâmetros antes de recriar com o 6º (comprovante, opcional).
+drop function if exists public.registrar_pagamento_mesa(text, int, text, date, numeric);
+
+create or replace function public.registrar_pagamento_mesa(
+  p_project text,
+  p_numero int,
+  p_status text,
+  p_data_pagamento date,
+  p_valor_pago numeric,
+  p_comprovante_path text default null
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if not exists (select 1 from public.profiles where id = auth.uid() and status = 'approved') then
+    raise exception 'Apenas usuários aprovados podem registrar pagamento de mesa.';
+  end if;
+  if p_status not in ('reservada','paga') then
+    raise exception 'status inválido';
+  end if;
+
+  update public.mesa_reservas
+    set status = p_status, data_pagamento = p_data_pagamento, valor_pago = coalesce(p_valor_pago,0),
+        -- não manda comprovante novo (ex.: só mudou o status) preserva o que já estava anexado
+        comprovante_path = coalesce(p_comprovante_path, mesa_reservas.comprovante_path),
+        lancado_por_user_id = auth.uid(),
+        lancado_por_email = coalesce((select email from public.profiles where id = auth.uid()), ''),
+        updated_at = now()
+    where project_id = p_project and numero = p_numero;
+
+  if not found then
+    raise exception 'Essa mesa ainda não tem reserva — não é possível registrar pagamento.';
+  end if;
+end;
+$$;
