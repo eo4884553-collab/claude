@@ -245,13 +245,22 @@ button.mesa-btn.selected{outline:3px solid var(--accent); outline-offset:2px;}
 .mesa-layout{display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap;}
 .mesa-layout .mesa-wrap{flex:1 1 480px;}
 .mesa-3d-ref{flex:2 1 560px; min-width:320px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); padding:14px; align-self:stretch;}
-.mesa-3d-ref img{width:100%; height:auto; border-radius:8px; display:block; cursor:zoom-in;}
+.mesa-3d-ref .mesa-3d-imgwrap{position:relative; width:100%; cursor:zoom-in; container-type:inline-size;}
+.mesa-3d-ref img{width:100%; height:auto; border-radius:8px; display:block;}
 .mesa-3d-ref .cap{font-size:11px; color:var(--text-faint); margin-top:8px; line-height:1.4;}
 .mesa-3d-lightbox{position:fixed; inset:0; z-index:200; background:rgba(10,6,10,.88); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px;}
 .mesa-3d-lightbox .lb-bar{display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; justify-content:center;}
 .mesa-3d-lightbox .lb-viewport{flex:1 1 auto; width:100%; max-width:1400px; overflow:auto; border-radius:10px; background:rgba(0,0,0,.25);}
-.mesa-3d-lightbox .lb-viewport img{display:block; transform-origin:top left; border-radius:0;}
+.mesa-3d-lightbox .lb-imgwrap{position:relative; transform-origin:top left; display:inline-block; container-type:inline-size;}
+.mesa-3d-lightbox .lb-viewport img{display:block; border-radius:0;}
 .mesa-3d-lightbox .lb-close{cursor:pointer;}
+/* marcador vermelho (mesa reservada/paga) sobreposto na foto 3D — numero + cor igual ao mapa 2D.
+   font-size em "cqw" (% da largura do container .mesa-3d-imgwrap/.lb-imgwrap) pra acompanhar o
+   tamanho do marcador (width em %) automaticamente, tanto na miniatura quanto no zoom do lightbox. */
+.mesa-3d-badge{position:absolute; width:2.4%; aspect-ratio:1/1; transform:translate(-50%,-50%); border-radius:50%;
+  background:var(--bad); color:#fff; border:2px solid rgba(255,255,255,.85); box-shadow:0 1px 3px rgba(0,0,0,.4);
+  display:flex; align-items:center; justify-content:center; font-weight:700; font-family:'IBM Plex Mono',monospace;
+  line-height:1; pointer-events:none; font-size:1.3cqw;}
 
 button.btn{
   font-family:inherit; font-size:12.5px; font-weight:600; padding:8px 14px; border-radius:8px; cursor:pointer;
@@ -2710,6 +2719,29 @@ ACTIONS.rmComprovanteCusto = (itemId,ci)=>{
 };
 
 /* ================= MESAS (Feijoada do Bloco) ================= */
+// posição (% da largura/altura da imagem) de cada bolinha numerada na foto de referência 3D
+// (mesas-3d-referencia.jpg, 2800×1703px) — mapeado manualmente uma vez, direto da imagem, pra
+// poder desenhar um marcador colorido em cima de cada mesa reservada/paga. Índice 0 = mesa 1.
+const MESA_3D_POS=[[39.66,51.67],[31.82,42.4],[34.0,40.93],[36.11,39.52],[38.16,38.14],[42.12,35.44],[43.59,63.12],[45.89,32.91],[47.71,31.65],[49.5,30.45],[51.23,29.27],[31.95,45.07],[34.18,43.51],[36.34,42.04],[38.43,40.58],[40.48,39.17],[44.32,36.64],[46.25,34.47],[48.18,33.76],[50.0,32.59],[51.75,31.36],[32.09,47.86],[34.38,46.24],[36.57,44.69],[38.71,43.16],[40.82,41.69],[44.84,38.81],[46.61,37.58],[48.54,36.05],[50.46,34.47],[52.29,33.53],[54.04,32.3],[34.57,49.12],[36.82,47.48],[39.02,45.86],[41.16,44.3],[43.21,42.81],[47.23,39.87],[49.16,38.49],[50.54,37.11],[52.93,35.82],[54.64,34.47],[34.75,52.08],[37.07,50.38],[39.32,48.71],[51.59,39.52],[53.45,38.14],[55.27,36.79],[57.04,35.44],[37.36,53.44],[39.5,51.67],[55.91,39.17],[57.71,37.79],[37.62,56.64],[39.98,54.82],[56.59,41.69],[58.43,40.25],[60.21,38.84],[40.34,58.1],[42.7,56.17],[57.3,44.33],[59.18,42.81],[61.0,41.34],[40.73,61.57],[43.14,59.54],[45.45,57.6],[47.7,55.75],[49.89,53.9],[54.07,50.38],[56.11,48.74],[58.05,47.09],[59.95,45.51],[61.8,43.95],[63.61,42.45],[43.57,63.07],[45.96,61.07],[48.27,59.07],[50.52,57.16],[52.68,55.28],[56.82,51.7],[58.84,49.97],[60.77,48.33],[62.66,46.71],[64.48,45.13],[44.07,66.88],[46.52,64.68],[48.88,62.62],[51.14,60.57],[53.37,58.6],[57.63,54.82],[59.66,53.02],[61.62,51.26],[63.54,49.56],[65.41,47.92],[67.23,46.3],[47.09,68.53],[68.23,49.18],[47.7,72.61],[69.29,52.14],[71.11,50.44]];
+// desenha, por cima da imagem 3D, um marcador vermelho com o número em cima de cada mesa
+// reservada ou paga (mesa livre não ganha marcador — a bolinha original da imagem já aparece
+// normalmente). "scale" ajusta o tamanho do marcador (lightbox usa um valor menor que o thumbnail
+// pequeno, pra não ficar desproporcional conforme o zoom da imagem)
+function mesa3dBadgesOverlay(){
+  const mesas = state.mesasFeijoada||[];
+  const marks = [];
+  for(let numero=1; numero<=100; numero++){
+    const m = mesas[numero-1];
+    if(!m) continue;
+    const status = mesaEffectiveStatus(m);
+    if(status==='livre') continue;
+    const pos = MESA_3D_POS[numero-1];
+    if(!pos) continue;
+    const [xPct,yPct] = pos;
+    marks.push(`<div class="mesa-3d-badge" style="left:${xPct}%; top:${yPct}%;" title="Mesa ${numero} — ${MESA_STATUS_LABEL[status]}">${numero}</div>`);
+  }
+  return marks.join('');
+}
 const MESA_STATUS = ['livre','reservada','paga'];
 const MESA_STATUS_LABEL = {livre:'Livre', reservada:'Reservada', paga:'Paga'};
 const MESA_ADMIN_STATUS = ['reservada','paga']; // "livre" nao e um status gravado — e so a mesa nao ter linha na tabela (ver "Liberar mesa")
@@ -2926,8 +2958,11 @@ VIEWS.mesas = function(){
         </div>
       </div>
       <div class="mesa-3d-ref">
-        <img src="/mesas-3d-referencia.jpg" alt="Referência 3D do salão de eventos" loading="lazy" data-action="openMesa3d">
-        <div class="cap">Referência 3D do salão — clique na imagem pra ampliar e dar zoom. Só pra visualização e localização, não é interativa: a reserva é feita no mapa numerado ao lado.</div>
+        <div class="mesa-3d-imgwrap" data-action="openMesa3d">
+          <img src="/mesas-3d-referencia.jpg" alt="Referência 3D do salão de eventos" loading="lazy">
+          ${mesa3dBadgesOverlay()}
+        </div>
+        <div class="cap">Referência 3D do salão — clique na imagem pra ampliar e dar zoom. As mesas já reservadas ou pagas aparecem marcadas em vermelho. Só pra visualização e localização, não é interativa: a reserva é feita no mapa numerado ao lado.</div>
       </div>
     </div>
     <div class="mesa-legend">
@@ -2952,7 +2987,10 @@ function mesa3dLightbox(){
       <button class="btn small lb-close guest-ok" data-action="closeMesa3d">Fechar ✕</button>
     </div>
     <div class="lb-viewport" onclick="event.stopPropagation();">
-      <img src="/mesas-3d-referencia.jpg" alt="Referência 3D do salão de eventos — ampliada" style="width:${widthPx}px;">
+      <div class="lb-imgwrap" style="width:${widthPx}px;">
+        <img src="/mesas-3d-referencia.jpg" alt="Referência 3D do salão de eventos — ampliada" style="width:100%; display:block;">
+        ${mesa3dBadgesOverlay()}
+      </div>
     </div>
   </div>`;
 }
