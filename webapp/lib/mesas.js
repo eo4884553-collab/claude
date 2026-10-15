@@ -4,7 +4,7 @@ import { supabase } from './supabaseClient';
 const TOTAL_MESAS = 100;
 
 function freshMesa(numero) {
-  return { numero, status: 'livre', reservadoPor: '', telefone: '', dataReserva: '', dataPagamento: '', valorPago: 0, pessoas: [], obs: '', reservadoPorUserId: null, reservadoPorEmail: '', lancadoPorEmail: '', comprovantePath: '' };
+  return { numero, status: 'livre', reservadoPor: '', telefone: '', dataReserva: '', dataPagamento: '', valorPago: 0, pessoas: [], obs: '', reservadoPorUserId: null, reservadoPorEmail: '', lancadoPorEmail: '', lancadoPorUserId: null, comprovantePath: '' };
 }
 
 // monta as 100 mesas (livre por padrão) e preenche com as linhas que já têm reserva —
@@ -30,6 +30,7 @@ export async function fetchMesasFeijoada(projectId) {
       reservadoPorUserId: row.user_id,
       reservadoPorEmail: row.user_email || '',
       lancadoPorEmail: row.lancado_por_email || '',
+      lancadoPorUserId: row.lancado_por_user_id || null,
       comprovantePath: row.comprovante_path || '',
     };
   });
@@ -82,6 +83,15 @@ export async function registrarPagamentoMesa(projectId, numero, status, dataPaga
     p_project: projectId, p_numero: numero, p_status: status,
     p_data_pagamento: dataPagamento || null, p_valor_pago: Number(valorPago) || 0,
     p_comprovante_path: comprovantePath || null,
+  });
+  if (error) throw error;
+}
+
+// move uma reserva (reservada OU paga) pra outra mesa livre — liberado pro admin do domínio OU
+// pra quem fez o ÚLTIMO lançamento de pagamento daquela mesa (ver mover_mesa_reserva no schema.sql)
+export async function moverMesaReserva(projectId, numeroOrigem, numeroDestino) {
+  const { error } = await supabase.rpc('mover_mesa_reserva', {
+    p_project: projectId, p_numero_origem: numeroOrigem, p_numero_destino: numeroDestino,
   });
   if (error) throw error;
 }

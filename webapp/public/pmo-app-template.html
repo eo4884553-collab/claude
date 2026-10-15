@@ -616,7 +616,7 @@ function mesLabels(){ return MESES.map((_,i)=> mesLabel(i)); }
 // 100 mesas da Feijoada do Bloco (só usado nesse domínio) — gera o número 1..100, o resto some
 // vazio/livre até alguém reservar. Mesma estrutura pra cada mesa, independente do status.
 function freshMesa(numero){
-  return {numero, status:'livre', reservadoPor:'', telefone:'', dataReserva:'', dataPagamento:'', valorPago:0, pessoas:[], obs:'', reservadoPorUserId:null, reservadoPorEmail:'', lancadoPorEmail:'', comprovantePath:''};
+  return {numero, status:'livre', reservadoPor:'', telefone:'', dataReserva:'', dataPagamento:'', valorPago:0, pessoas:[], obs:'', reservadoPorUserId:null, reservadoPorEmail:'', lancadoPorEmail:'', lancadoPorUserId:null, comprovantePath:''};
 }
 function freshMesasFeijoada(){
   return Array.from({length:100}, (_,i)=> freshMesa(i+1));
@@ -769,6 +769,13 @@ function requestMesaPagamento(numero, status, dataPagamento, valorPago, comprova
 function requestMesaComprovanteUpload(numero, file){
   if(!HOSTED || typeof window==='undefined') return;
   window.parent.postMessage({type:'piquinzada:mesa-upload-comprovante', numero, file}, '*');
+}
+// troca uma mesa (reservada/paga) de lugar pra outra livre — liberado pro admin OU pra quem fez
+// o último lançamento de pagamento daquela mesa (ver lancadoPorUserId); o banco confere de verdade
+// (ver mover_mesa_reserva no schema.sql), aqui só é o botão pra não aparecer pra quem não pode.
+function requestMesaMover(numeroOrigem, numeroDestino){
+  if(!HOSTED || typeof window==='undefined') return;
+  window.parent.postMessage({type:'piquinzada:mesa-mover', numeroOrigem, numeroDestino}, '*');
 }
 if(HOSTED){
   window.addEventListener('message', (ev)=>{
@@ -1696,7 +1703,7 @@ function onEnterCommit(e){
 // acoes que so navegam a tela (nao alteram dados do projeto) — continuam liberadas em modo convidado
 // reserva de mesa é a UNICA area do app onde convidado tambem grava de verdade (ver schema.sql,
 // secao 11) — por isso essas acoes de mesa entram aqui, mesmo nao sendo "so navegacao"
-const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento']);
+const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa']);
 function onAction(e){
   const el = e.currentTarget || e.target.closest('[data-action]');
   const [action, ...args] = el.dataset.action.split(':');
@@ -2827,7 +2834,7 @@ function mesaFormInit(m){
     obs: m.obs||'',
     status: statusForm==='livre' ? 'reservada' : statusForm,
     dataPagamento: m.dataPagamento||'', valorPago: m.valorPago||0,
-    comprovantePath: m.comprovantePath||'',
+    comprovantePath: m.comprovantePath||'', trocaDestino: '',
   };
   state.ui.mesaErro = '';
   state.ui.mesaFormBusy = false;
@@ -2855,6 +2862,39 @@ function mesaPanel(m){
   return mesaPanelReadonly(m);
 }
 // QUALQUER usuário aprovado pode registrar se uma mesa já foi paga ou não e o valor — não só
+// lista os números das mesas livres no momento (exceto a própria, se informada) — usada pra
+// preencher o seletor de destino da troca de mesa
+function mesasLivresOptions(excludeNumero){
+  const mesas = state.mesasFeijoada||[];
+  const out = [];
+  for(let n=1; n<=100; n++){
+    if(n===excludeNumero) continue;
+    const row = mesas[n-1];
+    const status = row ? mesaEffectiveStatus(row) : 'livre';
+    if(status==='livre') out.push(n);
+  }
+  return out;
+}
+// trocar uma mesa (já reservada/paga) de lugar pra outra livre, mantendo todo o resto igual
+// (nome, pessoas, pagamento, comprovante) — reaproveitado no painel do admin (sempre pode) e no
+// formulário de pagamento (só aparece pra quem fez o último lançamento daquela mesa, ver chamada
+// mais abaixo). O banco é quem de fato confere a permissão (ver mover_mesa_reserva no schema.sql).
+function mesaTrocaFields(m){
+  const livres = mesasLivresOptions(m.numero);
+  const destino = state.ui.mesaForm.trocaDestino || '';
+  const opts = livres.map(n=>`<option value="${n}" ${String(n)===String(destino)?'selected':''}>Mesa ${n}</option>`).join('');
+  return `<div style="margin-top:14px; padding-top:14px; border-top:1px dashed var(--border);">
+    <p class="lbl" style="margin-bottom:6px;">Trocar de mesa</p>
+    <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
+      <select class="guest-ok" data-bind="ui.mesaForm.trocaDestino" style="max-width:170px;">
+        <option value="">Escolha uma mesa livre…</option>
+        ${opts}
+      </select>
+      <button class="btn small guest-ok" data-action="moverMesa:${m.numero}" data-confirm="Confirmar troca" ${(!destino||state.ui.mesaFormBusy)?'disabled':''}>Trocar pra essa mesa</button>
+    </div>
+    <div class="hint" style="margin-top:4px;">${livres.length} mesa(s) livre(s) disponíveis agora. Reserva, pagamento e comprovante vão junto pra mesa nova.</div>
+  </div>`;
+}
 // quem reservou nem só admin (ex.: alguém ajudando a cobrar na entrada da festa). Reaproveitado
 // no painel de quem reservou e no painel de quem está só olhando a mesa de outra pessoa; fica
 // registrado quem fez o último lançamento (lancadoPorEmail) pra dar pra conferir depois.
@@ -2881,6 +2921,7 @@ function mesaPagamentoFields(m){
     ${mesaErroBox()}
     <button class="btn primary guest-ok" style="margin-top:10px;" data-action="savePagamentoMesa:${m.numero}" ${(state.ui.mesaFormBusy||state.ui.mesaUploadBusy)?'disabled':''}>Salvar pagamento</button>
   </div>
+  ${(USER_ID && m.lancadoPorUserId===USER_ID) ? mesaTrocaFields(m) : ''}
   <input type="file" id="mesaComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
 }
 function mesaPanelClaim(m){
@@ -2951,6 +2992,7 @@ function mesaPanelAdmin(m){
       <button class="btn primary" data-action="adminSaveMesa:${m.numero}" ${state.ui.mesaFormBusy?'disabled':''}>Salvar</button>
       ${m.status!=='livre' ? `<button class="btn danger" data-action="adminCancelMesa:${m.numero}" data-confirm="Confirmar — libera a mesa">Liberar mesa (cancelar reserva)</button>` : ''}
     </div>
+    ${m.status!=='livre' ? mesaTrocaFields(m) : ''}
   </div>`;
 }
 VIEWS.mesas = function(){
@@ -3143,6 +3185,15 @@ ACTIONS.rmComprovanteMesaPagamento = ()=>{
   if(!state.ui.mesaForm) return;
   state.ui.mesaForm.comprovantePath = '';
   render();
+};
+// troca a mesa de lugar — liberado pro admin ou pra quem fez o último lançamento daquela mesa
+// (ver mesaTrocaFields, só aparece o botão pra quem pode; o banco confere de verdade)
+ACTIONS.moverMesa = (numeroOrigem)=>{
+  const destino = Number(state.ui.mesaForm && state.ui.mesaForm.trocaDestino);
+  if(!destino) return;
+  state.ui.mesaErro = ''; state.ui.mesaFormBusy = true;
+  render();
+  requestMesaMover(Number(numeroOrigem), destino);
 };
 // só admin: libera a mesa (cancela/apaga a reserva), mesmo já paga — ex. desistência confirmada
 ACTIONS.adminCancelMesa = (numero)=>{

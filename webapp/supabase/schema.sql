@@ -707,3 +707,50 @@ begin
   end if;
 end;
 $$;
+
+-- ============================================================
+-- 13) TROCAR MESA DE LUGAR (Feijoada do Bloco)
+-- ============================================================
+-- Move uma reserva (reservada OU paga) de uma mesa pra outra que esteja livre, mantendo todo o
+-- resto igual (nome, telefone, pessoas, status, pagamento, comprovante, quem reservou/lançou).
+-- Liberado pro admin do domínio OU pra quem fez o ÚLTIMO lançamento de pagamento daquela mesa
+-- específica (mesmo critério de quem já pode registrar pagamento — ver registrar_pagamento_mesa).
+-- Só o DONO da reserva (sem nenhum lançamento ainda) NÃO pode mover sozinho — nesse caso só admin.
+create or replace function public.mover_mesa_reserva(
+  p_project text,
+  p_numero_origem int,
+  p_numero_destino int
+)
+returns void
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  v_lancado_por uuid;
+begin
+  select lancado_por_user_id into v_lancado_por
+    from public.mesa_reservas where project_id = p_project and numero = p_numero_origem;
+  if not found then
+    raise exception 'Essa mesa não tem reserva — não é possível trocar.';
+  end if;
+
+  if public.effective_role(p_project, auth.uid()) is distinct from 'admin'
+     and v_lancado_por is distinct from auth.uid() then
+    raise exception 'Só um administrador ou quem fez o último lançamento dessa mesa pode trocá-la de lugar.';
+  end if;
+
+  if p_numero_destino = p_numero_origem then
+    raise exception 'Escolha uma mesa diferente da atual.';
+  end if;
+  if p_numero_destino < 1 or p_numero_destino > 100 then
+    raise exception 'Número de mesa inválido.';
+  end if;
+  if exists (select 1 from public.mesa_reservas where project_id = p_project and numero = p_numero_destino) then
+    raise exception 'Essa mesa de destino já está ocupada — escolha uma mesa livre.';
+  end if;
+
+  update public.mesa_reservas
+    set numero = p_numero_destino, updated_at = now()
+    where project_id = p_project and numero = p_numero_origem;
+end;
+$$;

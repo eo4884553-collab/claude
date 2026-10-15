@@ -5,7 +5,7 @@ import { PROJECTS } from '../lib/projects';
 import { approvedReimbursementsTotal } from '../lib/reimbursements';
 import { fetchEffectiveRole } from '../lib/roles';
 import { fetchSharedCashBalance, setSharedCashSaldoInicial } from '../lib/cash';
-import { fetchMesasFeijoada, reservarMesa, atualizarMinhaMesa, cancelarMesa, adminSalvarMesa, registrarPagamentoMesa } from '../lib/mesas';
+import { fetchMesasFeijoada, reservarMesa, atualizarMinhaMesa, cancelarMesa, adminSalvarMesa, registrarPagamentoMesa, moverMesaReserva } from '../lib/mesas';
 
 const SEED_MARKER = '/* __PIQUINZADA_STATE_SEED__ */';
 
@@ -242,6 +242,20 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
         (async () => {
           try {
             await registrarPagamentoMesa(project.id, Number(d.numero), d.status, d.dataPagamento, d.valorPago, d.comprovantePath);
+            await refreshMesas();
+          } catch (e) {
+            iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:mesas-result', ok: false, error: e.message || String(e) }, '*');
+          }
+        })();
+      }
+      // trocar uma mesa (reservada/paga) de lugar pra outra livre — liberado pro admin OU pra
+      // quem fez o último lançamento de pagamento daquela mesa (o banco é quem confere isso de
+      // verdade, ver mover_mesa_reserva no schema.sql); aqui só repassamos e devolvemos a lista
+      // atualizada pro iframe, igual ao resto das ações de mesa.
+      if (d.type === 'piquinzada:mesa-mover') {
+        (async () => {
+          try {
+            await moverMesaReserva(project.id, Number(d.numeroOrigem), Number(d.numeroDestino));
             await refreshMesas();
           } catch (e) {
             iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:mesas-result', ok: false, error: e.message || String(e) }, '*');
