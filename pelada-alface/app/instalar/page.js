@@ -141,7 +141,7 @@ export default function Instalar() {
           <b>Depois de instalar</b>
           <ul className="muted peq" style={{ margin: '6px 0 0', paddingLeft: 18, lineHeight: 1.6 }}>
             <li>Abra pelo ícone do escudo na tela inicial.</li>
-            <li>Entre com sua conta ou toque em <b>Entrar como convidado</b> para só ver os rankings.</li>
+            <li>Crie sua conta (e-mail e senha) e aguarde o administrador aprovar seu acesso.</li>
             <li>As estatísticas atualizam sozinhas a cada rodada lançada.</li>
           </ul>
         </div>

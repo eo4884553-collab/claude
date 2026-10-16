@@ -1,8 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { supabase } from '../lib/supabaseClient';
-import { useAuth } from '../lib/auth';
 
 const MSG_ERRO = {
   'Invalid login credentials': 'E-mail ou senha incorretos.',
@@ -12,8 +10,6 @@ const MSG_ERRO = {
 const traduz = (m) => MSG_ERRO[m] || (/least 6/.test(m) ? 'A senha precisa ter pelo menos 6 caracteres.' : m);
 
 export default function LoginScreen({ aposEntrar }) {
-  const { enterAsGuest } = useAuth();
-  const router = useRouter();
   const [modo, setModo] = useState('entrar'); // entrar | cadastrar | esqueci | reenviar
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
@@ -41,8 +37,8 @@ export default function LoginScreen({ aposEntrar }) {
       });
       if (!res.error) {
         setOk(res.data.session
-          ? 'Conta criada! Você já está dentro.'
-          : 'Conta criada! Enviamos um link de confirmação para o seu e-mail — clique nele e depois entre aqui.');
+          ? 'Conta criada! Agora é só aguardar o administrador aprovar seu acesso.'
+          : 'Conta criada! Confirme pelo link que enviamos ao seu e-mail e aguarde o administrador aprovar seu acesso.');
       }
     } else if (modo === 'esqueci') {
       res = await supabase.auth.resetPasswordForEmail(em, { redirectTo: `${origem}/redefinir-senha` });
@@ -110,12 +106,8 @@ export default function LoginScreen({ aposEntrar }) {
           {modo !== 'entrar' && modo !== 'cadastrar' && <button className="link" onClick={() => trocar('entrar')}>← Voltar para entrar</button>}
         </div>
 
-        <div className="ou">ou</div>
-        <button className="btn linha bloco" onClick={() => { enterAsGuest(); router.push('/'); }}>
-          👀 Entrar como convidado (só visualizar)
-        </button>
-        <p className="muted peq" style={{ textAlign: 'center', marginBottom: 0 }}>
-          Convidados veem rankings e partidas. Lançamentos são feitos só pelos administradores.
+        <p className="muted peq" style={{ textAlign: 'center', margin: '16px 0 0' }}>
+          Acesso só para a turma: depois de criar a conta, o administrador da pelada aprova seu cadastro.
         </p>
         <p style={{ textAlign: 'center', margin: '10px 0 0' }}>
           <a href="/instalar" className="link">📲 Como instalar o app no celular</a>

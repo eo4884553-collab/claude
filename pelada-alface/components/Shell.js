@@ -23,6 +23,25 @@ const EXTRAS = [
   { href: '/instalar', ic: '📲', txt: 'Instalar no celular' },
 ];
 
+// cadastro feito, mas o dono ainda não liberou (ou recusou): não vê nenhum dado
+function AguardandoAprovacao() {
+  const { profile, refreshProfile, signOut } = useAuth();
+  const recusado = profile?.status === 'recusado';
+  return (
+    <div className="login-bg"><div className="login-card" style={{ marginTop: 70 }}>
+      <img className="logo" src="/logo.png" alt="" />
+      <h1>{recusado ? 'Acesso não liberado' : 'Aguardando aprovação'}</h1>
+      <p className="sub">
+        {recusado
+          ? 'O administrador da pelada não liberou o acesso desta conta. Fale com ele se achar que é engano.'
+          : <>Seu cadastro ({profile?.email}) foi recebido! Assim que o administrador da pelada aprovar, você vê rankings, artilharia e partidas.</>}
+      </p>
+      {!recusado && <button className="btn bloco" onClick={refreshProfile}>🔄 Já fui aprovado? Verificar</button>}
+      <button className="btn linha bloco" style={{ marginTop: 10 }} onClick={signOut}>Sair</button>
+    </div></div>
+  );
+}
+
 export default function Shell({ children }) {
   const path = usePathname();
   const auth = useAuth();
@@ -40,13 +59,14 @@ export default function Shell({ children }) {
     );
   }
   if (auth.loading) return <Carregando tela />;
-  if (!auth.canView) return <LoginScreen />;
+  if (!auth.session) return <LoginScreen />;
+  if (!auth.aprovado) return <AguardandoAprovacao />;
 
   const on = (href) => (href === '/' ? path === '/' : path.startsWith(href));
   const extras = [
     ...EXTRAS,
     ...(auth.isAdmin ? [{ href: '/admin', ic: '🛠️', txt: 'Administração (lançamentos)' }] : []),
-    { href: '/conta', ic: '👤', txt: auth.guest ? 'Entrar / criar conta' : 'Minha conta' },
+    { href: '/conta', ic: '👤', txt: 'Minha conta' },
   ];
 
   return (

@@ -4,15 +4,12 @@ import Link from 'next/link';
 import { useAuth } from '../../lib/auth';
 import { useData } from '../../lib/data';
 import { supabase } from '../../lib/supabaseClient';
-import LoginScreen from '../../components/LoginScreen';
 
 export default function Conta() {
   const auth = useAuth();
   const { raw } = useData();
   const [senha, setSenha] = useState('');
   const [msg, setMsg] = useState(null);
-
-  if (auth.guest) return <LoginScreen />;
 
   const p = auth.profile;
   const meu = raw.players.find((x) => x.id === p.player_id);
