@@ -31,7 +31,9 @@ export default function RootLayout({ children }) {
         <Providers>{children}</Providers>
         <script
           dangerouslySetInnerHTML={{
-            __html: "if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){})})}",
+            __html: "if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){})})}"
+              // guarda o convite de instalação do Chrome/Android para a tela /instalar usar
+              + "window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__aaInstall=e});",
           }}
         />
       </body>

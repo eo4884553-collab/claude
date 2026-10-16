@@ -117,6 +117,9 @@ export default function LoginScreen({ aposEntrar }) {
         <p className="muted peq" style={{ textAlign: 'center', marginBottom: 0 }}>
           Convidados veem rankings e partidas. Lançamentos são feitos só pelos administradores.
         </p>
+        <p style={{ textAlign: 'center', margin: '10px 0 0' }}>
+          <a href="/instalar" className="link">📲 Como instalar o app no celular</a>
+        </p>
       </div>
     </div>
   );
