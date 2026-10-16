@@ -539,8 +539,12 @@ function custosDefaults(){
     orcamentoAprovado:null, valorContratado:0, valorPago:0,
     dataPrevista:'', dataPagamento:'', status:'Não iniciado', comprovantes:[],
     responsavel: (spec.grupo==='Administrativo'||spec.grupo==='Contingência')?'Financeiro':(spec.grupo==='Marketing'?'Marketing':'Produção'), obs:'',
+    // de onde saiu o dinheiro desse pagamento: receita do próprio domínio (padrão) ou caixa geral
+    // da organização (ex.: adiantado antes do domínio ter arrecadado o suficiente)
+    origemPagamento: 'dominio',
   }));
 }
+const ORIGEM_PAGAMENTO_LABEL = {dominio:'Receita do domínio', caixa:'Caixa geral'};
 const RISK_CATS = ['Financeiro','Comercial','Ingressos','Patrocínio','Artista','Fornecedor','Infraestrutura','Segurança','Licenciamento','Clima','Marketing','Operação'];
 const RESPOSTAS = ['Mitigar','Aceitar','Transferir','Evitar'];
 const STATUS_RISCO = ['Aberto','Em andamento','Mitigado','Encerrado'];
@@ -865,6 +869,9 @@ function migrateState(){
   (state.custos||[]).forEach(c=>{
     if(!c.comprovantes) c.comprovantes = c.comprovantePath ? [c.comprovantePath] : [];
     delete c.comprovantePath;
+    // origem do pagamento (receita do domínio ou caixa geral) — itens salvos antes disso
+    // assumem "domínio" (era o único jeito implícito de antes dessa mudança)
+    if(!c.origemPagamento) c.origemPagamento = 'dominio';
   });
   // valor ja recebido em caixa de venda de ingressos — estados salvos antes disso nao tem esse campo
   if(state.venda && state.venda.valorRecebido===undefined) state.venda.valorRecebido = 0;
@@ -2324,6 +2331,7 @@ ACTIONS.addCostItem = (groupKey)=>{
     orcamentoAprovado:null, valorContratado:0, valorPago:0,
     dataPrevista:'', dataPagamento:'', status:'Não iniciado', comprovantes:[],
     responsavel: groupKey==='marketing' ? 'Marketing' : 'Produção', obs:'',
+    origemPagamento: 'dominio',
   });
   saveState(); render();
 };
@@ -2709,7 +2717,7 @@ VIEWS.custos = function(){
   const allSelected = cs.rows.length>0 && cs.rows.every(r=>selected[r.id]);
   let lastGroup = null;
   const rows = cs.rows.map((r,i)=>{
-    const groupHdr = r.grupo!==lastGroup ? `<tr class="section-hdr-row"><td colspan="14">${r.grupo}</td></tr>` : '';
+    const groupHdr = r.grupo!==lastGroup ? `<tr class="section-hdr-row"><td colspan="15">${r.grupo}</td></tr>` : '';
     lastGroup = r.grupo;
     const comprovantes = r.comprovantes||[];
     const comprovantesList = comprovantes.map((path,ci)=>`<span style="display:flex; align-items:center; gap:3px;">
@@ -2728,6 +2736,7 @@ VIEWS.custos = function(){
       <td class="num">${tblInput(`custos.${i}.orcamentoAprovado`, Math.round(r.orcAprovado), {type:'number', cls:'num'})}</td>
       <td class="num">${tblInput(`custos.${i}.valorContratado`, r.contratado, {type:'number', cls:'num'})}</td>
       <td class="num">${tblInput(`custos.${i}.valorPago`, r.pago, {type:'number', cls:'num'})}</td>
+      <td><select data-bind="custos.${i}.origemPagamento" title="De onde saiu o dinheiro desse pagamento">${Object.keys(ORIGEM_PAGAMENTO_LABEL).map(k=>`<option value="${k}" ${k===(r.origemPagamento||'dominio')?'selected':''}>${ORIGEM_PAGAMENTO_LABEL[k]}</option>`).join('')}</select></td>
       <td class="num mono">${fmtCur(r.saldo)}</td>
       <td><select id="${mkId('custos.'+i+'.status')}" data-bind="custos.${i}.status">${CUSTO_STATUS.map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}</select></td>
       <td>${tblInput(`custos.${i}.responsavel`, r.responsavel)}</td>
@@ -2773,11 +2782,11 @@ VIEWS.custos = function(){
 
   <div class="tablewrap">
     <table>
-      <thead><tr><th><input type="checkbox" data-action="toggleCustoSelectAll" ${allSelected?'checked':''} title="Selecionar/limpar todos"></th><th>Subcategoria</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th><th>Data de pagamento</th><th>Vencimento</th><th>Comprovante</th></tr></thead>
+      <thead><tr><th><input type="checkbox" data-action="toggleCustoSelectAll" ${allSelected?'checked':''} title="Selecionar/limpar todos"></th><th>Subcategoria</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th>Origem do pagamento</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th><th>Data de pagamento</th><th>Vencimento</th><th>Comprovante</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>
-  <div class="hint" style="margin-top:8px;">Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
+  <div class="hint" style="margin-top:8px;">Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
   <input type="file" id="custoComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
 };
 ACTIONS.toggleCustoSelect = (id)=>{
