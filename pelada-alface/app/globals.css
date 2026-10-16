@@ -386,3 +386,4 @@ h1, h2, h3 { font-family: var(--titulo); letter-spacing: 0.3px; margin: 0; }
   font-family: var(--titulo); font-weight: 800; font-size: 18px; display: grid; place-items: center;
 }
 .ic-ios { width: 22px; height: 22px; color: #0a84ff; vertical-align: middle; }
+.card.pendente { border-color: var(--ouro); box-shadow: 0 0 0 2px rgba(227,177,31,.25), var(--sombra); }

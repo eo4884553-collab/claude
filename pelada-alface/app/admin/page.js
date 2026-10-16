@@ -66,6 +66,12 @@ function Usuarios() {
   const carregar = () => supabase.from('profiles').select('*').order('created_at').then(({ data, error }) => { setLista(data || []); if (error) setErro(error.message); });
   useEffect(() => { carregar(); }, []);
 
+  async function definirStatus(p, novo) {
+    setErro('');
+    const { error } = await supabase.rpc('dono_definir_status', { target_id: p.id, novo_status: novo });
+    if (error) setErro(error.message); else carregar();
+  }
+
   async function salvar(p, campos) {
     setErro('');
     const n = { ...p, ...campos };
@@ -73,22 +79,34 @@ function Usuarios() {
     if (error) setErro(error.message); else carregar();
   }
   if (!lista) return null;
+  const ORDEM = { pendente: 0, aprovado: 1, recusado: 2 };
+  const ordenada = [...lista].sort((a, b) => (ORDEM[a.status] ?? 1) - (ORDEM[b.status] ?? 1));
+  const pendentes = lista.filter((p) => p.status === 'pendente').length;
   return (
     <>
       <p className="muted peq">
-        Todo cadastro novo entra como <b>Convidado</b> (só visualiza).{' '}
-        {souDono ? 'Promova aqui quem pode lançar partidas.' : 'Só o dono do app pode mudar quem é administrador.'}
+        Todo cadastro novo fica <b>aguardando aprovação</b> e não vê nada até {souDono ? 'você aprovar' : 'o dono aprovar'}.{' '}
+        {souDono ? 'Aqui você aprova, recusa e escolhe quem pode lançar partidas.' : 'Só o dono do app aprova cadastros e muda quem é administrador.'}
       </p>
+      {pendentes > 0 && <div className="achado">⏳ <b>{pendentes}</b> cadastro(s) aguardando aprovação.</div>}
       {erro && <div className="erro">{erro}</div>}
-      {lista.map((p) => (
-        <div key={p.id} className="card" style={{ display: 'grid', gap: 8 }}>
+      {ordenada.map((p) => (
+        <div key={p.id} className={`card ${p.status === 'pendente' ? 'pendente' : ''}`} style={{ display: 'grid', gap: 8 }}>
           <div>
             <b>{p.nome || p.email}</b>
             {p.dono && <span className="tag ouro">👑 dono</span>}
             {p.id === user.id && <span className="tag">você</span>}
-            <div className="muted peq">{p.email}</div>
+            {p.status === 'pendente' && <span className="tag ouro">⏳ aguardando</span>}
+            {p.status === 'recusado' && <span className="tag" style={{ background: '#fde8e8', color: 'var(--vermelho)' }}>recusado</span>}
+            <div className="muted peq">{p.email} · cadastro em {new Date(p.created_at).toLocaleDateString('pt-BR')}</div>
           </div>
-          <div className="grid2">
+          {souDono && !p.dono && p.status !== 'aprovado' && (
+            <div className="linha-acoes">
+              <button className="btn peq" onClick={() => definirStatus(p, 'aprovado')}>✅ Aprovar</button>
+              {p.status !== 'recusado' && <button className="btn perigo peq" onClick={() => definirStatus(p, 'recusado')}>✕ Recusar</button>}
+            </div>
+          )}
+          {p.status === 'aprovado' && <div className="grid2">
             {souDono && !p.dono ? (
               <select className="inp" value={p.role} onChange={(e) => salvar(p, { role: e.target.value })}>
                 <option value="convidado">👀 Convidado</option>
@@ -101,7 +119,13 @@ function Usuarios() {
               <option value="">— atleta —</option>
               {[...raw.players].sort((a, b) => a.nome.localeCompare(b.nome)).map((x) => <option key={x.id} value={x.id}>{x.nome}</option>)}
             </select>
-          </div>
+          </div>}
+          {souDono && !p.dono && p.status === 'aprovado' && (
+            <button className="link" style={{ justifySelf: 'start', color: 'var(--vermelho)' }}
+              onClick={() => confirm(`Bloquear o acesso de ${p.nome || p.email}?`) && definirStatus(p, 'recusado')}>
+              Bloquear acesso
+            </button>
+          )}
         </div>
       ))}
     </>
@@ -134,7 +158,7 @@ function Admin() {
   const { isAdmin } = useAuth();
   const params = useSearchParams();
   const editar = params.get('editar');
-  const [aba, setAba] = useState('lancar');
+  const [aba, setAba] = useState(params.get('aba') || 'lancar');
   useEffect(() => { if (editar) setAba('lancar'); }, [editar]);
 
   if (!isAdmin) return <Vazio ic="🔒">Área exclusiva dos administradores.</Vazio>;

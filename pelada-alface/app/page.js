@@ -1,14 +1,31 @@
 'use client';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { supabase } from '../lib/supabaseClient';
 import { useData } from '../lib/data';
 import { useAuth } from '../lib/auth';
 import { dataBR, dec, pct, proximoSabado } from '../lib/stats';
 import { Avatar, Forma, Vazio } from '../components/ui';
 import CartaoPartida from '../components/CartaoPartida';
 
+// só para o dono: avisa quando tem gente esperando aprovação
+function AvisoPendentes() {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('status', 'pendente')
+      .then(({ count }) => setN(count || 0));
+  }, []);
+  if (!n) return null;
+  return (
+    <Link href="/admin?aba=usuarios" className="achado" style={{ display: 'block', marginBottom: 14 }}>
+      ⏳ <b>{n} cadastro{n > 1 ? 's' : ''}</b> aguardando sua aprovação — toque para ver ›
+    </Link>
+  );
+}
+
 export default function Inicio() {
   const { stats, ano } = useData();
-  const { myPlayerId, profile } = useAuth();
+  const { myPlayerId, profile, isDono } = useAuth();
   if (!stats.partidas.length) {
     return <Vazio>Nenhuma partida lançada em {ano} ainda.</Vazio>;
   }
@@ -21,6 +38,7 @@ export default function Inicio() {
 
   return (
     <>
+      {isDono && <AvisoPendentes />}
       {lider && (
         <Link href={`/jogador/${lider.id}`} className="heroi" style={{ display: 'block' }}>
           <span className="selo">👑 Craque do aproveitamento {ano}</span>

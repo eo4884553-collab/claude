@@ -1,6 +1,7 @@
 'use client';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { supabase } from './supabaseClient';
+import { useAuth } from './auth';
 import { calcular, temporadas } from './stats';
 
 // carrega tudo de uma vez (uma temporada inteira tem ~50 rodadas x ~35 atletas,
@@ -23,6 +24,7 @@ export function DataProvider({ children }) {
   const [raw, setRaw] = useState(null);
   const [error, setError] = useState('');
   const [ano, setAnoState] = useState(new Date().getFullYear());
+  const { user, aprovado } = useAuth();
 
   const reload = useCallback(async () => {
     if (!supabase) return;
@@ -45,8 +47,13 @@ export function DataProvider({ children }) {
       const salvo = localStorage.getItem(ANO_KEY);
       if (salvo) setAnoState(salvo === 'todas' ? 'todas' : Number(salvo));
     } catch {}
-    reload();
-  }, [reload]);
+  }, []);
+
+  // os dados só são liberados (no banco) para quem o dono aprovou: carrega ao
+  // entrar/ser aprovado e limpa ao sair
+  useEffect(() => {
+    if (user && aprovado) reload(); else setRaw(null);
+  }, [user?.id, aprovado, reload]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setAno = useCallback((a) => {
     setAnoState(a);
