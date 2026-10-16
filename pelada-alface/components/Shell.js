@@ -8,7 +8,7 @@ import { supabaseConfigured } from '../lib/supabaseClient';
 import LoginScreen from './LoginScreen';
 import { Carregando } from './ui';
 
-const ABERTAS = ['/login', '/redefinir-senha'];
+const ABERTAS = ['/login', '/redefinir-senha', '/instalar'];
 
 const PRINCIPAIS = [
   { href: '/', ic: '🏠', txt: 'Início' },
@@ -20,6 +20,7 @@ const EXTRAS = [
   { href: '/cartoes', ic: '🟨', txt: 'Cartões' },
   { href: '/goleiros', ic: '🧤', txt: 'Goleiros' },
   { href: '/sorteio', ic: '🎲', txt: 'Sorteio de times' },
+  { href: '/instalar', ic: '📲', txt: 'Instalar no celular' },
 ];
 
 export default function Shell({ children }) {
@@ -58,7 +59,7 @@ export default function Shell({ children }) {
             <span>Pelada de sábado · desde 1997</span>
           </div>
           <nav className="nav-desk">
-            {[...PRINCIPAIS, ...EXTRAS].map((l) => (
+            {[...PRINCIPAIS, ...EXTRAS.filter((l) => l.href !== '/instalar')].map((l) => (
               <Link key={l.href} href={l.href} className={on(l.href) ? 'on' : ''}>{l.txt.split(' ')[0]}</Link>
             ))}
             {auth.isAdmin && <Link href="/admin" className={on('/admin') ? 'on' : ''}>Admin</Link>}
