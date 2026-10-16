@@ -59,7 +59,8 @@ function Jogadores() {
 
 function Usuarios() {
   const { raw } = useData();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const souDono = !!profile?.dono;
   const [lista, setLista] = useState(null);
   const [erro, setErro] = useState('');
   const carregar = () => supabase.from('profiles').select('*').order('created_at').then(({ data, error }) => { setLista(data || []); if (error) setErro(error.message); });
@@ -74,16 +75,28 @@ function Usuarios() {
   if (!lista) return null;
   return (
     <>
-      <p className="muted peq">Todo cadastro novo entra como <b>Convidado</b> (só visualiza). Promova aqui quem pode lançar partidas.</p>
+      <p className="muted peq">
+        Todo cadastro novo entra como <b>Convidado</b> (só visualiza).{' '}
+        {souDono ? 'Promova aqui quem pode lançar partidas.' : 'Só o dono do app pode mudar quem é administrador.'}
+      </p>
       {erro && <div className="erro">{erro}</div>}
       {lista.map((p) => (
         <div key={p.id} className="card" style={{ display: 'grid', gap: 8 }}>
-          <div><b>{p.nome || p.email}</b>{p.id === user.id && <span className="tag">você</span>}<div className="muted peq">{p.email}</div></div>
+          <div>
+            <b>{p.nome || p.email}</b>
+            {p.dono && <span className="tag ouro">👑 dono</span>}
+            {p.id === user.id && <span className="tag">você</span>}
+            <div className="muted peq">{p.email}</div>
+          </div>
           <div className="grid2">
-            <select className="inp" value={p.role} onChange={(e) => salvar(p, { role: e.target.value })}>
-              <option value="convidado">👀 Convidado</option>
-              <option value="admin">🛠️ Administrador</option>
-            </select>
+            {souDono && !p.dono ? (
+              <select className="inp" value={p.role} onChange={(e) => salvar(p, { role: e.target.value })}>
+                <option value="convidado">👀 Convidado</option>
+                <option value="admin">🛠️ Administrador</option>
+              </select>
+            ) : (
+              <span className="inp" style={{ background: '#f6faf7' }}>{p.role === 'admin' ? '🛠️ Administrador' : '👀 Convidado'}</span>
+            )}
             <select className="inp" value={p.player_id || ''} onChange={(e) => salvar(p, { player_id: e.target.value })}>
               <option value="">— atleta —</option>
               {[...raw.players].sort((a, b) => a.nome.localeCompare(b.nome)).map((x) => <option key={x.id} value={x.id}>{x.nome}</option>)}

@@ -13,8 +13,11 @@ create table if not exists public.profiles (
   nome text,
   role text not null default 'convidado' check (role in ('admin','convidado')),
   player_id uuid,
+  -- o dono é o único que promove/rebaixa administradores (ver admin_update_profile)
+  dono boolean not null default false,
   created_at timestamptz not null default now()
 );
+alter table public.profiles add column if not exists dono boolean not null default false;
 
 alter table public.profiles enable row level security;
 
@@ -129,17 +132,25 @@ create trigger on_auth_user_created
 -- ============================================================
 -- 6) FUNÇÕES DO APP
 -- ============================================================
--- admin troca o papel de alguém (admin <-> convidado) e/ou vincula a um jogador
+-- só o DONO do app promove/rebaixa administradores; qualquer admin pode
+-- vincular um usuário ao atleta correspondente
 create or replace function public.admin_update_profile(target_id uuid, new_role text, new_player_id uuid)
 returns void
 language plpgsql
 security definer set search_path = public
 as $$
+declare
+  atual public.profiles;
 begin
   if not public.is_admin() then raise exception 'Apenas administradores.'; end if;
   if new_role not in ('admin','convidado') then raise exception 'Papel inválido'; end if;
-  if target_id = auth.uid() and new_role <> 'admin' then
-    raise exception 'Você não pode tirar seu próprio acesso de administrador.';
+  select * into atual from public.profiles where id = target_id;
+  if not found then raise exception 'Usuário não encontrado.'; end if;
+  if new_role <> atual.role then
+    if not exists (select 1 from public.profiles where id = auth.uid() and dono) then
+      raise exception 'Só o dono do app pode mudar quem é administrador.';
+    end if;
+    if atual.dono then raise exception 'O dono do app continua sempre administrador.'; end if;
   end if;
   update public.profiles set role = new_role, player_id = new_player_id where id = target_id;
 end;
@@ -244,4 +255,6 @@ create policy "sumulas_admin_delete" on storage.objects
 -- rode isto uma única vez (troque o e-mail) — dali em diante você promove os
 -- outros administradores direto pela tela "Usuários" do app:
 --
---   update public.profiles set role = 'admin' where email = 'seu-email@exemplo.com';
+--   update public.profiles set role = 'admin', dono = true where email = 'seu-email@exemplo.com';
+--
+-- O "dono" é o único que promove/rebaixa administradores pela tela Usuários.
