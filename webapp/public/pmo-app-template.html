@@ -684,6 +684,15 @@ if(PROJECT_ID==='bateria-piquinzada' && state.venda && !READONLY){
   const pagoAgora = contribuintesBateriaTotalPago();
   if(Number(state.venda.valorRecebido)!==pagoAgora) saveState();
 }
+// mesmo esquema pra Feijoada: corrige o total salvo (usado no saldo de caixa compartilhado) se
+// alguém pagou/cadastrou mesa desde a última vez que um admin salvou — só funciona com admin
+// logado (igual Bateria acima; convidado não grava em project_state, só na mesa em si).
+if(PROJECT_ID==='feijoada-bloco' && state.venda && !READONLY){
+  const b = mesasFeijoadaVendaBreakdown();
+  const vendidosCertos = (Number(state.venda.vendidosHojeLote1)||0) + b.ingressos;
+  const valorCerto = (Number(state.venda.valorRecebidoLote1)||0) + b.valor;
+  if(Number(state.venda.vendidosHoje)!==vendidosCertos || Number(state.venda.valorRecebido)!==valorCerto) saveState();
+}
 initSaveStatusText();
 if(READONLY && typeof document!=='undefined') document.documentElement.classList.add('pq-readonly');
 if(HOSTED && typeof document!=='undefined') document.documentElement.classList.add('pq-hosted');
@@ -864,6 +873,15 @@ function migrateState(){
   // existir mas com menos de 100 (ex.: versao antiga com outro numero), completa o que falta
   if(!state.mesasFeijoada) state.mesasFeijoada = freshMesasFeijoada();
   else { for(let n=state.mesasFeijoada.length+1; n<=100; n++) state.mesasFeijoada.push(freshMesa(n)); }
+  // Feijoada do Bloco: a partir de agora "Ingressos vendidos"/"Valor recebido" em Vendas somam
+  // automaticamente as mesas já pagas (4 ingressos cada, ver syncVendaFeijoada), separado do que
+  // é vendido fora das mesas ("1º lote"). O que já estava lançado em vendidosHoje/valorRecebido
+  // vira a base do 1º lote — se esse número já contava mesas somadas na mão, dá pra ajustar o
+  // campo "1º lote" uma vez na aba Vendas depois desse update, pra não ficar contando em dobro.
+  if(PROJECT_ID==='feijoada-bloco' && state.venda){
+    if(state.venda.vendidosHojeLote1===undefined) state.venda.vendidosHojeLote1 = Number(state.venda.vendidosHoje)||0;
+    if(state.venda.valorRecebidoLote1===undefined) state.venda.valorRecebidoLote1 = Number(state.venda.valorRecebido)||0;
+  }
 
   // Fluxo de Caixa: cada linha (entrada ou saida) precisa de 1 valor por mes em MESES.
   // Sempre que MESES ganha uma linha nova (ex.: "Restituições de caixa aprovadas") ou
@@ -945,6 +963,9 @@ function saveState(){
   if(PROJECT_ID==='bateria-piquinzada' && state.venda){
     state.venda.valorRecebido = contribuintesBateriaTotalPago();
   }
+  // mesmo ponto unico de gravacao, pra Feijoada: mantem o total persistido (usado no saldo de
+  // caixa compartilhado entre domínios) = 1º lote + mesas pagas (ver syncVendaFeijoada acima)
+  syncVendaFeijoada();
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
   if(HOSTED){
     markSaveStatus('saving');
@@ -1176,7 +1197,12 @@ function computeVendaTracking(){
   const hoje = todayISO();
   const diasDecorridos = Math.max(1, daysBetween(v.dataInicio, hoje));
   const diasRestantes = Math.max(0, daysBetween(hoje, v.dataEvento));
-  const vendidos = Number(v.vendidosHoje)||0;
+  // Feijoada: calcula ao vivo (1º lote lançado à mão + mesas pagas agora), pra quem estiver
+  // olhando nunca ver um número desatualizado — v.vendidosHoje (só sincronizado quando um admin
+  // salva, ver syncVendaFeijoada) só serve pro saldo de caixa compartilhado entre domínios.
+  const vendidos = PROJECT_ID==='feijoada-bloco'
+    ? (Number(v.vendidosHojeLote1)||0) + mesasFeijoadaVendaBreakdown().ingressos
+    : Number(v.vendidosHoje)||0;
   const metaVendas = cs.pagantes;
   const gap = metaVendas - vendidos;
   const velocidade = vendidos/diasDecorridos;
@@ -1366,6 +1392,26 @@ function mesasFeijoadaDatedAmounts(kind){
 // a distribuir pela %, só mostra o que realmente já entrou, no mês em que entrou
 function mesasFeijoadaTotalAnual(){
   return sum((state.mesasFeijoada||[]).filter(m=>m.dataPagamento).map(m=> Number(m.valorPago)||0));
+}
+// quanto as mesas já PAGAS da Feijoada contribuem pra Vendas — cada mesa vira 4 ingressos,
+// e o valor pago por ela conta como receita. Usa mesaEffectiveStatus (igual ao resto do app:
+// mesa com data/valor de pagamento conta como paga mesmo se o campo status ainda não foi salvo).
+function mesasFeijoadaVendaBreakdown(){
+  let ingressos = 0, valor = 0;
+  (state.mesasFeijoada||[]).forEach(m=>{
+    if(mesaEffectiveStatus(m)==='paga'){ ingressos += 4; valor += Number(m.valorPago)||0; }
+  });
+  return {ingressos, valor};
+}
+// mantem venda.vendidosHoje/valorRecebido (usados em Vendas, Dashboard e no saldo de caixa
+// compartilhado entre domínios) sempre como o TOTAL = "1º lote" (vendido fora das mesas,
+// lançado à mão) + o que as mesas pagas já somam — mesmo padrão de ponto único de sincronização
+// já usado pra Bateria (ver saveState). Só se aplica ao domínio Feijoada do Bloco.
+function syncVendaFeijoada(){
+  if(PROJECT_ID!=='feijoada-bloco' || !state.venda) return;
+  const b = mesasFeijoadaVendaBreakdown();
+  state.venda.vendidosHoje = (Number(state.venda.vendidosHojeLote1)||0) + b.ingressos;
+  state.venda.valorRecebido = (Number(state.venda.valorRecebidoLote1)||0) + b.valor;
 }
 // converte a lista [{mes,valor}] (pagamentos/parcelas já datados) num array de 15 posições,
 // um valor por mês — usado tanto pro calculo do fluxo quanto pra sinalizar na tela quais meses
@@ -2334,15 +2380,34 @@ VIEWS.vendas = function(){
       <div class="gridN">
         ${fld('Data de início das vendas', 'venda.dataInicio', {kind:'date'})}
         ${fld('Data do evento', 'venda.dataEvento', {kind:'date'})}
-        ${fld('Ingressos vendidos até hoje', 'venda.vendidosHoje', {kind:'int'})}
+        ${PROJECT_ID==='feijoada-bloco' ? '' : fld('Ingressos vendidos até hoje', 'venda.vendidosHoje', {kind:'int'})}
         ${PROJECT_ID==='bateria-piquinzada'
           ? `<label class="field"><span class="lbl">Valor já recebido em caixa</span>
               <input type="text" value="${fmtCur(contribuintesBateriaTotalPago())}" readonly>
             </label>`
-          : fld('Valor já recebido em caixa (ingressos)', 'venda.valorRecebido', {kind:'currency'})}
+          : PROJECT_ID==='feijoada-bloco' ? '' : fld('Valor já recebido em caixa (ingressos)', 'venda.valorRecebido', {kind:'currency'})}
       </div>
+      ${PROJECT_ID==='feijoada-bloco' ? (()=>{
+        const mesasVB = mesasFeijoadaVendaBreakdown();
+        const totalIngressos = (Number(state.venda.vendidosHojeLote1)||0) + mesasVB.ingressos;
+        const totalValor = (Number(state.venda.valorRecebidoLote1)||0) + mesasVB.valor;
+        return `<div class="gridN" style="margin-top:12px;">
+          ${fld('Ingressos vendidos (1º lote, fora das mesas)', 'venda.vendidosHojeLote1', {kind:'int'})}
+          ${fld('Valor recebido (1º lote)', 'venda.valorRecebidoLote1', {kind:'currency'})}
+          <label class="field"><span class="lbl">Ingressos via mesas pagas</span>
+            <input type="text" value="${fmtInt(mesasVB.ingressos)}" readonly></label>
+          <label class="field"><span class="lbl">Valor recebido via mesas</span>
+            <input type="text" value="${fmtCur(mesasVB.valor)}" readonly></label>
+          <label class="field"><span class="lbl">Total de ingressos vendidos</span>
+            <input type="text" value="${fmtInt(totalIngressos)}" readonly style="font-weight:700;"></label>
+          <label class="field"><span class="lbl">Total recebido em caixa</span>
+            <input type="text" value="${fmtCur(totalValor)}" readonly style="font-weight:700;"></label>
+        </div>`;
+      })() : ''}
       <div class="hint" style="margin-top:6px;">${PROJECT_ID==='bateria-piquinzada'
         ? '"Valor já recebido" aqui é calculado automaticamente: a soma do que os integrantes da Bateria já pagaram (parcelas com data de pagamento em "Pagamentos por pessoa", mais abaixo) — soma no saldo de caixa compartilhado entre todos os domínios (ver Fluxo de Caixa).'
+        : PROJECT_ID==='feijoada-bloco'
+        ? 'Cada mesa paga (aba Mesas) conta automaticamente como 4 ingressos — some aqui só o que foi vendido FORA das mesas ("1º lote"). O total (em negrito) já soma os dois e é o que entra no saldo de caixa compartilhado entre todos os domínios (ver Fluxo de Caixa).'
         : '"Valor já recebido" é o que de fato entrou no caixa — soma no saldo de caixa compartilhado entre todos os domínios (ver Fluxo de Caixa).'}</div>
       <div class="divider"></div>
       <div class="gridN">
