@@ -352,3 +352,20 @@ h1, h2, h3 { font-family: var(--titulo); letter-spacing: 0.3px; margin: 0; }
 .bola-gira { width: 46px; height: 46px; border-radius: 50%; background: #fff; padding: 2px; animation: gira 1s linear infinite; margin: 0 auto 10px; display: block; }
 @keyframes gira { to { transform: rotate(360deg); } }
 .grid2 > .card, .grid4 > .card { margin-top: 0; }
+
+/* ---------- salvamento (lançamento) ---------- */
+.placar-vivo { flex-wrap: wrap; }
+.status-salvo {
+  flex-basis: 100%; text-align: center; font-family: var(--corpo); font-size: 12px; font-weight: 600;
+  letter-spacing: .2px; opacity: .85; margin-top: -4px;
+}
+.status-salvo.erro { color: #ffb4b4; opacity: 1; }
+.fab-salvar {
+  position: fixed; right: 18px; bottom: calc(env(safe-area-inset-bottom) + 82px); z-index: 45;
+  width: 58px; height: 58px; border-radius: 50%; border: 0; font-size: 26px;
+  background: var(--verde); color: #fff; box-shadow: 0 8px 22px rgba(6,55,28,.35);
+  display: grid; place-items: center;
+}
+.fab-salvar.pend { background: var(--ouro); box-shadow: 0 8px 22px rgba(211,158,15,.45); }
+.fab-salvar:disabled { opacity: .7; }
+@media (min-width: 900px) { .fab-salvar { bottom: 28px; right: 28px; } }

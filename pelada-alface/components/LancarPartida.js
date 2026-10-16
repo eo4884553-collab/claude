@@ -79,6 +79,17 @@ function ColunaTime({ time, linhas, setLinhas, conhecidos, extra, setExtra }) {
   );
 }
 
+function StatusSalvo({ status, pendente, novo }) {
+  let txt;
+  if (status.tipo === 'salvando') txt = 'Salvando…';
+  else if (status.tipo === 'erro') txt = '⚠️ Não salvou — toque no 💾';
+  else if (pendente && status.tipo === 'incompleto') txt = 'Salva quando os 2 times tiverem atletas';
+  else if (pendente) txt = 'Alterações pendentes…';
+  else if (novo) txt = 'Ainda não salva';
+  else txt = `✓ Salvo${status.hora ? ' ' + status.hora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''}`;
+  return <span className={`status-salvo ${status.tipo === 'erro' ? 'erro' : ''}`} title={status.texto || ''}>{txt}</span>;
+}
+
 export default function LancarPartida({ editarId }) {
   const { raw, reload } = useData();
   const router = useRouter();
@@ -91,10 +102,15 @@ export default function LancarPartida({ editarId }) {
   const [obs, setObs] = useState('');
   const [foto, setFoto] = useState(null); // {blob,b64,url}
   const [lendo, setLendo] = useState(false);
-  const [salvando, setSalvando] = useState(false);
+  const [matchId, setMatchId] = useState(editarId || null); // vira o id da rodada depois do 1º salvamento
+  const [fotoUrl, setFotoUrl] = useState(null);
+  const [status, setStatus] = useState({ tipo: 'ok' }); // ok | pendente | salvando | erro | incompleto
   const [msg, setMsg] = useState(null);
   const [aviso, setAviso] = useState('');
   const inputFoto = useRef();
+  const salvoRef = useRef(null);   // retrato do formulário na última gravação
+  const emAndamento = useRef(null); // promessa da gravação em curso (nunca grava duas ao mesmo tempo)
+  const timer = useRef();
 
   const conhecidos = useMemo(() => {
     const m = new Map(raw.players.map((p) => [normaliza(p.nome), p.nome]));
@@ -111,11 +127,22 @@ export default function LancarPartida({ editarId }) {
     setObs(existente.observacoes || '');
     setLinhas(raw.matchPlayers.filter((l) => l.match_id === existente.id)
       .map((l) => nova(l.time, nomes.get(l.player_id), { goleiro: l.goleiro, gols: l.gols, amarelos: l.amarelos, vermelhos: l.vermelhos })));
+    salvoRef.current = 'carregando'; // o primeiro retrato depois de carregar vira o "já salvo"
   }, [existente?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const placarB = extraB + linhas.filter((l) => l.time === 'branco').reduce((t, l) => t + l.gols, 0);
   const placarV = extraV + linhas.filter((l) => l.time === 'verde').reduce((t, l) => t + l.gols, 0);
-  const dataOcupada = raw.matches.find((m) => m.data === data && m.id !== editarId);
+  const dataOcupada = raw.matches.find((m) => m.data === data && m.id !== matchId);
+
+  // tudo que precisa ser gravado, num texto só: se mudou desde a última gravação, há algo pendente
+  const retrato = JSON.stringify({
+    data, extraB, extraV, obs: obs.trim(), fotoUrl,
+    linhas: linhas.map(({ nome, time, goleiro, gols, amarelos, vermelhos }) => ({ nome, time, goleiro, gols, amarelos, vermelhos })),
+  });
+  if (salvoRef.current === 'carregando' && existente) salvoRef.current = retrato;
+  const pendente = salvoRef.current !== retrato;
+  const atual = useRef();
+  atual.current = { retrato, data, extraB, extraV, obs, linhas, foto, fotoUrl, matchId, dataOcupada };
 
   async function lerFoto(file) {
     if (!file) return;
@@ -139,7 +166,7 @@ export default function LancarPartida({ editarId }) {
       setExtraV(j.gols_sem_autor_verde || 0);
       if (/^\d{4}-\d{2}-\d{2}$/.test(j.data)) setData(j.data);
       setAviso(j.observacoes || '');
-      setMsg({ ok: `Foto lida: ${j.branco.length + j.verde.length} atletas. Confira tudo abaixo antes de salvar.` });
+      setMsg({ ok: `Foto lida: ${j.branco.length + j.verde.length} atletas. Já foi salva — confira e corrija o que precisar.` });
     } catch (e) {
       setMsg({ erro: e.message });
     } finally {
@@ -147,38 +174,89 @@ export default function LancarPartida({ editarId }) {
     }
   }
 
-  async function salvar() {
-    setMsg(null);
-    if (!linhas.length) { setMsg({ erro: 'Adicione os atletas dos dois times.' }); return; }
-    setSalvando(true);
-    try {
-      let fotoUrl = null;
-      if (foto?.blob) {
-        const caminho = `${data}-${Date.now()}.jpg`;
-        const up = await supabase.storage.from('sumulas').upload(caminho, foto.blob, { contentType: 'image/jpeg' });
-        if (!up.error) fotoUrl = supabase.storage.from('sumulas').getPublicUrl(caminho).data.publicUrl;
+  // grava o estado atual. auto=true: chamada pelo salvamento automático (fica quieta se o
+  // formulário ainda está incompleto); auto=false: ícone 💾 / botão concluir
+  async function gravar(auto) {
+    if (emAndamento.current) await emAndamento.current.catch(() => {});
+    const f = atual.current;
+    if (salvoRef.current === f.retrato && f.matchId) return true;
+    const temDois = f.linhas.some((l) => l.time === 'branco') && f.linhas.some((l) => l.time === 'verde');
+    if (!temDois || f.dataOcupada) {
+      if (auto) { setStatus({ tipo: 'incompleto' }); return false; }
+      setMsg({ erro: f.dataOcupada ? `Já existe rodada em ${dataBR(f.data)}.` : 'Adicione atletas nos dois times antes de salvar.' });
+      return false;
+    }
+    setStatus({ tipo: 'salvando' });
+    const tarefa = (async () => {
+      let url = f.fotoUrl;
+      if (f.foto?.blob && !url) {
+        const caminho = `${f.data}-${Date.now()}.jpg`;
+        const up = await supabase.storage.from('sumulas').upload(caminho, f.foto.blob, { contentType: 'image/jpeg' });
+        if (!up.error) { url = supabase.storage.from('sumulas').getPublicUrl(caminho).data.publicUrl; setFotoUrl(url); }
       }
-      const { error } = await supabase.rpc('admin_save_match', {
-        p_match_id: editarId || null,
-        p_data: data,
-        p_extra_branco: extraB,
-        p_extra_verde: extraV,
-        p_obs: obs.trim() || null,
-        p_foto: fotoUrl,
-        p_players: linhas.map(({ nome, time, goleiro, gols, amarelos, vermelhos }) => ({ nome, time, goleiro, gols, amarelos, vermelhos })),
+      const { data: id, error } = await supabase.rpc('admin_save_match', {
+        p_match_id: f.matchId,
+        p_data: f.data,
+        p_extra_branco: f.extraB,
+        p_extra_verde: f.extraV,
+        p_obs: f.obs.trim() || null,
+        p_foto: url,
+        p_players: f.linhas.map(({ nome, time, goleiro, gols, amarelos, vermelhos }) => ({ nome, time, goleiro, gols, amarelos, vermelhos })),
       });
       if (error) throw error;
+      setMatchId(id);
+      atual.current.matchId = id;
+      // a foto acabou de entrar no retrato; grava o retrato já com ela
+      salvoRef.current = url === f.fotoUrl ? f.retrato : JSON.stringify({ ...JSON.parse(f.retrato), fotoUrl: url });
       await reload();
-      router.push('/partidas');
+    })();
+    emAndamento.current = tarefa;
+    try {
+      await tarefa;
+      setStatus({ tipo: 'ok', hora: new Date() });
+      setMsg((m) => (m?.erro ? null : m));
+      return true;
     } catch (e) {
-      setMsg({ erro: e.message });
-      setSalvando(false);
+      setStatus({ tipo: 'erro', texto: e.message });
+      if (!auto) setMsg({ erro: e.message });
+      return false;
+    } finally {
+      if (emAndamento.current === tarefa) emAndamento.current = null;
     }
   }
 
+  // salvamento automático: 1,5 s depois da última mudança
+  useEffect(() => {
+    if (!pendente) return undefined;
+    setStatus((st) => (st.tipo === 'salvando' ? st : { tipo: 'pendente' }));
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => gravar(true), 1500);
+    return () => clearTimeout(timer.current);
+  }, [retrato]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // avisa antes de fechar a página com algo ainda não gravado
+  useEffect(() => {
+    const aviso = (e) => { if (salvoRef.current !== atual.current.retrato) { e.preventDefault(); e.returnValue = ''; } };
+    window.addEventListener('beforeunload', aviso);
+    return () => window.removeEventListener('beforeunload', aviso);
+  }, []);
+
+  async function salvarAgora() {
+    clearTimeout(timer.current);
+    setMsg(null);
+    if (await gravar(false)) setMsg({ ok: 'Rodada salva.' });
+  }
+
+  async function concluir() {
+    clearTimeout(timer.current);
+    if (await gravar(false)) router.push('/partidas');
+  }
+
   async function excluir() {
-    if (!confirm(`Excluir a rodada de ${dataBR(existente.data)}? Isso recalcula todos os rankings.`)) return;
-    const { error } = await supabase.from('matches').delete().eq('id', existente.id);
+    if (!confirm(`Excluir a rodada de ${dataBR(data)}? Isso recalcula todos os rankings.`)) return;
+    clearTimeout(timer.current);
+    if (emAndamento.current) await emAndamento.current.catch(() => {});
+    const { error } = await supabase.from('matches').delete().eq('id', atual.current.matchId);
     if (error) { setMsg({ erro: error.message }); return; }
     await reload();
     router.push('/partidas');
@@ -193,7 +271,7 @@ export default function LancarPartida({ editarId }) {
       {!existente && (
         <div className="card foto-drop">
           <b>📷 Lançar por foto da súmula</b>
-          <p className="muted peq" style={{ margin: '4px 0 10px' }}>Tire foto do papel/quadro com os times e gols. O app lê e preenche tudo; você só confere e salva.</p>
+          <p className="muted peq" style={{ margin: '4px 0 10px' }}>Tire foto do papel/quadro com os times e gols. O app lê, preenche e salva sozinho; você só confere.</p>
           <input ref={inputFoto} type="file" accept="image/*" hidden onChange={(e) => lerFoto(e.target.files[0])} />
           <button type="button" className="btn" disabled={lendo} onClick={() => inputFoto.current.click()}>
             {lendo ? 'Lendo a foto… (até 1 min)' : 'Escolher / tirar foto'}
@@ -219,22 +297,32 @@ export default function LancarPartida({ editarId }) {
 
       <div className="placar-vivo" style={{ marginTop: 14 }}>
         <span className="camisa branco" /> {placarB} <span style={{ fontSize: 16, opacity: .7 }}>×</span> {placarV} <span className="camisa verde" />
+        <StatusSalvo status={status} pendente={pendente} novo={!matchId} />
       </div>
 
       <div className="lanc-times">
         <ColunaTime time="branco" linhas={linhas} setLinhas={setLinhas} conhecidos={conhecidos} extra={extraB} setExtra={setExtraB} />
         <ColunaTime time="verde" linhas={linhas} setLinhas={setLinhas} conhecidos={conhecidos} extra={extraV} setExtra={setExtraV} />
       </div>
-      <p className="muted peq">Atletas marcados <em className="novo">NOVO</em> serão cadastrados ao salvar. Marque <span className="gk on">GOL</span> no goleiro: ele vai para o ranking de goleiros.</p>
+      <p className="muted peq">Tudo é salvo sozinho enquanto você lança (ou toque no 💾 para salvar na hora). Atletas marcados <em className="novo">NOVO</em> são cadastrados ao salvar. Marque <span className="gk on">GOL</span> no goleiro: ele vai para o ranking de goleiros.</p>
 
       {msg?.erro && <div className="erro">{msg.erro}</div>}
       {msg?.ok && <div className="ok">{msg.ok}</div>}
       <div className="linha-acoes" style={{ marginTop: 14 }}>
-        <button className="btn" disabled={salvando || !!dataOcupada} onClick={salvar}>
-          {salvando ? 'Salvando…' : existente ? '💾 Salvar alterações' : '💾 Salvar rodada'}
-        </button>
-        {existente && <button className="btn perigo" onClick={excluir}>Excluir rodada</button>}
+        <button className="btn" disabled={status.tipo === 'salvando' || !!dataOcupada} onClick={concluir}>✅ Concluir rodada</button>
+        {matchId && <button className="btn perigo" onClick={excluir}>{existente ? 'Excluir rodada' : 'Descartar rodada'}</button>}
       </div>
+
+      <button
+        type="button"
+        className={`fab-salvar ${pendente ? 'pend' : ''}`}
+        onClick={salvarAgora}
+        disabled={status.tipo === 'salvando'}
+        aria-label="Salvar agora"
+        title="Salvar agora"
+      >
+        {status.tipo === 'salvando' ? '⏳' : '💾'}
+      </button>
     </>
   );
 }
