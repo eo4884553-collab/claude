@@ -864,6 +864,15 @@ function migrateState(){
   // existir mas com menos de 100 (ex.: versao antiga com outro numero), completa o que falta
   if(!state.mesasFeijoada) state.mesasFeijoada = freshMesasFeijoada();
   else { for(let n=state.mesasFeijoada.length+1; n<=100; n++) state.mesasFeijoada.push(freshMesa(n)); }
+  // Feijoada do Bloco: a partir de agora "Ingressos vendidos"/"Valor recebido" em Vendas somam
+  // automaticamente as mesas já pagas (4 ingressos cada, ver syncVendaFeijoada), separado do que
+  // é vendido fora das mesas ("1º lote"). O que já estava lançado em vendidosHoje/valorRecebido
+  // vira a base do 1º lote — se esse número já contava mesas somadas na mão, dá pra ajustar o
+  // campo "1º lote" uma vez na aba Vendas depois desse update, pra não ficar contando em dobro.
+  if(PROJECT_ID==='feijoada-bloco' && state.venda){
+    if(state.venda.vendidosHojeLote1===undefined) state.venda.vendidosHojeLote1 = Number(state.venda.vendidosHoje)||0;
+    if(state.venda.valorRecebidoLote1===undefined) state.venda.valorRecebidoLote1 = Number(state.venda.valorRecebido)||0;
+  }
 
   // Fluxo de Caixa: cada linha (entrada ou saida) precisa de 1 valor por mes em MESES.
   // Sempre que MESES ganha uma linha nova (ex.: "Restituições de caixa aprovadas") ou
