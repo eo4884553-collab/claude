@@ -4,7 +4,8 @@ App (site instalável no celular) com as estatísticas da pelada de sábado:
 **ranking de aproveitamento, artilharia, cartões amarelos/vermelhos, goleiros,
 partidas, perfil de cada atleta e sorteio de times equilibrado**.
 
-- **Administrador**: lança as rodadas (manual ou por **foto da súmula**), cadastra atletas e libera outros admins.
+- **Dono**: o administrador principal; é o único que transforma outros membros em administradores.
+- **Administrador**: lança as rodadas (manual ou por **foto da súmula**) e cadastra atletas.
 - **Convidado**: só visualiza. Pode criar conta (e-mail + senha) ou tocar em
   “Entrar como convidado” sem cadastro.
 - Login com **esqueci minha senha** (link por e-mail), **reenviar e-mail de confirmação** e troca de senha.
@@ -64,9 +65,14 @@ Sem isso, os links de “esqueci minha senha” e de confirmação apontam para 
 1. Abra o app → **Criar conta** com seu e-mail.
 2. No Supabase → **SQL Editor**, rode uma vez (com o seu e-mail):
    ```sql
-   update public.profiles set role = 'admin' where email = 'seu-email@exemplo.com';
+   update public.profiles set role = 'admin', dono = true where email = 'seu-email@exemplo.com';
    ```
 3. Recarregue o app: aparece **Mais → Administração**. Outros admins você libera pela aba **Usuários**.
+
+Só o **dono** (👑) promove ou rebaixa administradores; os demais admins lançam partidas e
+cadastram atletas, mas não mexem em quem é admin. Quem já tinha o app instalado antes dessa
+regra roda uma vez o [`supabase/atualizacao_01_dono.sql`](./supabase/atualizacao_01_dono.sql)
+(o primeiro administrador vira o dono).
 
 ## Passo 6 — Instalar no celular
 
