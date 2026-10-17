@@ -254,6 +254,12 @@ button.mesa-btn.selected{outline:3px solid var(--accent); outline-offset:2px;}
 .mesa-3d-lightbox .lb-imgwrap{position:relative; transform-origin:top left; display:inline-block; container-type:inline-size;}
 .mesa-3d-lightbox .lb-viewport img{display:block; border-radius:0;}
 .mesa-3d-lightbox .lb-close{cursor:pointer;}
+.saldo-hist-lightbox{position:fixed; inset:0; z-index:200; background:rgba(10,6,10,.88); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px;}
+.saldo-hist-lightbox .lb-bar{display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; justify-content:center; width:100%; max-width:960px;}
+.saldo-hist-lightbox .lb-viewport{flex:1 1 auto; width:100%; max-width:960px; overflow-y:auto; border-radius:10px; background:var(--surface); padding:20px; box-sizing:border-box;}
+.saldo-hist-lightbox .lb-close{cursor:pointer;}
+.saldo-kpi-clickable{cursor:pointer;}
+.saldo-kpi-clickable:hover{outline:2px solid var(--accent); outline-offset:2px;}
 /* marcador vermelho (mesa reservada/paga) sobreposto na foto 3D — igual à bolinha numerada
    original da imagem (mesmo tamanho/traço fino, sem sombra nem borda grossa), só que vermelha
    em vez de amarela, pra parecer que a PRÓPRIA bolinha mudou de cor, não um adesivo por cima.
@@ -749,6 +755,26 @@ if(HOSTED){
     } else {
       markSaveStatus('error');
     }
+  });
+}
+// histórico item a item por trás do saldo compartilhado (clicar no KPI "Saldo atual" abre esse
+// drill-down) — só pede quando o painel é aberto, já que é uma consulta mais pesada
+function requestSaldoHistorico(){
+  if(!HOSTED || typeof window==='undefined') return;
+  window.parent.postMessage({type:'piquinzada:saldo-historico'}, '*');
+}
+if(HOSTED){
+  window.addEventListener('message', (ev)=>{
+    const d = ev.data;
+    if(!d || typeof d!=='object' || d.type!=='piquinzada:saldo-historico-result') return;
+    state.ui.saldoHistoricoLoading = false;
+    if(d.ok){
+      state.ui.saldoHistoricoData = { saldoInicial: d.saldoInicial, porDominio: d.porDominio };
+      state.ui.saldoHistoricoError = null;
+    } else {
+      state.ui.saldoHistoricoError = d.error || 'Erro ao carregar histórico.';
+    }
+    render();
   });
 }
 // reserva de mesas (Feijoada do Bloco) — diferente do resto do app, QUALQUER usuário aprovado
@@ -1765,7 +1791,7 @@ function onEnterCommit(e){
 // acoes que so navegam a tela (nao alteram dados do projeto) — continuam liberadas em modo convidado
 // reserva de mesa é a UNICA area do app onde convidado tambem grava de verdade (ver schema.sql,
 // secao 11) — por isso essas acoes de mesa entram aqui, mesmo nao sendo "so navegacao"
-const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa']);
+const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa', 'openSaldoHistorico', 'closeSaldoHistorico', 'setSaldoHistoricoFiltro']);
 function onAction(e){
   const el = e.currentTarget || e.target.closest('[data-action]');
   const [action, ...args] = el.dataset.action.split(':');
@@ -2059,12 +2085,13 @@ VIEWS.dashboard = function(){
       const saldoAtual = Number(state.saldoCompartilhado)||0;
       const det = state.saldoCompartilhadoDetalhe||{};
       return `<div class="gridN">
-        <div class="kpi"><div class="lbl">Saldo atual (todos os domínios)</div><div class="kpi-value" style="color:${saldoAtual>=0?'var(--good)':'var(--bad)'}">${fmtCur(saldoAtual)}</div></div>
-        <div class="kpi"><div class="lbl">Recebido em ingressos (todos)</div><div class="kpi-value">${fmtCur(det.totalRecebidoIngressos||0)}</div></div>
-        <div class="kpi"><div class="lbl">Pago em custos (todos)</div><div class="kpi-value">${fmtCur(det.totalPagoCustos||0)}</div></div>
-        <div class="kpi"><div class="lbl">Pago em restituições (todos)</div><div class="kpi-value">${fmtCur(det.totalPagoRestituicoes||0)}</div></div>
+        <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:todos" title="Clique para ver o histórico completo"><div class="lbl">Saldo atual (todos os domínios) 🔎</div><div class="kpi-value" style="color:${saldoAtual>=0?'var(--good)':'var(--bad)'}">${fmtCur(saldoAtual)}</div></div>
+        <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:receitas" title="Clique para ver as linhas"><div class="lbl">Recebido em ingressos (todos) 🔎</div><div class="kpi-value">${fmtCur(det.totalRecebidoIngressos||0)}</div></div>
+        <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:custos" title="Clique para ver as linhas"><div class="lbl">Pago em custos (todos) 🔎</div><div class="kpi-value">${fmtCur(det.totalPagoCustos||0)}</div></div>
+        <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:restituicoes" title="Clique para ver as linhas"><div class="lbl">Pago em restituições (todos) 🔎</div><div class="kpi-value">${fmtCur(det.totalPagoRestituicoes||0)}</div></div>
       </div>
-      ${!HOSTED ? `<div class="hint" style="margin-top:10px;">O saldo compartilhado só fica disponível no app publicado (conectado ao Supabase) — não neste arquivo local.</div>` : ''}`;
+      <div class="hint" style="margin-top:8px;">Clique em qualquer card pra ver o histórico completo — item a item, por domínio.</div>
+      ${!HOSTED ? `<div class="hint" style="margin-top:4px;">O saldo compartilhado só fica disponível no app publicado (conectado ao Supabase) — não neste arquivo local.</div>` : ''}`;
     })()}
   </div>
 
@@ -2123,7 +2150,169 @@ VIEWS.dashboard = function(){
         <div class="item" style="grid-column:1/-1;"><div class="lbl">Ação prioritária</div><div class="val">${acaoPrioritaria}</div></div>
       </div>
     </div>
+  </div>
+  ${state.ui.saldoHistoricoOpen ? saldoHistoricoLightbox() : ''}`;
+};
+// histórico item a item do saldo de caixa compartilhado — reaproveitado tanto no card do
+// Dashboard quanto no do Fluxo de Caixa (os dois mostram o mesmo saldo, só que em telas diferentes)
+const SALDO_HIST_DOMAIN_LABEL = {main:'Piquinzada 2027', 'feijoada-bloco':'Feijoada do Bloco', 'bateria-piquinzada':'Bateria Piquinzada'};
+const SALDO_HIST_DOMAIN_ORDER = ['main','feijoada-bloco','bateria-piquinzada'];
+function saldoHistoricoDomainBlock(domId, dom){
+  const receitas = dom.receitas||[], custos = dom.custos||[], restituicoes = dom.restituicoes||[];
+  const totalReceitas = sum(receitas.map(r=>r.valor));
+  const totalCustos = sum(custos.map(c=>c.valor));
+  const totalRestituicoes = sum(restituicoes.map(r=>r.valor));
+  const saldoDominio = totalReceitas - totalCustos - totalRestituicoes;
+  const dataFmt = (d)=> d ? new Date(d+'T00:00:00').toLocaleDateString('pt-BR') : '—';
+  const receitasRows = receitas.length ? receitas.map(r=>`<tr>
+      <td>${esc(r.descricao)}${r.agregado ? ` <span class="hint" title="Valor lançado como total único na aba Vendas — não tem lançamento individual por transação.">(agregado)</span>` : ''}</td>
+      <td>${dataFmt(r.data)}</td>
+      <td class="num mono" style="color:var(--good);">${fmtCur(r.valor)}</td>
+    </tr>`).join('') : `<tr><td colspan="3" class="hint">Nenhuma receita registrada.</td></tr>`;
+  const custosRows = custos.length ? custos.map(c=>`<tr>
+      <td>${esc(c.fornecedor)}${c.subcategoria ? ` <span class="hint">(${esc(c.subcategoria)})</span>` : ''}</td>
+      <td>${dataFmt(c.data)}</td>
+      <td>${esc(ORIGEM_PAGAMENTO_LABEL[c.origem] || c.origem)}</td>
+      <td class="num mono" style="color:var(--bad);">${fmtCur(c.valor)}</td>
+    </tr>`).join('') : `<tr><td colspan="4" class="hint">Nenhum custo pago registrado.</td></tr>`;
+  const restRows = restituicoes.map(r=>`<tr>
+      <td>${esc(r.descricao||'(sem descrição)')}</td>
+      <td>${esc(r.quem||'—')}</td>
+      <td>${dataFmt(r.data)}</td>
+      <td class="num mono" style="color:var(--bad);">${fmtCur(r.valor)}</td>
+    </tr>`).join('');
+  return `
+  <div class="section" style="margin-top:14px;">
+    <h3 style="margin:0 0 8px;">${esc(SALDO_HIST_DOMAIN_LABEL[domId]||domId)} <span class="hint">saldo do domínio: ${fmtCur(saldoDominio)}</span></h3>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Receita</th><th>Data</th><th class="num">Valor</th></tr></thead>
+      <tbody>${receitasRows}</tbody>
+      <tfoot><tr><td colspan="2">Total receitas</td><td class="num mono" style="font-weight:700;">${fmtCur(totalReceitas)}</td></tr></tfoot>
+    </table></div>
+    <div class="tablewrap" style="margin-top:10px;"><table>
+      <thead><tr><th>Custo</th><th>Data</th><th>Origem</th><th class="num">Valor</th></tr></thead>
+      <tbody>${custosRows}</tbody>
+      <tfoot><tr><td colspan="3">Total custos</td><td class="num mono" style="font-weight:700;">${fmtCur(totalCustos)}</td></tr></tfoot>
+    </table></div>
+    ${restituicoes.length ? `<div class="tablewrap" style="margin-top:10px;"><table>
+      <thead><tr><th>Restituição</th><th>Quem recebeu</th><th>Data</th><th class="num">Valor</th></tr></thead>
+      <tbody>${restRows}</tbody>
+      <tfoot><tr><td colspan="3">Total restituições</td><td class="num mono" style="font-weight:700;">${fmtCur(totalRestituicoes)}</td></tr></tfoot>
+    </table></div>` : ''}
   </div>`;
+}
+// visão "achatada" de uma categoria (receitas, custos ou restituições) cruzando os 3 domínios
+// numa tabela só — é o que abre quando clica direto no card "Recebido em ingressos"/"Pago em
+// custos"/"Pago em restituições" (em vez da visão geral por domínio, que é mais pra conferir tudo)
+const SALDO_HIST_FILTRO_LABEL = {receitas:'Receitas', custos:'Custos', restituicoes:'Restituições'};
+function saldoHistoricoFlatTable(data, filtro){
+  const dataFmt = (d)=> d ? new Date(d+'T00:00:00').toLocaleDateString('pt-BR') : '—';
+  const linhas = [];
+  SALDO_HIST_DOMAIN_ORDER.forEach(domId=>{
+    const dom = data.porDominio[domId] || {};
+    (dom[filtro]||[]).forEach(item=> linhas.push({domId, item}));
+  });
+  const total = sum(linhas.map(l=> Number(l.item.valor)||0));
+  let theadCols, bodyRows;
+  if(filtro==='receitas'){
+    theadCols = '<th>Domínio</th><th>Receita</th><th>Data</th><th class="num">Valor</th>';
+    bodyRows = linhas.map(({domId,item:r})=>`<tr>
+      <td>${esc(SALDO_HIST_DOMAIN_LABEL[domId]||domId)}</td>
+      <td>${esc(r.descricao)}${r.agregado ? ` <span class="hint" title="Valor lançado como total único na aba Vendas — não tem lançamento individual por transação.">(agregado)</span>` : ''}</td>
+      <td>${dataFmt(r.data)}</td>
+      <td class="num mono" style="color:var(--good);">${fmtCur(r.valor)}</td>
+    </tr>`).join('');
+  } else if(filtro==='custos'){
+    theadCols = '<th>Domínio</th><th>Custo</th><th>Data</th><th>Origem</th><th class="num">Valor</th>';
+    bodyRows = linhas.map(({domId,item:c})=>`<tr>
+      <td>${esc(SALDO_HIST_DOMAIN_LABEL[domId]||domId)}</td>
+      <td>${esc(c.fornecedor)}${c.subcategoria ? ` <span class="hint">(${esc(c.subcategoria)})</span>` : ''}</td>
+      <td>${dataFmt(c.data)}</td>
+      <td>${esc(ORIGEM_PAGAMENTO_LABEL[c.origem] || c.origem)}</td>
+      <td class="num mono" style="color:var(--bad);">${fmtCur(c.valor)}</td>
+    </tr>`).join('');
+  } else {
+    theadCols = '<th>Domínio</th><th>Restituição</th><th>Quem recebeu</th><th>Data</th><th class="num">Valor</th>';
+    bodyRows = linhas.map(({domId,item:r})=>`<tr>
+      <td>${esc(SALDO_HIST_DOMAIN_LABEL[domId]||domId)}</td>
+      <td>${esc(r.descricao||'(sem descrição)')}</td>
+      <td>${esc(r.quem||'—')}</td>
+      <td>${dataFmt(r.data)}</td>
+      <td class="num mono" style="color:var(--bad);">${fmtCur(r.valor)}</td>
+    </tr>`).join('');
+  }
+  const colspan = filtro==='custos' ? 4 : 3;
+  return `
+  <div class="tablewrap"><table>
+    <thead><tr>${theadCols}</tr></thead>
+    <tbody>${bodyRows || `<tr><td colspan="${colspan+1}" class="hint">Nenhum lançamento.</td></tr>`}</tbody>
+    <tfoot><tr><td colspan="${colspan}">Total — ${SALDO_HIST_FILTRO_LABEL[filtro]} (todos os domínios)</td><td class="num mono" style="font-weight:700;">${fmtCur(total)}</td></tr></tfoot>
+  </table></div>`;
+}
+const SALDO_HIST_TABS = [['todos','Visão geral'],['receitas','Receitas'],['custos','Custos'],['restituicoes','Restituições']];
+function saldoHistoricoLightbox(){
+  const loading = state.ui.saldoHistoricoLoading;
+  const error = state.ui.saldoHistoricoError;
+  const data = state.ui.saldoHistoricoData;
+  const filtro = state.ui.saldoHistoricoFiltro || 'todos';
+  let body;
+  if(loading){
+    body = `<div class="hint" style="padding:30px; text-align:center;">Carregando histórico…</div>`;
+  } else if(error){
+    body = `<div class="callout" style="border-color:var(--bad); background:var(--bad-soft); color:var(--bad);"><strong>Erro ao carregar histórico:</strong> ${esc(error)}</div>`;
+  } else if(data){
+    const saldoInicial = Number(data.saldoInicial)||0;
+    let totalReceitas = 0, totalCustos = 0, totalRestituicoes = 0;
+    SALDO_HIST_DOMAIN_ORDER.forEach(id=>{
+      const dom = data.porDominio[id] || {};
+      totalReceitas += sum((dom.receitas||[]).map(r=>r.valor));
+      totalCustos += sum((dom.custos||[]).map(c=>c.valor));
+      totalRestituicoes += sum((dom.restituicoes||[]).map(r=>r.valor));
+    });
+    const saldoFinal = saldoInicial + totalReceitas - totalCustos - totalRestituicoes;
+    const tabs = `<div class="pillrow" style="margin-bottom:14px;">${SALDO_HIST_TABS.map(([id,lbl])=>
+      `<button class="pill ${id===filtro?'active':''} guest-ok" data-action="setSaldoHistoricoFiltro:${id}">${lbl}</button>`).join('')}</div>`;
+    const resumo = `<div class="gridN">
+      <div class="kpi"><div class="lbl">Saldo inicial</div><div class="kpi-value">${fmtCur(saldoInicial)}</div></div>
+      <div class="kpi"><div class="lbl">+ Receitas (todos)</div><div class="kpi-value" style="color:var(--good);">${fmtCur(totalReceitas)}</div></div>
+      <div class="kpi"><div class="lbl">− Custos (todos)</div><div class="kpi-value" style="color:var(--bad);">${fmtCur(totalCustos)}</div></div>
+      <div class="kpi"><div class="lbl">− Restituições (todos)</div><div class="kpi-value" style="color:var(--bad);">${fmtCur(totalRestituicoes)}</div></div>
+      <div class="kpi"><div class="lbl">= Saldo atual</div><div class="kpi-value" style="color:${saldoFinal>=0?'var(--good)':'var(--bad)'}">${fmtCur(saldoFinal)}</div></div>
+    </div>
+    <div class="hint" style="margin-top:8px;">Saldo inicial + receitas − custos − restituições pagas, somando os 3 domínios. "Ingressos vendidos" (Piquinzada 2027) e "1º lote" (Feijoada do Bloco) são valores lançados como total único na aba Vendas, sem lançamento individual por comprador — por isso aparecem como uma linha "(agregado)" só.</div>`;
+    const conteudo = filtro==='todos'
+      ? resumo + SALDO_HIST_DOMAIN_ORDER.map(id=> saldoHistoricoDomainBlock(id, data.porDominio[id] || {})).join('')
+      : saldoHistoricoFlatTable(data, filtro);
+    body = tabs + conteudo;
+  } else {
+    body = `<div class="hint" style="padding:30px; text-align:center;">Sem dados.</div>`;
+  }
+  return `
+  <div class="saldo-hist-lightbox" data-action="closeSaldoHistorico">
+    <div class="lb-bar" onclick="event.stopPropagation();">
+      <span class="hint" style="font-weight:600; color:var(--text);">Histórico do saldo de caixa compartilhado</span>
+      <button class="btn small lb-close guest-ok" data-action="closeSaldoHistorico" style="margin-left:auto;">Fechar ✕</button>
+    </div>
+    <div class="lb-viewport" onclick="event.stopPropagation();">
+      ${body}
+    </div>
+  </div>`;
+}
+ACTIONS.openSaldoHistorico = (filtro)=>{
+  state.ui.saldoHistoricoOpen = true;
+  state.ui.saldoHistoricoLoading = true;
+  state.ui.saldoHistoricoError = null;
+  state.ui.saldoHistoricoFiltro = filtro || 'todos';
+  render();
+  requestSaldoHistorico();
+};
+ACTIONS.closeSaldoHistorico = ()=>{
+  state.ui.saldoHistoricoOpen = false;
+  render();
+};
+ACTIONS.setSaldoHistoricoFiltro = (filtro)=>{
+  state.ui.saldoHistoricoFiltro = filtro || 'todos';
+  render();
 };
 
 /* ================= ENTRADAS PMO ================= */
@@ -3446,17 +3635,18 @@ VIEWS.fluxo = function(){
       const saldoInicial = Number(state.saldoCompartilhadoInicial)||0;
       const det = state.saldoCompartilhadoDetalhe||{};
       return `<div class="gridN">
-        <div class="kpi"><div class="lbl">Saldo atual (todos os domínios)</div><div class="kpi-value" style="color:${saldoAtual>=0?'var(--good)':'var(--bad)'}">${fmtCur(saldoAtual)}</div></div>
-        <div class="kpi"><div class="lbl">Recebido em ingressos (todos)</div><div class="kpi-value">${fmtCur(det.totalRecebidoIngressos||0)}</div></div>
-        <div class="kpi"><div class="lbl">Pago em custos (todos)</div><div class="kpi-value">${fmtCur(det.totalPagoCustos||0)}</div></div>
-        <div class="kpi"><div class="lbl">Pago em restituições (todos)</div><div class="kpi-value">${fmtCur(det.totalPagoRestituicoes||0)}</div></div>
+        <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:todos" title="Clique para ver o histórico completo"><div class="lbl">Saldo atual (todos os domínios) 🔎</div><div class="kpi-value" style="color:${saldoAtual>=0?'var(--good)':'var(--bad)'}">${fmtCur(saldoAtual)}</div></div>
+        <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:receitas" title="Clique para ver as linhas"><div class="lbl">Recebido em ingressos (todos) 🔎</div><div class="kpi-value">${fmtCur(det.totalRecebidoIngressos||0)}</div></div>
+        <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:custos" title="Clique para ver as linhas"><div class="lbl">Pago em custos (todos) 🔎</div><div class="kpi-value">${fmtCur(det.totalPagoCustos||0)}</div></div>
+        <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:restituicoes" title="Clique para ver as linhas"><div class="lbl">Pago em restituições (todos) 🔎</div><div class="kpi-value">${fmtCur(det.totalPagoRestituicoes||0)}</div></div>
       </div>
-      ${HOSTED ? `<label class="field" style="flex-direction:row; align-items:center; gap:6px; margin-top:14px; max-width:320px;">
+      <div class="hint" style="margin-top:8px;">Clique em qualquer card pra ver o histórico completo — item a item, por domínio.</div>
+      ${HOSTED ? `<label class="field" style="flex-direction:row; align-items:center; gap:6px; margin-top:10px; max-width:320px;">
         <span class="lbl" style="white-space:nowrap;">Saldo inicial do caixa (ajustar)</span>
         <input type="number" step="100" value="${saldoInicial}" onchange="requestSetSaldoCompartilhado(Number(this.value)||0)" style="width:140px;">
       </label>
       <div class="hint" style="margin-top:6px;">Só administrador ajusta este valor — é o ponto de partida do caixa antes de qualquer recebimento/pagamento.</div>`
-      : `<div class="hint" style="margin-top:10px;">O saldo compartilhado só fica disponível no app publicado (conectado ao Supabase) — não neste arquivo local.</div>`}`;
+      : `<div class="hint" style="margin-top:4px;">O saldo compartilhado só fica disponível no app publicado (conectado ao Supabase) — não neste arquivo local.</div>`}`;
     })()}
   </div>
 
@@ -3500,7 +3690,8 @@ VIEWS.fluxo = function(){
   <div class="section">
     <h2>Capital de giro por cenário <span class="hint">reutiliza as mesmas distribuições mensais acima</span></h2>
     <div class="gridN">${SCEN.map(s=>`<div class="kpi"><div class="lbl">${SCEN_LABEL[s]}</div><div class="kpi-value">${fmtCur(capGiroFor(s))}</div></div>`).join('')}</div>
-  </div>`;
+  </div>
+  ${state.ui.saldoHistoricoOpen ? saldoHistoricoLightbox() : ''}`;
 };
 
 /* ================= BREAK-EVEN ================= */

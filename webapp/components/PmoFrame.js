@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import { PROJECTS } from '../lib/projects';
 import { approvedReimbursementsTotal } from '../lib/reimbursements';
 import { fetchEffectiveRole } from '../lib/roles';
-import { fetchSharedCashBalance, setSharedCashSaldoInicial } from '../lib/cash';
+import { fetchSharedCashBalance, setSharedCashSaldoInicial, fetchSharedCashHistory } from '../lib/cash';
 import { fetchMesasFeijoada, reservarMesa, atualizarMinhaMesa, cancelarMesa, adminSalvarMesa, registrarPagamentoMesa, moverMesaReserva } from '../lib/mesas';
 
 const SEED_MARKER = '/* __PIQUINZADA_STATE_SEED__ */';
@@ -187,6 +187,19 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
             }, '*');
           } catch (e) {
             iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:saldo-compartilhado-result', ok: false }, '*');
+          }
+        })();
+      }
+      // histórico completo item a item por trás do saldo compartilhado — só busca quando a
+      // pessoa realmente abre o drill-down (consulta mais pesada, 4 tabelas cruzando os 3
+      // domínios), liberado pra qualquer usuário aprovado (o KPI já é visível pra todo mundo)
+      if (d.type === 'piquinzada:saldo-historico') {
+        (async () => {
+          try {
+            const hist = await fetchSharedCashHistory();
+            iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:saldo-historico-result', ok: true, ...hist }, '*');
+          } catch (e) {
+            iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:saldo-historico-result', ok: false, error: e.message || String(e) }, '*');
           }
         })();
       }
