@@ -47,6 +47,22 @@ export function useAuth() {
     await supabase.auth.signOut();
   }, []);
 
+  // dispara o e-mail de recuperação de senha do Supabase — o Supabase nunca guarda a senha em
+  // texto puro (só o hash), então não dá pra "reenviar a senha antiga": o link do e-mail leva a
+  // pessoa pra /reset-password, aqui no próprio app, pra ela DEFINIR uma senha nova
+  const resetPasswordForEmail = useCallback(async (email) => {
+    if (!supabase) return { error: { message: 'Supabase não configurado.' } };
+    const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/reset-password` : undefined;
+    return supabase.auth.resetPasswordForEmail(email, { redirectTo });
+  }, []);
+
+  // só funciona depois que a pessoa chegou em /reset-password a partir do link do e-mail (o
+  // Supabase já estabelece uma sessão de recuperação sozinho, lendo o token da própria URL)
+  const updatePassword = useCallback(async (newPassword) => {
+    if (!supabase) return { error: { message: 'Supabase não configurado.' } };
+    return supabase.auth.updateUser({ password: newPassword });
+  }, []);
+
   const refreshProfile = useCallback(() => {
     if (session?.user?.id) loadProfile(session.user.id);
   }, [session, loadProfile]);
@@ -62,5 +78,7 @@ export function useAuth() {
     signIn,
     signOut,
     refreshProfile,
+    resetPasswordForEmail,
+    updatePassword,
   };
 }

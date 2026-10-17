@@ -46,6 +46,10 @@ uns 15-20 minutos na primeira vez.
 5. Clique em **Deploy**. Em 1-2 minutos você recebe um link do tipo
    `https://piquinzada-pmo.vercel.app` — esse já é o app funcionando, pronto
    para compartilhar.
+6. Volte no Supabase, em **Authentication → URL Configuration**, e adicione
+   esse link do Vercel (ex. `https://piquinzada-pmo.vercel.app/**`) em
+   **Redirect URLs**. Sem isso, o botão "Esqueci minha senha" do login manda
+   o e-mail, mas o link dele não funciona.
 
 ## Passo 3 — Criar o primeiro administrador (você)
 
