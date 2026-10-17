@@ -2087,10 +2087,11 @@ VIEWS.dashboard = function(){
       return `<div class="gridN">
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:todos" title="Clique para ver o histórico completo"><div class="lbl">Saldo atual (todos os domínios) 🔎</div><div class="kpi-value" style="color:${saldoAtual>=0?'var(--good)':'var(--bad)'}">${fmtCur(saldoAtual)}</div></div>
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:receitas" title="Clique para ver as linhas"><div class="lbl">Recebido em ingressos (todos) 🔎</div><div class="kpi-value">${fmtCur(det.totalRecebidoIngressos||0)}</div></div>
+        <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:receitas" title="Clique para ver as linhas"><div class="lbl">Recebido em patrocínios (todos) 🔎</div><div class="kpi-value">${fmtCur(det.totalRecebidoPatrocinios||0)}</div></div>
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:custos" title="Clique para ver as linhas"><div class="lbl">Pago em custos (todos) 🔎</div><div class="kpi-value">${fmtCur(det.totalPagoCustos||0)}</div></div>
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:restituicoes" title="Clique para ver as linhas"><div class="lbl">Pago em restituições (todos) 🔎</div><div class="kpi-value">${fmtCur(det.totalPagoRestituicoes||0)}</div></div>
       </div>
-      <div class="hint" style="margin-top:8px;">Clique em qualquer card pra ver o histórico completo — item a item, por domínio.</div>
+      <div class="hint" style="margin-top:8px;">Clique em qualquer card pra ver o histórico completo — item a item, por domínio. "Recebido" inclui ingressos vendidos, mesas pagas (Feijoada), contribuições (Bateria) e parcelas de patrocínio já pagas, nos 3 domínios.</div>
       ${!HOSTED ? `<div class="hint" style="margin-top:4px;">O saldo compartilhado só fica disponível no app publicado (conectado ao Supabase) — não neste arquivo local.</div>` : ''}`;
     })()}
   </div>
@@ -3637,10 +3638,11 @@ VIEWS.fluxo = function(){
       return `<div class="gridN">
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:todos" title="Clique para ver o histórico completo"><div class="lbl">Saldo atual (todos os domínios) 🔎</div><div class="kpi-value" style="color:${saldoAtual>=0?'var(--good)':'var(--bad)'}">${fmtCur(saldoAtual)}</div></div>
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:receitas" title="Clique para ver as linhas"><div class="lbl">Recebido em ingressos (todos) 🔎</div><div class="kpi-value">${fmtCur(det.totalRecebidoIngressos||0)}</div></div>
+        <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:receitas" title="Clique para ver as linhas"><div class="lbl">Recebido em patrocínios (todos) 🔎</div><div class="kpi-value">${fmtCur(det.totalRecebidoPatrocinios||0)}</div></div>
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:custos" title="Clique para ver as linhas"><div class="lbl">Pago em custos (todos) 🔎</div><div class="kpi-value">${fmtCur(det.totalPagoCustos||0)}</div></div>
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:restituicoes" title="Clique para ver as linhas"><div class="lbl">Pago em restituições (todos) 🔎</div><div class="kpi-value">${fmtCur(det.totalPagoRestituicoes||0)}</div></div>
       </div>
-      <div class="hint" style="margin-top:8px;">Clique em qualquer card pra ver o histórico completo — item a item, por domínio.</div>
+      <div class="hint" style="margin-top:8px;">Clique em qualquer card pra ver o histórico completo — item a item, por domínio. "Recebido" inclui ingressos vendidos, mesas pagas (Feijoada), contribuições (Bateria) e parcelas de patrocínio já pagas, nos 3 domínios.</div>
       ${HOSTED ? `<label class="field" style="flex-direction:row; align-items:center; gap:6px; margin-top:10px; max-width:320px;">
         <span class="lbl" style="white-space:nowrap;">Saldo inicial do caixa (ajustar)</span>
         <input type="number" step="100" value="${saldoInicial}" onchange="requestSetSaldoCompartilhado(Number(this.value)||0)" style="width:140px;">

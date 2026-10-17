@@ -3,9 +3,24 @@ import { supabase } from './supabaseClient';
 import { PROJECTS } from './projects';
 import { paidReimbursementsTotalAllProjects } from './reimbursements';
 
+// soma as parcelas de patrocínio já pagas (dataPagamento preenchida) de um domínio — sempre lidas
+// do cenário "base" (é o cenário padrão de acompanhamento real no resto do app, ex. Dashboard/
+// Fluxo de Caixa); patrocínio é pipeline por cenário, mas um pagamento já recebido é dinheiro de
+// verdade, então só faz sentido ler de UM cenário fixo pra não contar o mesmo valor 3x
+function patrociniosPagoDominio(d) {
+  let total = 0;
+  (d.patrocinios?.base || []).forEach((t) => {
+    (t.fechamentos || []).forEach((f) => {
+      (f.parcelas || []).forEach((p) => { if (p.dataPagamento) total += Number(p.valor) || 0; });
+    });
+  });
+  return total;
+}
+
 // saldo de caixa REAL, compartilhado entre TODOS os domínios — soma tudo que já foi de fato
 // pago (custos pagos + restituições pagas, em qualquer domínio) e tudo que já entrou de verdade
-// (ingressos recebidos, em qualquer domínio), a partir de um único saldo inicial da organização
+// (ingressos e patrocínios recebidos, em qualquer domínio), a partir de um único saldo inicial
+// da organização
 export async function fetchSharedCashBalance() {
   const [{ data: cashRow, error: e1 }, { data: states, error: e2 }, totalPagoRestituicoes] = await Promise.all([
     supabase.from('org_cash').select('saldo_inicial').eq('id', 'main').maybeSingle(),
@@ -17,13 +32,15 @@ export async function fetchSharedCashBalance() {
   const saldoInicial = Number(cashRow?.saldo_inicial) || 0;
   let totalPagoCustos = 0;
   let totalRecebidoIngressos = 0;
+  let totalRecebidoPatrocinios = 0;
   (states || []).forEach((row) => {
     const d = row.data || {};
     (d.custos || []).forEach((c) => { totalPagoCustos += Number(c.valorPago) || 0; });
     totalRecebidoIngressos += Number(d.venda?.valorRecebido) || 0;
+    totalRecebidoPatrocinios += patrociniosPagoDominio(d);
   });
-  const saldo = saldoInicial + totalRecebidoIngressos - totalPagoCustos - totalPagoRestituicoes;
-  return { saldo, saldoInicial, totalRecebidoIngressos, totalPagoCustos, totalPagoRestituicoes };
+  const saldo = saldoInicial + totalRecebidoIngressos + totalRecebidoPatrocinios - totalPagoCustos - totalPagoRestituicoes;
+  return { saldo, saldoInicial, totalRecebidoIngressos, totalRecebidoPatrocinios, totalPagoCustos, totalPagoRestituicoes };
 }
 
 // histórico completo por trás do saldo de caixa compartilhado — item por item, agrupado por
@@ -59,6 +76,17 @@ export async function fetchSharedCashHistory() {
         fornecedor: c.fornecedor || '(sem fornecedor)',
         subcategoria: c.subcategoria || c.grupo || '',
         valor, data: c.dataPagamento, origem: c.origemPagamento || 'dominio',
+      });
+    });
+    // patrocínio é pipeline por cenário, mas uma parcela já paga é dinheiro de verdade — lida
+    // sempre do cenário "base" (ver patrociniosPagoDominio acima), em qualquer dos 3 domínios
+    (d.patrocinios?.base || []).forEach((t) => {
+      (t.fechamentos || []).forEach((f) => {
+        (f.parcelas || []).forEach((p) => {
+          const valor = Number(p.valor) || 0;
+          if (!valor || !p.dataPagamento) return;
+          dom.receitas.push({ descricao: `${f.empresa || '(sem empresa)'} — ${t.cota || 'patrocínio'}`, valor, data: p.dataPagamento });
+        });
       });
     });
     if (row.id === 'bateria-piquinzada') {
