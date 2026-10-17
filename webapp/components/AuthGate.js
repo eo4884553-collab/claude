@@ -2,36 +2,11 @@
 import { useState } from 'react';
 import { useAuth } from '../lib/useAuth';
 import { supabaseConfigured } from '../lib/supabaseClient';
-
-const wrap = {
-  minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-  background: '#FDF6FA', padding: '24px', fontFamily: "'Public Sans', system-ui, sans-serif",
-};
-const card = {
-  width: '100%', maxWidth: 380, background: '#fff', borderRadius: 16, padding: '28px 26px',
-  boxShadow: '0 8px 30px rgba(0,0,0,.08)', border: '1px solid #F1D3E5',
-};
-const h1 = { fontFamily: "'Fraunces', serif", fontSize: 22, margin: '0 0 6px', color: '#241220' };
-const sub = { fontSize: 13, color: '#6B5566', margin: '0 0 20px' };
-const label = { display: 'block', fontSize: 12.5, fontWeight: 600, color: '#241220', margin: '14px 0 5px' };
-const input = {
-  width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8,
-  border: '1px solid #F1D3E5', fontSize: 14, fontFamily: 'inherit',
-};
-const btn = {
-  width: '100%', marginTop: 20, padding: '11px 14px', borderRadius: 8, border: 'none',
-  background: '#E01F7F', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer',
-};
-const btnGhost = {
-  width: '100%', marginTop: 10, padding: '10px 14px', borderRadius: 8, border: '1px solid #F1D3E5',
-  background: '#FBE9F4', color: '#B8156A', fontWeight: 600, fontSize: 13.5, cursor: 'pointer',
-};
-const errBox = { marginTop: 14, fontSize: 12.5, color: '#D6323F', background: '#FAE0E2', borderRadius: 8, padding: '9px 11px' };
-const okBox = { marginTop: 14, fontSize: 12.5, color: '#1E8F63', background: '#DCF0E6', borderRadius: 8, padding: '9px 11px' };
+import { wrap, card, h1, sub, label, input, btn, btnGhost, errBox, okBox } from '../lib/authCardStyles';
 
 function LoginSignup() {
-  const { signIn, signUp } = useAuth();
-  const [mode, setMode] = useState('login'); // 'login' | 'signup'
+  const { signIn, signUp, resetPasswordForEmail } = useAuth();
+  const [mode, setMode] = useState('login'); // 'login' | 'signup' | 'forgot'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -41,6 +16,15 @@ function LoginSignup() {
   async function submit(e) {
     e.preventDefault();
     setErr(''); setMsg(''); setBusy(true);
+    if (mode === 'forgot') {
+      const { error } = await resetPasswordForEmail(email.trim());
+      setBusy(false);
+      if (error) { setErr(error.message); return; }
+      // sempre mostra a mesma mensagem de sucesso, exista ou não essa conta — não dá pra revelar
+      // pra quem está pedindo se um e-mail está cadastrado ou não
+      setMsg('Se esse e-mail tiver uma conta cadastrada, enviamos um link pra você definir uma senha nova. Confira sua caixa de entrada (e o spam).');
+      return;
+    }
     const fn = mode === 'login' ? signIn : signUp;
     const { error } = await fn(email.trim(), password);
     setBusy(false);
@@ -50,20 +34,35 @@ function LoginSignup() {
     }
   }
 
+  function switchMode(next) {
+    setMode(next); setErr(''); setMsg(''); setPassword('');
+  }
+
   return (
     <div style={wrap}>
       <div style={card}>
         <h1 style={h1}>🎭 Piquinzada · Torre de Controle</h1>
-        <p style={sub}>{mode === 'login' ? 'Entre com sua conta.' : 'Crie sua conta — um administrador precisa aprovar antes de você ver os dados.'}</p>
+        <p style={sub}>
+          {mode === 'login' ? 'Entre com sua conta.'
+            : mode === 'signup' ? 'Crie sua conta — um administrador precisa aprovar antes de você ver os dados.'
+            : 'Informe o e-mail cadastrado — vamos enviar um link pra você definir uma senha nova.'}
+        </p>
         <form onSubmit={submit}>
           <label style={label}>E-mail</label>
           <input style={input} type="email" required value={email} onChange={e=>setEmail(e.target.value)} autoComplete="email" />
-          <label style={label}>Senha</label>
-          <input style={input} type="password" required minLength={6} value={password} onChange={e=>setPassword(e.target.value)} autoComplete={mode==='login'?'current-password':'new-password'} />
-          <button style={btn} type="submit" disabled={busy}>{busy ? 'Aguarde…' : (mode === 'login' ? 'Entrar' : 'Criar conta')}</button>
+          {mode !== 'forgot' && <>
+            <label style={label}>Senha</label>
+            <input style={input} type="password" required minLength={6} value={password} onChange={e=>setPassword(e.target.value)} autoComplete={mode==='login'?'current-password':'new-password'} />
+          </>}
+          <button style={btn} type="submit" disabled={busy}>
+            {busy ? 'Aguarde…' : (mode === 'login' ? 'Entrar' : mode === 'signup' ? 'Criar conta' : 'Enviar link de recuperação')}
+          </button>
         </form>
-        <button style={btnGhost} onClick={()=>{ setMode(mode==='login'?'signup':'login'); setErr(''); setMsg(''); }}>
-          {mode === 'login' ? 'Não tem conta? Cadastre-se' : 'Já tem conta? Entrar'}
+        {mode === 'login' && (
+          <button style={btnGhost} onClick={()=>switchMode('forgot')}>Esqueci minha senha</button>
+        )}
+        <button style={btnGhost} onClick={()=>switchMode(mode==='login'?'signup':'login')}>
+          {mode === 'login' ? 'Não tem conta? Cadastre-se' : mode === 'signup' ? 'Já tem conta? Entrar' : 'Voltar pro login'}
         </button>
         {err && <div style={errBox}>{err}</div>}
         {msg && <div style={okBox}>{msg}</div>}
