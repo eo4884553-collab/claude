@@ -1,46 +1,30 @@
 'use client';
 import { supabase } from './supabaseClient';
 import { PROJECTS } from './projects';
-import { paidReimbursementsTotalAllProjects } from './reimbursements';
 
-// soma as parcelas de patrocínio já pagas (dataPagamento preenchida) de um domínio — sempre lidas
-// do cenário "base" (é o cenário padrão de acompanhamento real no resto do app, ex. Dashboard/
-// Fluxo de Caixa); patrocínio é pipeline por cenário, mas um pagamento já recebido é dinheiro de
-// verdade, então só faz sentido ler de UM cenário fixo pra não contar o mesmo valor 3x
-function patrociniosPagoDominio(d) {
-  let total = 0;
-  (d.patrocinios?.base || []).forEach((t) => {
-    (t.fechamentos || []).forEach((f) => {
-      (f.parcelas || []).forEach((p) => { if (p.dataPagamento) total += Number(p.valor) || 0; });
-    });
-  });
-  return total;
-}
-
-// saldo de caixa REAL, compartilhado entre TODOS os domínios — soma tudo que já foi de fato
-// pago (custos pagos + restituições pagas, em qualquer domínio) e tudo que já entrou de verdade
-// (ingressos e patrocínios recebidos, em qualquer domínio), a partir de um único saldo inicial
-// da organização
+// saldo de caixa REAL, compartilhado entre TODOS os domínios — SEMPRE derivado de
+// fetchSharedCashHistory() (abaixo), nunca recalculado por conta própria: os dois já divergiram no
+// passado porque liam fontes diferentes (ex. este aqui somava direto o "valorPago" de um custo
+// mesmo sem dataPagamento, e usava o venda.valorRecebido "sincronizado" da Feijoada/Bateria em vez
+// da tabela mesa_reservas/contribuintesBateria ao vivo) — ler sempre do mesmo lugar garante que o
+// card do Dashboard e o drill-down item a item nunca mais mostrem números diferentes
 export async function fetchSharedCashBalance() {
-  const [{ data: cashRow, error: e1 }, { data: states, error: e2 }, totalPagoRestituicoes] = await Promise.all([
-    supabase.from('org_cash').select('saldo_inicial').eq('id', 'main').maybeSingle(),
-    supabase.from('project_state').select('id,data').in('id', PROJECTS.map((p) => p.id)),
-    paidReimbursementsTotalAllProjects(),
-  ]);
-  if (e1) throw e1;
-  if (e2) throw e2;
-  const saldoInicial = Number(cashRow?.saldo_inicial) || 0;
-  let totalPagoCustos = 0;
+  const hist = await fetchSharedCashHistory();
   let totalRecebidoIngressos = 0;
   let totalRecebidoPatrocinios = 0;
-  (states || []).forEach((row) => {
-    const d = row.data || {};
-    (d.custos || []).forEach((c) => { totalPagoCustos += Number(c.valorPago) || 0; });
-    totalRecebidoIngressos += Number(d.venda?.valorRecebido) || 0;
-    totalRecebidoPatrocinios += patrociniosPagoDominio(d);
+  let totalPagoCustos = 0;
+  let totalPagoRestituicoes = 0;
+  PROJECTS.forEach((p) => {
+    const dom = hist.porDominio[p.id] || { receitas: [], custos: [], restituicoes: [] };
+    (dom.receitas || []).forEach((r) => {
+      if (r.tipo === 'patrocinio') totalRecebidoPatrocinios += Number(r.valor) || 0;
+      else totalRecebidoIngressos += Number(r.valor) || 0;
+    });
+    (dom.custos || []).forEach((c) => { totalPagoCustos += Number(c.valor) || 0; });
+    (dom.restituicoes || []).forEach((r) => { totalPagoRestituicoes += Number(r.valor) || 0; });
   });
-  const saldo = saldoInicial + totalRecebidoIngressos + totalRecebidoPatrocinios - totalPagoCustos - totalPagoRestituicoes;
-  return { saldo, saldoInicial, totalRecebidoIngressos, totalRecebidoPatrocinios, totalPagoCustos, totalPagoRestituicoes };
+  const saldo = hist.saldoInicial + totalRecebidoIngressos + totalRecebidoPatrocinios - totalPagoCustos - totalPagoRestituicoes;
+  return { saldo, saldoInicial: hist.saldoInicial, totalRecebidoIngressos, totalRecebidoPatrocinios, totalPagoCustos, totalPagoRestituicoes };
 }
 
 // histórico completo por trás do saldo de caixa compartilhado — item por item, agrupado por
@@ -79,13 +63,15 @@ export async function fetchSharedCashHistory() {
       });
     });
     // patrocínio é pipeline por cenário, mas uma parcela já paga é dinheiro de verdade — lida
-    // sempre do cenário "base" (ver patrociniosPagoDominio acima), em qualquer dos 3 domínios
+    // sempre do cenário "base", em qualquer dos 3 domínios. "tipo" marca a origem (patrocínio x
+    // ingressos/mesas/contribuições) — é o que fetchSharedCashBalance usa pra separar os 2 cards
+    // do Dashboard/Fluxo de Caixa sem duplicar a lógica de leitura dos dados
     (d.patrocinios?.base || []).forEach((t) => {
       (t.fechamentos || []).forEach((f) => {
         (f.parcelas || []).forEach((p) => {
           const valor = Number(p.valor) || 0;
           if (!valor || !p.dataPagamento) return;
-          dom.receitas.push({ descricao: `${f.empresa || '(sem empresa)'} — ${t.cota || 'patrocínio'}`, valor, data: p.dataPagamento });
+          dom.receitas.push({ descricao: `${f.empresa || '(sem empresa)'} — ${t.cota || 'patrocínio'}`, valor, data: p.dataPagamento, tipo: 'patrocinio' });
         });
       });
     });
@@ -94,15 +80,15 @@ export async function fetchSharedCashHistory() {
         (p.parcelas || []).forEach((pc) => {
           const valor = Number(pc.valor) || 0;
           if (!valor || !pc.dataPagamento) return;
-          dom.receitas.push({ descricao: `${p.nome || '(sem nome)'} — parcela`, valor, data: pc.dataPagamento });
+          dom.receitas.push({ descricao: `${p.nome || '(sem nome)'} — parcela`, valor, data: pc.dataPagamento, tipo: 'ingressos' });
         });
       });
     } else if (row.id === 'feijoada-bloco') {
       const lote1 = Number(d.venda?.valorRecebidoLote1) || 0;
-      if (lote1) dom.receitas.push({ descricao: '1º lote (ingressos avulsos)', valor: lote1, data: null, agregado: true });
+      if (lote1) dom.receitas.push({ descricao: '1º lote (ingressos avulsos)', valor: lote1, data: null, agregado: true, tipo: 'ingressos' });
     } else {
       const valor = Number(d.venda?.valorRecebido) || 0;
-      if (valor) dom.receitas.push({ descricao: 'Ingressos vendidos', valor, data: null, agregado: true });
+      if (valor) dom.receitas.push({ descricao: 'Ingressos vendidos', valor, data: null, agregado: true, tipo: 'ingressos' });
     }
   });
 
@@ -110,7 +96,7 @@ export async function fetchSharedCashHistory() {
     const valor = Number(m.valor_pago) || 0;
     const paga = m.status === 'paga' || !!m.data_pagamento || valor > 0;
     if (!paga || !valor) return;
-    porDominio['feijoada-bloco'].receitas.push({ descricao: `Mesa ${m.numero} — ${m.reservado_por || '(sem nome)'}`, valor, data: m.data_pagamento });
+    porDominio['feijoada-bloco'].receitas.push({ descricao: `Mesa ${m.numero} — ${m.reservado_por || '(sem nome)'}`, valor, data: m.data_pagamento, tipo: 'ingressos' });
   });
 
   (reimbRows || []).forEach((r) => {
