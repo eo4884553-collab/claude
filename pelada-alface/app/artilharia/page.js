@@ -11,7 +11,7 @@ export default function Artilharia() {
     <>
       <div className="pg-tit">
         <h1>Artilharia {ano}</h1>
-        <p>{stats.totalGols} gols em {stats.partidas.length} rodadas. Empate em gols: fica na frente quem jogou mais (igual à planilha).</p>
+        <p>{stats.totalGols} gols em {stats.partidas.length} rodadas. Empate em gols: fica na frente quem tem a melhor média de gols por jogo.</p>
       </div>
       <Podio itens={stats.artilharia} valor={(s) => s.gols} rotulo="gols" />
       <Ranking

@@ -79,9 +79,9 @@ export function calcular({ players, matches, matchPlayers, ano, minJogosPct = 0.
   const abaixo = lista.filter((s) => s.jogos < minJogos).sort(porAprov);
   classificados.forEach((s, i) => { s.posAprov = i + 1; });
 
-  // mesma ordem da planilha: mais gols; empate -> quem jogou mais
+  // mais gols; empate -> melhor média de gols por jogo (quem marcou em menos jogos)
   const artilharia = lista.filter((s) => s.gols > 0)
-    .sort((a, b) => b.gols - a.gols || b.jogos - a.jogos || a.nome.localeCompare(b.nome));
+    .sort((a, b) => b.gols - a.gols || b.media - a.media || a.nome.localeCompare(b.nome));
   artilharia.forEach((s, i) => { s.posArt = i + 1; });
 
   const cartoes = [...lista, ...[...goleiros.values()]]
