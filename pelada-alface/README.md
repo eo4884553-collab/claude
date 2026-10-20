@@ -104,7 +104,7 @@ Alface como ícone, igual a um app.
 | Placar | gols dos atletas + gols sem autor do time |
 | Pontos | vitória 3, empate 1; disputados = jogos × 3 |
 | Aproveitamento | pontos ganhos ÷ pontos disputados; disputa quem jogou ≥ 40% das rodadas (ajustável em **Ajustes**) |
-| Artilharia | mais gols; empate → quem jogou mais |
+| Artilharia | mais gols; empate → melhor média de gols por jogo |
 | Cartões | mais vermelhos, depois mais amarelos |
 | Goleiros | menor média de gols sofridos |
 
