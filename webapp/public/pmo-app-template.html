@@ -1791,7 +1791,7 @@ function onEnterCommit(e){
 // acoes que so navegam a tela (nao alteram dados do projeto) — continuam liberadas em modo convidado
 // reserva de mesa é a UNICA area do app onde convidado tambem grava de verdade (ver schema.sql,
 // secao 11) — por isso essas acoes de mesa entram aqui, mesmo nao sendo "so navegacao"
-const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa', 'openSaldoHistorico', 'closeSaldoHistorico', 'setSaldoHistoricoFiltro', 'openMesasLista', 'closeMesasLista']);
+const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa', 'openSaldoHistorico', 'closeSaldoHistorico', 'setSaldoHistoricoFiltro', 'openMesasLista', 'closeMesasLista', 'openScenarioBreakdown', 'closeScenarioBreakdown']);
 function onAction(e){
   const el = e.currentTarget || e.target.closest('[data-action]');
   const [action, ...args] = el.dataset.action.split(':');
@@ -2016,11 +2016,11 @@ VIEWS.dashboard = function(){
         <span class="name">${SCEN_LABEL[scen]} <span class="info-ic" style="background:rgba(255,255,255,.25); border-color:rgba(255,255,255,.5); color:#fff;" tabindex="0" role="note" aria-label="${esc(SCEN_DESC[scen])}">i<span class="tip">${SCEN_DESC[scen]}</span></span></span>${badge(c.status)}
       </div>
       <div class="body">
-        <div class="kv total"><span class="k">Receita total</span><span class="v">${fmtCur(c.receitaTotal)}</span></div>
+        <div class="kv total saldo-kpi-clickable" data-action="openScenarioBreakdown:${scen}:receita" title="Clique para ver de onde vem"><span class="k">Receita total 🔎</span><span class="v">${fmtCur(c.receitaTotal)}</span></div>
         <div class="kv"><span class="k">↳ Ingressos</span><span class="v">${fmtCur(c.receitaIngressos)}</span></div>
         <div class="kv"><span class="k">↳ Patrocínio</span><span class="v">${fmtCur(c.patrocinio)}</span></div>
         <div class="kv"><span class="k">↳ Consumo/ativações</span><span class="v">${fmtCur(c.receitaConsumo)}</span></div>
-        <div class="kv total"><span class="k">Custo total</span><span class="v">${fmtCur(c.custoTotal)}</span></div>
+        <div class="kv total saldo-kpi-clickable" data-action="openScenarioBreakdown:${scen}:custo" title="Clique para ver de onde vem"><span class="k">Custo total 🔎</span><span class="v">${fmtCur(c.custoTotal)}</span></div>
         <div class="kv total"><span class="k">Resultado</span><span class="v" style="color:${c.resultado>=0?'var(--good)':'var(--bad)'}">${fmtCur(c.resultado)}</span></div>
         <div class="kv"><span class="k">Margem líquida</span><span class="v">${fmtPct(c.margem)}</span></div>
         <div class="kv"><span class="k">Pagantes</span><span class="v">${fmtInt(c.pagantes)}</span></div>
@@ -2153,7 +2153,75 @@ VIEWS.dashboard = function(){
       </div>
     </div>
   </div>
-  ${state.ui.saldoHistoricoOpen ? saldoHistoricoLightbox() : ''}`;
+  ${state.ui.saldoHistoricoOpen ? saldoHistoricoLightbox() : ''}
+  ${state.ui.scenarioBreakdownOpen ? scenarioBreakdownLightbox() : ''}`;
+};
+// "de onde vem" a Receita total / Custo total de um cenário do Dashboard — não é uma consulta
+// nova, é a mesma conta que computeScenario() já faz (ver função acima), só exibida separada por
+// componente em vez de só o total — então o que aparece aqui bate exatamente com o KPI de origem
+function scenarioBreakdownLightbox(){
+  const scen = state.ui.scenarioBreakdownScen || 'base';
+  const tipo = state.ui.scenarioBreakdownTipo || 'receita';
+  const c = computeScenario(scen);
+  const e = state.entradas[scen];
+  let titulo, linhas, total;
+  if(tipo==='receita'){
+    titulo = `Receita total — ${SCEN_LABEL[scen]}`;
+    linhas = [
+      ['Ingressos vendidos', c.receitaIngressos, `${fmtInt(c.pagantes)} pagantes × ${fmtCur2(c.ticketMedio)} de ticket médio (bruto, antes das taxas)`],
+      ['Patrocínio', c.patrocinio, `pipeline ponderado pela probabilidade de cada cota — contratado: ${fmtCur(c.patroContratado)}, em negociação: ${fmtCur(c.patroPipeline)}`],
+      ['Consumo/ativações', c.receitaConsumo, c.bebidasAtivas ? 'soma da margem do catálogo de bebidas/ativações × pagantes' : 'margem estimada por pessoa × pagantes'],
+      ['Outras receitas', c.outras, 'valor fixo lançado em Entradas PMO'],
+    ];
+    total = c.receitaTotal;
+  } else {
+    titulo = `Custo total — ${SCEN_LABEL[scen]}`;
+    const extraRows = (c.extraGroups||[]).map(g=> [g.label, sumObj(e[g.key]||{}), 'categoria de custo extra, cadastrada em Entradas PMO']);
+    linhas = [
+      ['Atrações', c.subAtracoes, `inclui o cachê principal (${fmtCur(c.cachePrincipal)})`],
+      ['Estrutura', c.subEstrutura, null],
+      ['Operação', c.subOperacao, null],
+      ['Marketing', c.subMarketing, null],
+      ['Logística', c.subLogistica, null],
+      ...extraRows,
+      ['Despesas administrativas', c.despesasAdm, null],
+      ['Restituições de caixa aprovadas', c.restituicoesAprovadas, 'já aprovadas na aba Restituição de Caixa, entram como custo já incorrido'],
+      ['Taxa sobre ingressos', c.custoTaxaIngressos, 'plataforma + cartão + tributos, sobre a receita de ingressos'],
+      ['Tributos / taxas bancárias / comissões', c.tributosValor, 'sobre a receita total'],
+      ['Contingência', c.contingenciaValor, `${fmtPct(e.outros.contingenciaPct)} sobre os custos fixos + taxa de ingressos`],
+      ['Open bar', c.openBar, c.openBar ? `${fmtCur2(e.outros.openBarValor)} × capacidade (${fmtInt(c.capMax)})` : 'não contratado nesse cenário'],
+    ];
+    total = c.custoTotal;
+  }
+  const rows = linhas.map(([label,valor,nota])=>`<tr>
+      <td>${esc(label)}${nota ? ` <span class="hint">— ${esc(nota)}</span>` : ''}</td>
+      <td class="num mono">${fmtCur2(valor)}</td>
+    </tr>`).join('');
+  return `
+  <div class="saldo-hist-lightbox" data-action="closeScenarioBreakdown">
+    <div class="lb-bar" onclick="event.stopPropagation();">
+      <span class="hint" style="font-weight:600; color:var(--text);">${esc(titulo)}</span>
+      <button class="btn small lb-close guest-ok" data-action="closeScenarioBreakdown" style="margin-left:auto;">Fechar ✕</button>
+    </div>
+    <div class="lb-viewport" onclick="event.stopPropagation();">
+      <div class="tablewrap"><table>
+        <thead><tr><th>Componente</th><th class="num">Valor</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td>Total</td><td class="num mono" style="font-weight:700;">${fmtCur2(total)}</td></tr></tfoot>
+      </table></div>
+      <div class="hint" style="margin-top:8px;">Esse cenário (${SCEN_LABEL[scen]}) é só deste domínio — cada domínio (Piquinzada 2027, Feijoada do Bloco, Bateria Piquinzada) tem suas próprias Entradas PMO e seu próprio Dashboard.</div>
+    </div>
+  </div>`;
+}
+ACTIONS.openScenarioBreakdown = (scen, tipo)=>{
+  state.ui.scenarioBreakdownOpen = true;
+  state.ui.scenarioBreakdownScen = scen;
+  state.ui.scenarioBreakdownTipo = tipo;
+  render();
+};
+ACTIONS.closeScenarioBreakdown = ()=>{
+  state.ui.scenarioBreakdownOpen = false;
+  render();
 };
 // histórico item a item do saldo de caixa compartilhado — reaproveitado tanto no card do
 // Dashboard quanto no do Fluxo de Caixa (os dois mostram o mesmo saldo, só que em telas diferentes)
