@@ -1791,7 +1791,7 @@ function onEnterCommit(e){
 // acoes que so navegam a tela (nao alteram dados do projeto) — continuam liberadas em modo convidado
 // reserva de mesa é a UNICA area do app onde convidado tambem grava de verdade (ver schema.sql,
 // secao 11) — por isso essas acoes de mesa entram aqui, mesmo nao sendo "so navegacao"
-const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa', 'openSaldoHistorico', 'closeSaldoHistorico', 'setSaldoHistoricoFiltro']);
+const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa', 'openSaldoHistorico', 'closeSaldoHistorico', 'setSaldoHistoricoFiltro', 'openMesasLista', 'closeMesasLista']);
 function onAction(e){
   const el = e.currentTarget || e.target.closest('[data-action]');
   const [action, ...args] = el.dataset.action.split(':');
@@ -3304,8 +3304,8 @@ VIEWS.mesas = function(){
 
   <div class="gridN" style="margin-bottom:16px;">
     <div class="kpi"><div class="lbl">Mesas livres</div><div class="kpi-value">${fmtInt(ms.livres)}</div></div>
-    <div class="kpi"><div class="lbl">Mesas reservadas</div><div class="kpi-value" style="color:var(--warn)">${fmtInt(ms.reservadas)}</div></div>
-    <div class="kpi"><div class="lbl">Mesas pagas</div><div class="kpi-value" style="color:var(--good)">${fmtInt(ms.pagas)}</div></div>
+    <div class="kpi saldo-kpi-clickable guest-ok" data-action="openMesasLista:reservadas" title="Clique para ver quais mesas e nomes"><div class="lbl">Mesas reservadas 🔎</div><div class="kpi-value" style="color:var(--warn)">${fmtInt(ms.reservadas)}</div></div>
+    <div class="kpi saldo-kpi-clickable guest-ok" data-action="openMesasLista:pagas" title="Clique para ver quais mesas e nomes"><div class="lbl">Mesas pagas 🔎</div><div class="kpi-value" style="color:var(--good)">${fmtInt(ms.pagas)}</div></div>
     <div class="kpi"><div class="lbl">Total arrecadado</div><div class="kpi-value">${fmtCur(ms.totalPago)}</div></div>
   </div>
 
@@ -3340,7 +3340,58 @@ VIEWS.mesas = function(){
       <span><span class="sw" style="background:var(--good-soft); border:2px solid var(--good);"></span>Paga</span>
     </div>
   </div>
-  ${state.ui.mesa3dOpen ? mesa3dLightbox() : ''}`;
+  ${state.ui.mesa3dOpen ? mesa3dLightbox() : ''}
+  ${state.ui.mesasListaOpen ? mesasListaLightbox() : ''}`;
+};
+// lista nomes + mesa de cada mesa reservada/paga, pra responder "quais mesas e nomes compõem
+// esse número" sem precisar ficar passando o mouse mesa a mesa no mapa — é dado 100% local
+// (state.mesasFeijoada já veio inteiro do Supabase), não precisa pedir nada pro pai (PmoFrame)
+function mesasListaLightbox(){
+  const filtro = state.ui.mesasListaFiltro || 'reservadas';
+  const statusAlvo = filtro==='pagas' ? 'paga' : 'reservada'; // mesaEffectiveStatus() devolve no singular
+  const mesas = (state.mesasFeijoada||[]).filter(m=> mesaEffectiveStatus(m)===statusAlvo).slice().sort((a,b)=> a.numero-b.numero);
+  const titulo = filtro==='pagas' ? 'Mesas pagas' : 'Mesas reservadas (ainda não pagas)';
+  const dataFmt = (d)=> d ? new Date(d+'T00:00:00').toLocaleDateString('pt-BR') : '—';
+  const colCount = filtro==='pagas' ? 5 : 4;
+  const rows = mesas.length ? mesas.map(m=> filtro==='pagas' ? `<tr>
+      <td class="num mono">${m.numero}</td>
+      <td>${esc(m.reservadoPor||'(sem nome)')}</td>
+      <td>${esc(m.telefone||'—')}</td>
+      <td>${dataFmt(m.dataPagamento)}</td>
+      <td class="num mono" style="color:var(--good);">${fmtCur2(Number(m.valorPago)||0)}</td>
+    </tr>` : `<tr>
+      <td class="num mono">${m.numero}</td>
+      <td>${esc(m.reservadoPor||'(sem nome)')}</td>
+      <td>${esc(m.telefone||'—')}</td>
+      <td>${(m.pessoas||[]).length}</td>
+    </tr>`).join('') : `<tr><td colspan="${colCount}" class="hint">Nenhuma mesa ${filtro==='pagas'?'paga':'reservada'} ainda.</td></tr>`;
+  const theadCols = filtro==='pagas'
+    ? '<th class="num">Mesa</th><th>Reservado por</th><th>Telefone</th><th>Data pagto</th><th class="num">Valor pago</th>'
+    : '<th class="num">Mesa</th><th>Reservado por</th><th>Telefone</th><th class="num">Pessoas</th>';
+  const totalPago = filtro==='pagas' ? sum(mesas.map(m=>Number(m.valorPago)||0)) : null;
+  return `
+  <div class="saldo-hist-lightbox" data-action="closeMesasLista">
+    <div class="lb-bar" onclick="event.stopPropagation();">
+      <span class="hint" style="font-weight:600; color:var(--text);">${titulo} — ${mesas.length} mesa${mesas.length!==1?'s':''}</span>
+      <button class="btn small lb-close guest-ok" data-action="closeMesasLista" style="margin-left:auto;">Fechar ✕</button>
+    </div>
+    <div class="lb-viewport" onclick="event.stopPropagation();">
+      <div class="tablewrap"><table>
+        <thead><tr>${theadCols}</tr></thead>
+        <tbody>${rows}</tbody>
+        ${totalPago!=null ? `<tfoot><tr><td colspan="4">Total pago</td><td class="num mono" style="font-weight:700;">${fmtCur2(totalPago)}</td></tr></tfoot>` : ''}
+      </table></div>
+    </div>
+  </div>`;
+}
+ACTIONS.openMesasLista = (filtro)=>{
+  state.ui.mesasListaOpen = true;
+  state.ui.mesasListaFiltro = filtro || 'reservadas';
+  render();
+};
+ACTIONS.closeMesasLista = ()=>{
+  state.ui.mesasListaOpen = false;
+  render();
 };
 const MESA_3D_LIGHTBOX_BASE_PX = 1400; // = max-width da .lb-viewport; zoom 2x = 2800px = resolução nativa da imagem (sem perda de qualidade)
 function mesa3dLightbox(){
