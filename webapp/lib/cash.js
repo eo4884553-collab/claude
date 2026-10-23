@@ -14,17 +14,21 @@ export async function fetchSharedCashBalance() {
   let totalRecebidoPatrocinios = 0;
   let totalPagoCustos = 0;
   let totalPagoRestituicoes = 0;
+  let totalRestituicoesAprovadas = 0;
   PROJECTS.forEach((p) => {
-    const dom = hist.porDominio[p.id] || { receitas: [], custos: [], restituicoes: [] };
+    const dom = hist.porDominio[p.id] || { receitas: [], custos: [], restituicoes: [], restituicoesAprovadas: [] };
     (dom.receitas || []).forEach((r) => {
       if (r.tipo === 'patrocinio') totalRecebidoPatrocinios += Number(r.valor) || 0;
       else totalRecebidoIngressos += Number(r.valor) || 0;
     });
     (dom.custos || []).forEach((c) => { totalPagoCustos += Number(c.valor) || 0; });
     (dom.restituicoes || []).forEach((r) => { totalPagoRestituicoes += Number(r.valor) || 0; });
+    // restituição aprovada mas AINDA NÃO PAGA — não entra na conta do saldo (dinheiro ainda não
+    // saiu do caixa), é só um número de controle pra saber quanto falta efetivamente pagar
+    (dom.restituicoesAprovadas || []).forEach((r) => { totalRestituicoesAprovadas += Number(r.valor) || 0; });
   });
   const saldo = hist.saldoInicial + totalRecebidoIngressos + totalRecebidoPatrocinios - totalPagoCustos - totalPagoRestituicoes;
-  return { saldo, saldoInicial: hist.saldoInicial, totalRecebidoIngressos, totalRecebidoPatrocinios, totalPagoCustos, totalPagoRestituicoes };
+  return { saldo, saldoInicial: hist.saldoInicial, totalRecebidoIngressos, totalRecebidoPatrocinios, totalPagoCustos, totalPagoRestituicoes, totalRestituicoesAprovadas };
 }
 
 // histórico completo por trás do saldo de caixa compartilhado — item por item, agrupado por
@@ -37,7 +41,7 @@ export async function fetchSharedCashHistory() {
   const [{ data: cashRow, error: e1 }, { data: states, error: e2 }, { data: reimbRows, error: e3 }, { data: mesaRows, error: e4 }] = await Promise.all([
     supabase.from('org_cash').select('saldo_inicial').eq('id', 'main').maybeSingle(),
     supabase.from('project_state').select('id,data').in('id', PROJECTS.map((p) => p.id)),
-    supabase.from('reimbursements').select('project_id,descricao,valor,user_email,paid_at').eq('status', 'pago'),
+    supabase.from('reimbursements').select('project_id,descricao,valor,user_email,paid_at,data_compra,status').in('status', ['pago', 'aprovado']),
     supabase.from('mesa_reservas').select('numero,reservado_por,status,valor_pago,data_pagamento').eq('project_id', 'feijoada-bloco'),
   ]);
   if (e1) throw e1;
@@ -47,7 +51,7 @@ export async function fetchSharedCashHistory() {
 
   const saldoInicial = Number(cashRow?.saldo_inicial) || 0;
   const porDominio = {};
-  PROJECTS.forEach((p) => { porDominio[p.id] = { receitas: [], custos: [], restituicoes: [] }; });
+  PROJECTS.forEach((p) => { porDominio[p.id] = { receitas: [], custos: [], restituicoes: [], restituicoesAprovadas: [] }; });
 
   (states || []).forEach((row) => {
     const d = row.data || {};
@@ -102,7 +106,14 @@ export async function fetchSharedCashHistory() {
   (reimbRows || []).forEach((r) => {
     const dom = porDominio[r.project_id];
     if (!dom) return;
-    dom.restituicoes.push({ descricao: r.descricao, quem: r.user_email, valor: Number(r.valor) || 0, data: r.paid_at ? r.paid_at.slice(0, 10) : null });
+    const valor = Number(r.valor) || 0;
+    if (r.status === 'pago') {
+      dom.restituicoes.push({ descricao: r.descricao, quem: r.user_email, valor, data: r.paid_at ? r.paid_at.slice(0, 10) : null });
+    } else if (r.status === 'aprovado') {
+      // ainda não foi paga — fica de controle pra saber o que falta pagar (ver nota em
+      // fetchSharedCashBalance acima: este valor não entra na conta do saldo)
+      dom.restituicoesAprovadas.push({ descricao: r.descricao, quem: r.user_email, valor, data: r.data_compra || null });
+    }
   });
 
   return { saldoInicial, porDominio };
