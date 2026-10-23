@@ -82,6 +82,7 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
             totalRecebidoPatrocinios: cash.totalRecebidoPatrocinios,
             totalPagoCustos: cash.totalPagoCustos,
             totalPagoRestituicoes: cash.totalPagoRestituicoes,
+            totalRestituicoesAprovadas: cash.totalRestituicoesAprovadas,
           },
         });
       } catch (_) { /* se falhar, o app abre normalmente so sem esse saldo (fica 0) */ }
@@ -123,7 +124,7 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
         iframeRef.current?.contentWindow?.postMessage({
           type: 'piquinzada:saldo-compartilhado-result', ok: true,
           saldo: cash.saldo, saldoInicial: cash.saldoInicial,
-          detalhe: { totalRecebidoIngressos: cash.totalRecebidoIngressos, totalRecebidoPatrocinios: cash.totalRecebidoPatrocinios, totalPagoCustos: cash.totalPagoCustos, totalPagoRestituicoes: cash.totalPagoRestituicoes },
+          detalhe: { totalRecebidoIngressos: cash.totalRecebidoIngressos, totalRecebidoPatrocinios: cash.totalRecebidoPatrocinios, totalPagoCustos: cash.totalPagoCustos, totalPagoRestituicoes: cash.totalPagoRestituicoes, totalRestituicoesAprovadas: cash.totalRestituicoesAprovadas },
         }, '*');
       } catch (_) { /* se falhar, o saldo so fica desatualizado ate o proximo save ou recarregar */ }
     }
@@ -184,7 +185,7 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
             iframeRef.current?.contentWindow?.postMessage({
               type: 'piquinzada:saldo-compartilhado-result', ok: true,
               saldo: cash.saldo, saldoInicial: cash.saldoInicial,
-              detalhe: { totalRecebidoIngressos: cash.totalRecebidoIngressos, totalRecebidoPatrocinios: cash.totalRecebidoPatrocinios, totalPagoCustos: cash.totalPagoCustos, totalPagoRestituicoes: cash.totalPagoRestituicoes },
+              detalhe: { totalRecebidoIngressos: cash.totalRecebidoIngressos, totalRecebidoPatrocinios: cash.totalRecebidoPatrocinios, totalPagoCustos: cash.totalPagoCustos, totalPagoRestituicoes: cash.totalPagoRestituicoes, totalRestituicoesAprovadas: cash.totalRestituicoesAprovadas },
             }, '*');
           } catch (e) {
             iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:saldo-compartilhado-result', ok: false }, '*');

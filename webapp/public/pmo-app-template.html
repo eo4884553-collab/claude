@@ -2090,8 +2090,9 @@ VIEWS.dashboard = function(){
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:receitas" title="Clique para ver as linhas"><div class="lbl">Recebido em patrocínios (todos) 🔎</div><div class="kpi-value">${fmtCur2(det.totalRecebidoPatrocinios||0)}</div></div>
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:custos" title="Clique para ver as linhas"><div class="lbl">Pago em custos (todos) 🔎</div><div class="kpi-value">${fmtCur2(det.totalPagoCustos||0)}</div></div>
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:restituicoes" title="Clique para ver as linhas"><div class="lbl">Pago em restituições (todos) 🔎</div><div class="kpi-value">${fmtCur2(det.totalPagoRestituicoes||0)}</div></div>
+        <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:restituicoesAprovadas" title="Clique para ver quais são"><div class="lbl">Restituições aprovadas — a pagar (todos) 🔎</div><div class="kpi-value" style="color:var(--warn)">${fmtCur2(det.totalRestituicoesAprovadas||0)}</div></div>
       </div>
-      <div class="hint" style="margin-top:8px;">Clique em qualquer card pra ver o histórico completo — item a item, por domínio. "Recebido" inclui ingressos vendidos, mesas pagas (Feijoada), contribuições (Bateria) e parcelas de patrocínio já pagas, nos 3 domínios.</div>
+      <div class="hint" style="margin-top:8px;">Clique em qualquer card pra ver o histórico completo — item a item, por domínio. "Recebido" inclui ingressos vendidos, mesas pagas (Feijoada), contribuições (Bateria) e parcelas de patrocínio já pagas, nos 3 domínios. "Restituições aprovadas — a pagar" já foi aprovada mas o dinheiro ainda não saiu do caixa, então não entra no saldo atual — é só controle do que falta pagar.</div>
       ${!HOSTED ? `<div class="hint" style="margin-top:4px;">O saldo compartilhado só fica disponível no app publicado (conectado ao Supabase) — não neste arquivo local.</div>` : ''}`;
     })()}
   </div>
@@ -2205,7 +2206,7 @@ function saldoHistoricoDomainBlock(domId, dom){
 // visão "achatada" de uma categoria (receitas, custos ou restituições) cruzando os 3 domínios
 // numa tabela só — é o que abre quando clica direto no card "Recebido em ingressos"/"Pago em
 // custos"/"Pago em restituições" (em vez da visão geral por domínio, que é mais pra conferir tudo)
-const SALDO_HIST_FILTRO_LABEL = {receitas:'Receitas', custos:'Custos', restituicoes:'Restituições'};
+const SALDO_HIST_FILTRO_LABEL = {receitas:'Receitas', custos:'Custos', restituicoes:'Restituições pagas', restituicoesAprovadas:'Restituições aprovadas — a pagar'};
 function saldoHistoricoFlatTable(data, filtro){
   const dataFmt = (d)=> d ? new Date(d+'T00:00:00').toLocaleDateString('pt-BR') : '—';
   const linhas = [];
@@ -2232,6 +2233,15 @@ function saldoHistoricoFlatTable(data, filtro){
       <td>${esc(ORIGEM_PAGAMENTO_LABEL[c.origem] || c.origem)}</td>
       <td class="num mono" style="color:var(--bad);">${fmtCur2(c.valor)}</td>
     </tr>`).join('');
+  } else if(filtro==='restituicoesAprovadas'){
+    theadCols = '<th>Domínio</th><th>Restituição</th><th>Quem solicitou</th><th>Data da compra</th><th class="num">Valor</th>';
+    bodyRows = linhas.map(({domId,item:r})=>`<tr>
+      <td>${esc(SALDO_HIST_DOMAIN_LABEL[domId]||domId)}</td>
+      <td>${esc(r.descricao||'(sem descrição)')}</td>
+      <td>${esc(r.quem||'—')}</td>
+      <td>${dataFmt(r.data)}</td>
+      <td class="num mono" style="color:var(--warn);">${fmtCur2(r.valor)}</td>
+    </tr>`).join('');
   } else {
     theadCols = '<th>Domínio</th><th>Restituição</th><th>Quem recebeu</th><th>Data</th><th class="num">Valor</th>';
     bodyRows = linhas.map(({domId,item:r})=>`<tr>
@@ -2242,7 +2252,7 @@ function saldoHistoricoFlatTable(data, filtro){
       <td class="num mono" style="color:var(--bad);">${fmtCur2(r.valor)}</td>
     </tr>`).join('');
   }
-  const colspan = filtro==='custos' ? 4 : 3;
+  const colspan = (filtro==='custos' || filtro==='restituicoesAprovadas') ? 4 : 3;
   return `
   <div class="tablewrap"><table>
     <thead><tr>${theadCols}</tr></thead>
@@ -2250,7 +2260,7 @@ function saldoHistoricoFlatTable(data, filtro){
     <tfoot><tr><td colspan="${colspan}">Total — ${SALDO_HIST_FILTRO_LABEL[filtro]} (todos os domínios)</td><td class="num mono" style="font-weight:700;">${fmtCur2(total)}</td></tr></tfoot>
   </table></div>`;
 }
-const SALDO_HIST_TABS = [['todos','Visão geral'],['receitas','Receitas'],['custos','Custos'],['restituicoes','Restituições']];
+const SALDO_HIST_TABS = [['todos','Visão geral'],['receitas','Receitas'],['custos','Custos'],['restituicoes','Restituições pagas'],['restituicoesAprovadas','A pagar (aprovadas)']];
 function saldoHistoricoLightbox(){
   const loading = state.ui.saldoHistoricoLoading;
   const error = state.ui.saldoHistoricoError;
@@ -3692,8 +3702,9 @@ VIEWS.fluxo = function(){
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:receitas" title="Clique para ver as linhas"><div class="lbl">Recebido em patrocínios (todos) 🔎</div><div class="kpi-value">${fmtCur2(det.totalRecebidoPatrocinios||0)}</div></div>
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:custos" title="Clique para ver as linhas"><div class="lbl">Pago em custos (todos) 🔎</div><div class="kpi-value">${fmtCur2(det.totalPagoCustos||0)}</div></div>
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:restituicoes" title="Clique para ver as linhas"><div class="lbl">Pago em restituições (todos) 🔎</div><div class="kpi-value">${fmtCur2(det.totalPagoRestituicoes||0)}</div></div>
+        <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:restituicoesAprovadas" title="Clique para ver quais são"><div class="lbl">Restituições aprovadas — a pagar (todos) 🔎</div><div class="kpi-value" style="color:var(--warn)">${fmtCur2(det.totalRestituicoesAprovadas||0)}</div></div>
       </div>
-      <div class="hint" style="margin-top:8px;">Clique em qualquer card pra ver o histórico completo — item a item, por domínio. "Recebido" inclui ingressos vendidos, mesas pagas (Feijoada), contribuições (Bateria) e parcelas de patrocínio já pagas, nos 3 domínios.</div>
+      <div class="hint" style="margin-top:8px;">Clique em qualquer card pra ver o histórico completo — item a item, por domínio. "Recebido" inclui ingressos vendidos, mesas pagas (Feijoada), contribuições (Bateria) e parcelas de patrocínio já pagas, nos 3 domínios. "Restituições aprovadas — a pagar" já foi aprovada mas o dinheiro ainda não saiu do caixa, então não entra no saldo atual — é só controle do que falta pagar.</div>
       ${HOSTED ? `<label class="field" style="flex-direction:row; align-items:center; gap:6px; margin-top:10px; max-width:320px;">
         <span class="lbl" style="white-space:nowrap;">Saldo inicial do caixa (ajustar)</span>
         <input type="number" step="100" value="${saldoInicial}" onchange="requestSetSaldoCompartilhado(Number(this.value)||0)" style="width:140px;">
