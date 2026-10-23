@@ -875,6 +875,15 @@ function migrateState(){
     }
     // catalogo detalhado de bebidas — estados salvos antes disso nao tem essa lista ainda
     if(state.entradas && state.entradas[scen] && !state.entradas[scen].bebidas) state.entradas[scen].bebidas = [];
+    // itens do catalogo salvos antes do campo "Nº de pessoas" existir nao tem esse campo —
+    // default = total de pagantes do cenario, pra preservar o total ja lançado (equivale ao
+    // comportamento antigo de "todo pagante consome esse item"); o usuário ajusta depois pra
+    // itens que não valem pra todo mundo (ex.: passaporte de brinquedoteca é só pras crianças)
+    if(state.entradas && state.entradas[scen]){
+      (state.entradas[scen].bebidas||[]).forEach(b=>{
+        if(b.numPessoas===undefined) b.numPessoas = Math.round(pagantesBase(scen));
+      });
+    }
     // uma cota (ex.: "Prata") tem Qtd. alvo > 1, ou seja, varias empresas diferentes podem fechar
     // a mesma cota — cada uma com seu proprio nome e seu proprio parcelamento. Cotas salvas antes
     // dessa mudanca tinham 1 "empresa" + 1 lista de "parcelas" direto na cota (so permitia 1
@@ -1053,29 +1062,36 @@ function computePatrocinio(scen){
   return {nCotas, contratado, pipeline, esperado, nominal};
 }
 // margem liquida por unidade de uma bebida/ativacao: preco de venda menos custo do produto,
-// mao de obra operacional (pra servir) e taxa de cartao sobre o preco de venda
+// mao de obra operacional (pra servir) e taxa de cartao sobre o preco de venda. "Nº de pessoas"
+// é a quantidade de pessoas a que ESSE item se aplica — nem todo item vale pra todo mundo que
+// paga ingresso (ex.: passaporte de brinquedoteca é só pras crianças), então cada item tem sua
+// própria base de pessoas em vez de usar sempre o total de pagantes do evento
 function bebidaCalc(b){
   const custoUnit = Number(b.custoUnit)||0;
   const precoVenda = Number(b.precoVenda)||0;
   const custoOperacionalUnit = Number(b.custoOperacionalUnit)||0;
   const taxaCartaoPct = Number(b.taxaCartaoPct)||0;
   const qtdPorPessoa = Number(b.qtdPorPessoa)||0;
+  const numPessoas = Number(b.numPessoas)||0;
   const taxaCartaoValor = precoVenda*taxaCartaoPct;
   const margemUnit = precoVenda - custoUnit - custoOperacionalUnit - taxaCartaoValor;
   const margemPct = precoVenda ? margemUnit/precoVenda : 0;
+  const qtdTotal = qtdPorPessoa*numPessoas;
   return {
-    custoUnit, precoVenda, custoOperacionalUnit, taxaCartaoPct, qtdPorPessoa,
-    taxaCartaoValor, margemUnit, margemPct,
-    receitaPP: precoVenda*qtdPorPessoa, margemPP: margemUnit*qtdPorPessoa,
+    custoUnit, precoVenda, custoOperacionalUnit, taxaCartaoPct, qtdPorPessoa, numPessoas,
+    taxaCartaoValor, margemUnit, margemPct, qtdTotal,
+    receitaItemTotal: precoVenda*qtdTotal, margemItemTotal: margemUnit*qtdTotal,
   };
 }
-// resumo do catalogo de bebidas de um cenario — usado tanto pela tela quanto pelo motor de calculo
+// resumo do catalogo de bebidas de um cenario — usado tanto pela tela quanto pelo motor de calculo.
+// cada item já carrega sua própria quantidade de pessoas, entao os totais aqui sao somas diretas —
+// nao se multiplica de novo pelo total de pagantes do evento (ver computeScenario)
 function computeBebidas(scen){
   const list = (state.entradas[scen].bebidas)||[];
   const rows = list.map(b=> Object.assign({}, b, bebidaCalc(b)));
-  const receitaPPTotal = sum(rows.map(r=>r.receitaPP));
-  const margemPPTotal = sum(rows.map(r=>r.margemPP));
-  return {rows, receitaPPTotal, margemPPTotal, ativo: rows.length>0};
+  const receitaCatalogoTotal = sum(rows.map(r=>r.receitaItemTotal));
+  const margemCatalogoTotal = sum(rows.map(r=>r.margemItemTotal));
+  return {rows, receitaCatalogoTotal, margemCatalogoTotal, ativo: rows.length>0};
 }
 const FIXED_COST_GROUP_KEYS = ['atracoes','estrutura','operacao','marketing','logistica'];
 function computeCustoGroups(scen){
@@ -1117,10 +1133,15 @@ function computeScenario(scen, overrides){
   const receitaIngressos = pagantes * v.ticketMedio * ticketFactor;
   const custoTaxaIngressos = receitaIngressos * taxaTotal;
 
-  // se houver catalogo detalhado de bebidas cadastrado, ele substitui a estimativa simplificada
+  // se houver catalogo detalhado de bebidas cadastrado, ele substitui a estimativa simplificada —
+  // cada item do catalogo ja tem seu proprio "Nº de pessoas" embutido no total (um passaporte de
+  // criança nao escala com o total de pagantes do evento), entao o total do catalogo NAO é
+  // multiplicado de novo pelo total de pagantes; so a estimativa simplificada (sem catalogo) continua
+  // escalando pelo total de pagantes, por ser uma média geral por pessoa
   const beb = computeBebidas(scen);
-  const margemConsumoPP = beb.ativo ? beb.margemPPTotal : e.consumoBruto*(1-e.custoOpConsumoPct);
-  const receitaConsumo = margemConsumoPP * pagantes * consumoFactor;
+  const margemConsumoTotal = beb.ativo ? beb.margemCatalogoTotal : e.consumoBruto*(1-e.custoOpConsumoPct)*pagantes;
+  const receitaConsumo = margemConsumoTotal * consumoFactor;
+  const margemConsumoPP = pagantes ? margemConsumoTotal/pagantes : 0;
 
   const patrocinio = p.esperado * patroFactor;
   const outras = e.outrasReceitas;
@@ -2170,7 +2191,7 @@ function scenarioBreakdownLightbox(){
     linhas = [
       ['Ingressos vendidos', c.receitaIngressos, `${fmtInt(c.pagantes)} pagantes × ${fmtCur2(c.ticketMedio)} de ticket médio (bruto, antes das taxas)`],
       ['Patrocínio', c.patrocinio, `pipeline ponderado pela probabilidade de cada cota — contratado: ${fmtCur(c.patroContratado)}, em negociação: ${fmtCur(c.patroPipeline)}`],
-      ['Consumo/ativações', c.receitaConsumo, c.bebidasAtivas ? 'soma da margem do catálogo de bebidas/ativações × pagantes' : 'margem estimada por pessoa × pagantes'],
+      ['Consumo/ativações', c.receitaConsumo, c.bebidasAtivas ? 'soma da margem de cada item do catálogo de bebidas/ativações, já considerando o nº de pessoas de cada item' : 'margem estimada por pessoa × pagantes'],
       ['Outras receitas', c.outras, 'valor fixo lançado em Entradas PMO'],
     ];
     total = c.receitaTotal;
@@ -2511,19 +2532,20 @@ VIEWS.entradas = function(){
       <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.custoOperacionalUnit`, r.custoOperacionalUnit, {type:'number', step:'0.1', cls:'num'})}</td>
       <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.taxaCartaoPct`, Math.round(r.taxaCartaoPct*1000)/10, {type:'number', step:'0.1', cls:'num', kind:'pct'})}</td>
       <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.qtdPorPessoa`, r.qtdPorPessoa, {type:'number', step:'0.1', cls:'num'})}</td>
+      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.numPessoas`, r.numPessoas, {type:'number', step:'1', cls:'num'})}</td>
       <td class="num mono">${fmtCur2(r.margemUnit)}</td>
       <td class="num mono">${fmtPct(r.margemPct)}</td>
-      <td class="num mono">${fmtCur2(r.margemPP)}</td>
+      <td class="num mono">${fmtCur2(r.margemItemTotal)}</td>
       <td><button class="rm" data-action="rmBebida:${scen}:${i}" title="Remover bebida/ativação">✕</button></td>
     </tr>`).join('');
     body = `<div class="section" style="margin:0 0 16px;">
       <h3 style="margin:0 0 6px; font-size:14.5px;">Catálogo detalhado de bebidas/ativações</h3>
-      <div class="hint">Cadastre cada tipo de bebida (ou ativação de consumo) com custo do produto, preço de venda, mão de obra operacional para servir e taxa de cartão — a margem líquida por pessoa é calculada automaticamente. Ao cadastrar pelo menos 1 item aqui, ele substitui a estimativa simplificada abaixo.</div>
+      <div class="hint">Cadastre cada tipo de bebida (ou ativação de consumo) com custo do produto, preço de venda, mão de obra operacional para servir e taxa de cartão. Em "Nº de pessoas", informe quantas pessoas esse item realmente atinge — nem todo item vale pra todo mundo que paga ingresso (ex.: um passaporte de brinquedoteca é só pras crianças, não para o total de pagantes do evento). A margem total do item é calculada automaticamente. Ao cadastrar pelo menos 1 item aqui, o catálogo substitui a estimativa simplificada abaixo.</div>
       <div class="tablewrap" style="margin-top:10px;">
         <table>
-          <thead><tr><th>Bebida/ativação</th><th class="num">Custo unit. (R$)</th><th class="num">Preço venda (R$)</th><th class="num">Mão de obra/unid. (R$)</th><th class="num">Taxa cartão (%)</th><th class="num">Qtd./pessoa</th><th class="num">Margem unit.</th><th class="num">Margem %</th><th class="num">Margem/pessoa</th><th></th></tr></thead>
-          <tbody>${bebRows || `<tr><td colspan="10" class="hint">Nenhuma bebida cadastrada — usando a estimativa simplificada abaixo.</td></tr>`}</tbody>
-          ${bebCalc.rows.length ? `<tfoot><tr><td colspan="8">Total</td><td class="num mono">${fmtCur2(bebCalc.margemPPTotal)}</td><td></td></tr></tfoot>` : ''}
+          <thead><tr><th>Bebida/ativação</th><th class="num">Custo unit. (R$)</th><th class="num">Preço venda (R$)</th><th class="num">Mão de obra/unid. (R$)</th><th class="num">Taxa cartão (%)</th><th class="num">Qtd./pessoa</th><th class="num">Nº de pessoas</th><th class="num">Margem unit.</th><th class="num">Margem %</th><th class="num">Margem total</th><th></th></tr></thead>
+          <tbody>${bebRows || `<tr><td colspan="11" class="hint">Nenhuma bebida cadastrada — usando a estimativa simplificada abaixo.</td></tr>`}</tbody>
+          ${bebCalc.rows.length ? `<tfoot><tr><td colspan="9">Total</td><td class="num mono">${fmtCur2(bebCalc.margemCatalogoTotal)}</td><td></td></tr></tfoot>` : ''}
         </table>
       </div>
       <button class="btn small" style="margin-top:10px;" data-action="addBebida:${scen}">+ Adicionar bebida/ativação</button>
@@ -2539,8 +2561,9 @@ VIEWS.entradas = function(){
       </div>
       <div class="card" style="padding:16px 18px;">
         <h3 style="margin:0 0 10px; font-size:14.5px;">Calculado (usado no cenário)</h3>
-        ${readonlyRow('Margem líquida por pessoa', fmtCur2(cs.margemConsumoPP))}
+        ${readonlyRow(bebCalc.ativo ? 'Margem líquida por pessoa (média, total ÷ pagantes)' : 'Margem líquida por pessoa', fmtCur2(cs.margemConsumoPP))}
         ${readonlyRow('Receita líquida de consumo/ativações', fmtCur(cs.receitaConsumo))}
+        ${bebCalc.ativo ? `<div class="hint" style="margin-top:8px;">Vem da soma do catálogo acima, já considerando o "Nº de pessoas" de cada item — não é mais multiplicado pelo total de pagantes do evento.</div>` : ''}
       </div>
     </div>`;
   } else if(sec==='custos'){
@@ -2585,7 +2608,10 @@ VIEWS.entradas = function(){
 };
 ACTIONS.setEntradasSection = (id)=>{ state.ui.entradasSection = id; saveState(); render(); };
 ACTIONS.addBebida = (scen)=>{
-  state.entradas[scen].bebidas.push({id:uid(), nome:'Nova bebida', custoUnit:0, precoVenda:0, custoOperacionalUnit:0, taxaCartaoPct:0, qtdPorPessoa:0});
+  // Nº de pessoas começa igual ao total de pagantes do cenário (a maioria dos itens, tipo bebida,
+  // vale pra todo mundo) — o usuário reduz esse número pra itens que valem só pra um grupo
+  // específico (ex.: passaporte de brinquedoteca, só pras crianças)
+  state.entradas[scen].bebidas.push({id:uid(), nome:'Nova bebida', custoUnit:0, precoVenda:0, custoOperacionalUnit:0, taxaCartaoPct:0, qtdPorPessoa:0, numPessoas: Math.round(pagantesBase(scen))});
   saveState(); render();
 };
 ACTIONS.rmBebida = (scen, idx)=>{
