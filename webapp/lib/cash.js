@@ -63,6 +63,7 @@ export async function fetchSharedCashHistory() {
       dom.custos.push({
         fornecedor: c.fornecedor || '(sem fornecedor)',
         subcategoria: c.subcategoria || c.grupo || '',
+        grupo: c.grupo || '',
         valor, data: c.dataPagamento, origem: c.origemPagamento || 'dominio',
       });
     });
