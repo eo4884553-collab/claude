@@ -907,6 +907,15 @@ async function extratoProcessarPdf(file){
 // consulta pra dar pra referenciar o vínculo exato escolhido. Restituição APROVADA mas ainda não paga
 // fica de fora — dinheiro ainda não saiu do caixa, não é um movimento bancário de verdade ainda.
 const EXTRATO_DOM_LABEL = {main:'Piquinzada 2027', 'feijoada-bloco':'Feijoada do Bloco', 'bateria-piquinzada':'Bateria Piquinzada'};
+// cada candidato ganha "categoria" (o tipo de lançamento — Mesa, Patrocínio, Custo por grupo etc.)
+// separado do "item" (o lançamento específico) — é o que permite agrupar a lista de candidatos por
+// domínio › categoria em vez de uma lista comprida sem organização (ver extratoAgruparCandidatos)
+function extratoReceitaCategoria(r){
+  if(r.tipo==='patrocinio') return 'Patrocínio';
+  if(/^Mesa \d+/.test(r.descricao||'')) return 'Mesa';
+  if(/— parcela$/.test(r.descricao||'')) return 'Contribuição';
+  return 'Vendas';
+}
 function extratoLedgerFlat(){
   const data = state.ui.saldoHistoricoData;
   if(!data || !data.porDominio) return [];
@@ -916,11 +925,23 @@ function extratoLedgerFlat(){
     const domLabel = EXTRATO_DOM_LABEL[domId] || domId;
     // separador "|" (não ":") no id — vai dentro de um data-action que o dispatcher corta por ":",
     // então um id com ":" quebraria o parse dos argumentos (ver ACTIONS.extratoToggleVinculo)
-    (dom.receitas||[]).forEach((r,i)=> out.push({id:`${domId}|receitas|${i}`, tipo:'entrada', valor:Number(r.valor)||0, data:r.data, label:r.descricao, dom:domLabel}));
-    (dom.custos||[]).forEach((c,i)=> out.push({id:`${domId}|custos|${i}`, tipo:'saida', valor:Number(c.valor)||0, data:c.data, label:`${c.fornecedor||'(sem fornecedor)'}${c.subcategoria?' — '+c.subcategoria:''}`, dom:domLabel}));
-    (dom.restituicoes||[]).forEach((r,i)=> out.push({id:`${domId}|restituicoes|${i}`, tipo:'saida', valor:Number(r.valor)||0, data:r.data, label:`Restituição — ${r.descricao}`, dom:domLabel}));
+    (dom.receitas||[]).forEach((r,i)=> out.push({id:`${domId}|receitas|${i}`, tipo:'entrada', valor:Number(r.valor)||0, data:r.data, dom:domLabel, categoria:extratoReceitaCategoria(r), item:r.descricao||'(sem descrição)'}));
+    (dom.custos||[]).forEach((c,i)=> out.push({id:`${domId}|custos|${i}`, tipo:'saida', valor:Number(c.valor)||0, data:c.data, dom:domLabel, categoria:c.grupo||'Custo', item:`${c.fornecedor||'(sem fornecedor)'}${c.subcategoria && c.subcategoria!==c.grupo ? ' — '+c.subcategoria : ''}`}));
+    (dom.restituicoes||[]).forEach((r,i)=> out.push({id:`${domId}|restituicoes|${i}`, tipo:'saida', valor:Number(r.valor)||0, data:r.data, dom:domLabel, categoria:'Restituição de Caixa', item:r.descricao}));
   });
   return out;
+}
+// agrupa os candidatos de uma linha por domínio › categoria, pra mostrar um subtítulo por grupo em
+// vez de uma lista plana repetindo "Feijoada do Bloco — Mesa" em cada linha (ex.: "Feijoada do
+// Bloco › Mesa" como subtítulo, com "Mesa 31" e "Mesa 34" listados embaixo)
+function extratoAgruparCandidatos(candidatos){
+  const grupos = new Map();
+  candidatos.forEach(c=>{
+    const chave = `${c.dom}|${c.categoria}`;
+    if(!grupos.has(chave)) grupos.set(chave, {dom:c.dom, categoria:c.categoria, itens:[]});
+    grupos.get(chave).itens.push(c);
+  });
+  return [...grupos.values()];
 }
 // candidatos pra vincular uma linha do extrato: mesmo tipo (entrada/saída) e data próxima (até 10
 // dias) — ou sem data (ex.: receita agregada, que não tem data individual). A janela de data evita
@@ -942,7 +963,7 @@ function extratoScoreMatch(linha, candidato){
   const normalize = s => (s||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z0-9 ]/g,' ').split(/\s+/).filter(w=>w.length>=3);
   const palavrasLinha = new Set(normalize(linha.descricao));
   let score = 0;
-  normalize(candidato.label).forEach(w=>{ if(palavrasLinha.has(w)) score++; });
+  normalize(candidato.item).forEach(w=>{ if(palavrasLinha.has(w)) score++; });
   return score;
 }
 // sugestão automática de vínculo: só pré-marca quando existe um candidato com o valor EXATAMENTE
@@ -4345,13 +4366,19 @@ function extratoLinhaRow(linha, idx, ledger){
       ? `<span class="badge warn"><span class="dot"></span>vinculado ${fmtCur2(somaVinculada)} de ${fmtCur2(valorLinha)}</span>`
       : `<span class="badge warn"><span class="dot"></span>não lançado</span>`;
   // lista de candidatos pra VINCULAR (pode marcar mais de 1 — ex.: 1 Pix que é a soma de 2 mesas
-  // pagas) — o total marcado é comparado ao valor da linha acima, pra saber se já "bate"
+  // pagas), agrupada por domínio › categoria com um subtítulo pra cada grupo (em vez de uma lista
+  // plana repetindo "Feijoada do Bloco — Mesa" em toda linha) — o total marcado é comparado ao
+  // valor da linha acima, pra saber se já "bate"
   const listaHtml = candidatos.length
-    ? `<div style="max-height:120px; overflow-y:auto; border:1px solid var(--line); border-radius:6px; padding:4px 6px; margin-top:4px; font-size:11px;">
-        ${candidatos.map(c=>`<label style="display:flex; align-items:flex-start; gap:4px; padding:2px 0; cursor:pointer;">
-          <input type="checkbox" data-action="extratoToggleVinculo:${idx}:${c.id}" ${vinculoIds.includes(c.id)?'checked':''} style="margin-top:2px;">
-          <span>${esc(c.dom)} — ${esc(c.label)} — ${fmtCur2(c.valor)}${c.data?` (${c.data.split('-').reverse().join('/')})`:''}</span>
-        </label>`).join('')}
+    ? `<div style="max-height:150px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; padding:4px 6px; margin-top:4px; font-size:11px;">
+        ${extratoAgruparCandidatos(candidatos).map(g=>`
+          <div style="margin-top:4px;">
+            <div style="font-weight:700; font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.03em;">${esc(g.dom)} › ${esc(g.categoria)}</div>
+            ${g.itens.map(c=>`<label style="display:flex; align-items:flex-start; gap:4px; padding:2px 0 2px 8px; cursor:pointer;">
+              <input type="checkbox" data-action="extratoToggleVinculo:${idx}:${c.id}" ${vinculoIds.includes(c.id)?'checked':''} style="margin-top:2px;">
+              <span>${esc(c.item)} — ${fmtCur2(c.valor)}${c.data?` (${c.data.split('-').reverse().join('/')})`:''}</span>
+            </label>`).join('')}
+          </div>`).join('')}
       </div>`
     : `<div class="hint" style="margin-top:4px;">Nenhum lançamento do mesmo tipo perto dessa data.</div>`;
   const acaoHtml = bate ? '' : (linha.tipo==='saida' ? extratoLancarSaidaForm(linha, idx) : `<div class="hint" style="max-width:220px; margin-top:4px;">${EXTRATO_ENTRADA_HINT[PROJECT_ID] || 'Lance na tela certa do domínio correspondente.'}</div>`);
