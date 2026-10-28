@@ -829,14 +829,29 @@ async function extratoExtrairTextoPdf(file){
   }
   return linhas;
 }
+const EXTRATO_MES_PT = {janeiro:1,fevereiro:2,'março':3,marco:3,abril:4,maio:5,junho:6,julho:7,agosto:8,setembro:9,outubro:10,novembro:11,dezembro:12};
 // tenta reconhecer "data | descrição | valor" em cada linha de texto extraída do PDF — heurística,
-// não é garantido pegar 100% certo (cada banco formata diferente, e algumas linhas têm 2 valores:
-// o da transação e o saldo corrente). É só uma sugestão inicial pra tabela editável da aba.
+// não é garantido pegar 100% certo. Cobre 2 formatos comuns de extrato brasileiro:
+// 1) data e transação na MESMA linha, formato dd/mm/aaaa (ex.: "15/03/2026 PIX ... 1.234,56")
+// 2) um "cabeçalho de dia" por extenso (ex.: "28 de Setembro de 2026 Saldo do dia: R$ 193,39"),
+//    seguido de várias linhas de transação SEM data própria (ex.: Banco Inter) — nesse caso a
+//    data do cabeçalho vale pra todas as transações abaixo dele, até o próximo cabeçalho.
+// Em qualquer um dos casos, algumas linhas têm 2 valores (o da transação e o saldo corrente) —
+// o penúltimo costuma ser o da transação. É só uma sugestão inicial pra tabela editável da aba.
 function extratoParseLinhas(linhasTexto){
+  const DATE_PT_RE = /^(\d{1,2})\s+de\s+([a-zçã]+)\s+de\s+(\d{4})/i;
   const DATE_RE = /(\d{2}\/\d{2}\/\d{2,4})/;
   const VALUE_RE = /-?\s*(?:R\$\s*)?\d{1,3}(?:\.\d{3})*,\d{2}\s*-?/g;
   const out = [];
+  let dataCorrente = '';
   linhasTexto.forEach(linha=>{
+    const ptMatch = linha.match(DATE_PT_RE);
+    if(ptMatch){
+      const dia = ptMatch[1].padStart(2,'0');
+      const mes = String(EXTRATO_MES_PT[ptMatch[2].toLowerCase()]||'').padStart(2,'0');
+      if(mes!=='00') dataCorrente = `${ptMatch[3]}-${mes}-${dia}`;
+      return; // cabeçalho de dia só atualiza a data corrente, não é uma transação
+    }
     const valueMatches = linha.match(VALUE_RE);
     if(!valueMatches || !valueMatches.length) return;
     const dateMatch = linha.match(DATE_RE);
@@ -848,14 +863,16 @@ function extratoParseLinhas(linhasTexto){
     if(dateMatch) descricao = descricao.replace(dateMatch[0], '');
     valueMatches.forEach(v=>{ descricao = descricao.replace(v, ''); });
     descricao = descricao.replace(/\s+/g,' ').trim();
-    let data = '';
-    if(dateMatch){
+    // linha de resumo de saldo ("Saldo total", "Saldo disponível:", "Saldo bloqueado:" etc.) não
+    // é transação — uma transação de verdade nunca começa a descrição com essa palavra
+    if(!descricao || /^saldo\b/i.test(descricao)) return;
+    const data = dateMatch ? (()=>{
       const partes = dateMatch[0].split('/');
       const yyyy = partes[2].length===2 ? '20'+partes[2] : partes[2];
-      data = `${yyyy}-${partes[1]}-${partes[0]}`;
-    }
+      return `${yyyy}-${partes[1]}-${partes[0]}`;
+    })() : dataCorrente;
     out.push({
-      id: uid(), data, descricao: descricao || '(sem descrição)',
+      id: uid(), data, descricao,
       valor: Math.round(Math.abs(valorAssinado)*100)/100,
       tipo: valorAssinado < 0 ? 'saida' : 'entrada',
     });
