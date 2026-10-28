@@ -902,8 +902,10 @@ async function extratoProcessarPdf(file){
   }
 }
 // achata o histórico cruzado dos 3 domínios (mesma fonte do "Saldo de caixa real") numa lista só,
-// pra comparar com cada linha do extrato por valor. Restituição APROVADA mas ainda não paga fica de
-// fora — dinheiro ainda não saiu do caixa, não é um movimento bancário de verdade ainda.
+// pra VINCULAR cada linha do extrato a um ou mais lançamentos já existentes (ex.: 1 Pix de R$400 que
+// na verdade é a soma de 2 mesas pagas, R$200 cada) — cada item ganha um "id" estável dentro dessa
+// consulta pra dar pra referenciar o vínculo exato escolhido. Restituição APROVADA mas ainda não paga
+// fica de fora — dinheiro ainda não saiu do caixa, não é um movimento bancário de verdade ainda.
 const EXTRATO_DOM_LABEL = {main:'Piquinzada 2027', 'feijoada-bloco':'Feijoada do Bloco', 'bateria-piquinzada':'Bateria Piquinzada'};
 function extratoLedgerFlat(){
   const data = state.ui.saldoHistoricoData;
@@ -912,15 +914,54 @@ function extratoLedgerFlat(){
   Object.keys(data.porDominio).forEach(domId=>{
     const dom = data.porDominio[domId];
     const domLabel = EXTRATO_DOM_LABEL[domId] || domId;
-    (dom.receitas||[]).forEach(r=> out.push({tipo:'entrada', valor:Number(r.valor)||0, data:r.data, label:r.descricao, dom:domLabel}));
-    (dom.custos||[]).forEach(c=> out.push({tipo:'saida', valor:Number(c.valor)||0, data:c.data, label:`${c.fornecedor||'(sem fornecedor)'}${c.subcategoria?' — '+c.subcategoria:''}`, dom:domLabel}));
-    (dom.restituicoes||[]).forEach(r=> out.push({tipo:'saida', valor:Number(r.valor)||0, data:r.data, label:`Restituição — ${r.descricao}`, dom:domLabel}));
+    // separador "|" (não ":") no id — vai dentro de um data-action que o dispatcher corta por ":",
+    // então um id com ":" quebraria o parse dos argumentos (ver ACTIONS.extratoToggleVinculo)
+    (dom.receitas||[]).forEach((r,i)=> out.push({id:`${domId}|receitas|${i}`, tipo:'entrada', valor:Number(r.valor)||0, data:r.data, label:r.descricao, dom:domLabel}));
+    (dom.custos||[]).forEach((c,i)=> out.push({id:`${domId}|custos|${i}`, tipo:'saida', valor:Number(c.valor)||0, data:c.data, label:`${c.fornecedor||'(sem fornecedor)'}${c.subcategoria?' — '+c.subcategoria:''}`, dom:domLabel}));
+    (dom.restituicoes||[]).forEach((r,i)=> out.push({id:`${domId}|restituicoes|${i}`, tipo:'saida', valor:Number(r.valor)||0, data:r.data, label:`Restituição — ${r.descricao}`, dom:domLabel}));
   });
   return out;
 }
-function extratoFindMatches(linha, ledger){
-  const tol = 0.01;
-  return ledger.filter(l=> l.tipo===linha.tipo && Math.abs(l.valor - (Number(linha.valor)||0)) <= tol);
+// candidatos pra vincular uma linha do extrato: mesmo tipo (entrada/saída) e data próxima (até 10
+// dias) — ou sem data (ex.: receita agregada, que não tem data individual). A janela de data evita
+// uma lista enorme com TODO lançamento do mesmo tipo em qualquer mês do projeto.
+function extratoCandidatosParaLinha(linha, ledger){
+  const dataLinha = linha.data ? new Date(linha.data+'T00:00:00') : null;
+  return ledger.filter(l=>{
+    if(l.tipo !== linha.tipo) return false;
+    if(!dataLinha || !l.data) return true;
+    const dataCand = new Date(l.data+'T00:00:00');
+    const diffDias = Math.abs((dataCand-dataLinha)/86400000);
+    return diffDias <= 10;
+  });
+}
+// pontua um candidato pela sobreposição de palavras com a descrição da linha do extrato — nomes de
+// pessoas/empresas costumam aparecer nos 2 lados (ex.: "ERICA TEODORO" no Pix e no lançamento),
+// então isso ajuda a pré-marcar o candidato certo quando o valor sozinho não é suficiente
+function extratoScoreMatch(linha, candidato){
+  const normalize = s => (s||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z0-9 ]/g,' ').split(/\s+/).filter(w=>w.length>=3);
+  const palavrasLinha = new Set(normalize(linha.descricao));
+  let score = 0;
+  normalize(candidato.label).forEach(w=>{ if(palavrasLinha.has(w)) score++; });
+  return score;
+}
+// sugestão automática de vínculo: só pré-marca quando existe um candidato com o valor EXATAMENTE
+// igual ao da linha (o caso simples, 1 pra 1) — quando não tem (ex.: 1 Pix de R$400 que na
+// verdade é a soma de Mesa 30 + Mesa 40, R$200 cada), deixa em branco pro usuário combinar manual
+function extratoAutoSugerirVinculo(linha, candidatos){
+  const valorLinha = Math.round((Number(linha.valor)||0)*100)/100;
+  const exatos = candidatos.filter(c=> Math.abs(c.valor-valorLinha)<=0.01);
+  if(!exatos.length) return [];
+  let melhor = exatos[0], melhorScore = extratoScoreMatch(linha, exatos[0]);
+  exatos.slice(1).forEach(c=>{
+    const s = extratoScoreMatch(linha, c);
+    if(s>melhorScore){ melhor=c; melhorScore=s; }
+  });
+  return [melhor.id];
+}
+function extratoSomaVinculada(linha, candidatos){
+  const ids = new Set(linha.vinculoIds||[]);
+  return Math.round(sum(candidatos.filter(c=>ids.has(c.id)).map(c=>c.valor))*100)/100;
 }
 // reserva de mesas (Feijoada do Bloco) — diferente do resto do app, QUALQUER usuário aprovado
 // pode reservar (não só admin), então essas ações nunca passam por saveState()/piquinzada:save
@@ -4283,19 +4324,44 @@ const EXTRATO_ENTRADA_HINT = {
   'bateria-piquinzada': 'Lance em Vendas (contribuição) ou Patrocínios, neste domínio.',
 };
 function extratoLinhaRow(linha, idx, ledger){
-  const matches = extratoFindMatches(linha, ledger);
-  const lancado = matches.length>0 || linha.lancado;
-  const statusHtml = lancado
-    ? `<span class="badge good"><span class="dot"></span>já lançado</span>${matches[0] ? `<div class="hint">${esc(matches[0].dom)} — ${esc(matches[0].label)}</div>` : ''}${matches.length>1 ? `<div class="hint">(+${matches.length-1} outro(s) com esse valor)</div>` : ''}`
-    : `<span class="badge warn"><span class="dot"></span>não lançado</span>`;
-  const acaoHtml = lancado ? '' : (linha.tipo==='saida' ? extratoLancarSaidaForm(linha, idx) : `<div class="hint" style="max-width:210px;">${EXTRATO_ENTRADA_HINT[PROJECT_ID] || 'Lance na tela certa do domínio correspondente.'}</div>`);
+  if(linha.lancado){
+    return `<tr>
+      <td>${tblInput(`ui.extrato.linhas.${idx}.data`, linha.data, {type:'date'})}</td>
+      <td>${tblInput(`ui.extrato.linhas.${idx}.descricao`, linha.descricao, {width:'220px'})}</td>
+      <td class="num">${tblInput(`ui.extrato.linhas.${idx}.valor`, linha.valor, {type:'number', step:'0.01', cls:'num', width:'100px'})}</td>
+      <td><select data-bind="ui.extrato.linhas.${idx}.tipo"><option value="entrada" ${linha.tipo==='entrada'?'selected':''}>Entrada</option><option value="saida" ${linha.tipo==='saida'?'selected':''}>Saída</option></select></td>
+      <td><span class="badge good"><span class="dot"></span>já lançado</span></td>
+      <td><button class="rm" data-action="extratoRemoverLinha:${idx}" title="Remover linha">✕</button></td>
+    </tr>`;
+  }
+  const candidatos = extratoCandidatosParaLinha(linha, ledger);
+  const vinculoIds = linha.vinculoIds||[];
+  const somaVinculada = extratoSomaVinculada(linha, candidatos);
+  const valorLinha = Math.round((Number(linha.valor)||0)*100)/100;
+  const bate = vinculoIds.length>0 && Math.abs(somaVinculada-valorLinha)<=0.01;
+  const badgeHtml = bate
+    ? `<span class="badge good"><span class="dot"></span>já lançado</span>`
+    : vinculoIds.length>0
+      ? `<span class="badge warn"><span class="dot"></span>vinculado ${fmtCur2(somaVinculada)} de ${fmtCur2(valorLinha)}</span>`
+      : `<span class="badge warn"><span class="dot"></span>não lançado</span>`;
+  // lista de candidatos pra VINCULAR (pode marcar mais de 1 — ex.: 1 Pix que é a soma de 2 mesas
+  // pagas) — o total marcado é comparado ao valor da linha acima, pra saber se já "bate"
+  const listaHtml = candidatos.length
+    ? `<div style="max-height:120px; overflow-y:auto; border:1px solid var(--line); border-radius:6px; padding:4px 6px; margin-top:4px; font-size:11px;">
+        ${candidatos.map(c=>`<label style="display:flex; align-items:flex-start; gap:4px; padding:2px 0; cursor:pointer;">
+          <input type="checkbox" data-action="extratoToggleVinculo:${idx}:${c.id}" ${vinculoIds.includes(c.id)?'checked':''} style="margin-top:2px;">
+          <span>${esc(c.dom)} — ${esc(c.label)} — ${fmtCur2(c.valor)}${c.data?` (${c.data.split('-').reverse().join('/')})`:''}</span>
+        </label>`).join('')}
+      </div>`
+    : `<div class="hint" style="margin-top:4px;">Nenhum lançamento do mesmo tipo perto dessa data.</div>`;
+  const acaoHtml = bate ? '' : (linha.tipo==='saida' ? extratoLancarSaidaForm(linha, idx) : `<div class="hint" style="max-width:220px; margin-top:4px;">${EXTRATO_ENTRADA_HINT[PROJECT_ID] || 'Lance na tela certa do domínio correspondente.'}</div>`);
   return `<tr>
     <td>${tblInput(`ui.extrato.linhas.${idx}.data`, linha.data, {type:'date'})}</td>
     <td>${tblInput(`ui.extrato.linhas.${idx}.descricao`, linha.descricao, {width:'220px'})}</td>
     <td class="num">${tblInput(`ui.extrato.linhas.${idx}.valor`, linha.valor, {type:'number', step:'0.01', cls:'num', width:'100px'})}</td>
     <td><select data-bind="ui.extrato.linhas.${idx}.tipo"><option value="entrada" ${linha.tipo==='entrada'?'selected':''}>Entrada</option><option value="saida" ${linha.tipo==='saida'?'selected':''}>Saída</option></select></td>
-    <td>${statusHtml}</td>
-    <td style="display:flex; gap:6px; align-items:flex-start;">${acaoHtml}<button class="rm" data-action="extratoRemoverLinha:${idx}" title="Remover linha">✕</button></td>
+    <td style="min-width:260px;">${badgeHtml}${listaHtml}${acaoHtml}</td>
+    <td><button class="rm" data-action="extratoRemoverLinha:${idx}" title="Remover linha">✕</button></td>
   </tr>`;
 }
 VIEWS.extrato = function(){
@@ -4310,11 +4376,18 @@ VIEWS.extrato = function(){
   const ledger = extratoLedgerFlat();
   const ledgerPronto = !!state.ui.saldoHistoricoData;
   const linhas = state.ui.extrato.linhas||[];
-  const naoLancadas = linhas.filter(l=> extratoFindMatches(l, ledger).length===0 && !l.lancado);
+  // na primeira vez que uma linha aparece (ou quando o valor/tipo mudou o suficiente pra zerar a
+  // sugestão), pré-marca o vínculo só quando existe 1 candidato com o valor EXATO — o resto fica
+  // em branco pra combinação manual (ver extratoAutoSugerirVinculo)
+  linhas.forEach(l=>{
+    if(l.lancado || l.vinculoIds!==undefined) return;
+    l.vinculoIds = extratoAutoSugerirVinculo(l, extratoCandidatosParaLinha(l, ledger));
+  });
+  const naoLancadas = linhas.filter(l=> !l.lancado && Math.abs(extratoSomaVinculada(l, extratoCandidatosParaLinha(l, ledger)) - Math.round((Number(l.valor)||0)*100)/100) > 0.01);
   const rows = linhas.map((l,i)=> extratoLinhaRow(l, i, ledger)).join('');
 
   return `
-  <div class="topline"><div><h1>Extrato da Conta ${infoIcon('Suba o PDF do extrato bancário (ou lance linhas manualmente) e compare com tudo que já foi lançado nos 3 domínios — ingressos, patrocínios, custos pagos e restituições. O que ainda não bate, você decide: pra saídas, escolhe a categoria e confirma o lançamento (cria o custo de verdade neste domínio); pra entradas, a aba só aponta onde lançar, já que cada domínio guarda receita de um jeito diferente.')}</h1><div class="desc">Aba pessoal — só visível pro seu usuário. Compara contra o caixa dos 3 domínios juntos; lançar uma saída cria o custo neste domínio (${esc(EXTRATO_DOM_LABEL[PROJECT_ID]||PROJECT_ID)} — troque de domínio no topo pra lançar em outro).</div></div></div>
+  <div class="topline"><div><h1>Extrato da Conta ${infoIcon('Suba o PDF do extrato bancário (ou lance linhas manualmente) e vincule cada linha ao(s) lançamento(s) correspondente(s) nos 3 domínios — ingressos, patrocínios, custos pagos e restituições. Marque as caixinhas da lista de candidatos (pode marcar mais de 1 — ex.: 1 Pix de R$400 que na verdade é a soma de Mesa 30 + Mesa 40, R$200 cada); o total marcado precisa bater com o valor da linha. Se o vínculo sugerido automaticamente vier errado, é só desmarcar e marcar o certo. O que não tiver nenhum vínculo que bata, você decide: pra saídas, escolhe a categoria e confirma o lançamento (cria o custo de verdade neste domínio); pra entradas, a aba só aponta onde lançar, já que cada domínio guarda receita de um jeito diferente.')}</h1><div class="desc">Aba pessoal — só visível pro seu usuário. Compara contra o caixa dos 3 domínios juntos; lançar uma saída cria o custo neste domínio (${esc(EXTRATO_DOM_LABEL[PROJECT_ID]||PROJECT_ID)} — troque de domínio no topo pra lançar em outro).</div></div></div>
 
   <div class="section" style="margin-bottom:16px;">
     <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
@@ -4367,6 +4440,16 @@ ACTIONS.extratoLimpar = ()=>{
 };
 ACTIONS.extratoRefreshLedger = ()=>{
   requestSaldoHistorico();
+  render();
+};
+// marca/desmarca um lançamento já existente como parte do que compõe essa linha do extrato — pode
+// marcar mais de 1 (ex.: 1 Pix de R$400 que é a soma de Mesa 30 + Mesa 40, R$200 cada)
+ACTIONS.extratoToggleVinculo = (idx, candId)=>{
+  const linha = (state.ui.extrato && state.ui.extrato.linhas || [])[Number(idx)];
+  if(!linha) return;
+  if(!linha.vinculoIds) linha.vinculoIds = [];
+  const pos = linha.vinculoIds.indexOf(candId);
+  if(pos>=0) linha.vinculoIds.splice(pos,1); else linha.vinculoIds.push(candId);
   render();
 };
 // cria o custo de verdade neste domínio (mesmo caminho de "Entradas PMO > Custos por categoria >
