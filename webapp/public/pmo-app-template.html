@@ -684,6 +684,11 @@ const PROJECT_ID = (typeof window!=='undefined' && window.__PIQUINZADA_PROJECT_I
 // Bloco, pra saber de quem é cada reserva (reserva não passa pelo resto do state/saveState)
 const USER_ID = (typeof window!=='undefined' && window.__PIQUINZADA_USER_ID__) || null;
 const USER_EMAIL = (typeof window!=='undefined' && window.__PIQUINZADA_USER_EMAIL__) || '';
+// aba "Extrato da Conta" (conciliação bancária) é pessoal — só o dono vê e usa, mesmo que outras
+// pessoas sejam administradoras do projeto. Restrição é a nível de UI/visibilidade (igual o resto
+// do app, que também não tem um sistema de permissão granular por pessoa); a criação de custos que
+// ela faz continua passando pela mesma política de escrita de admin do Supabase de sempre.
+const EXTRATO_OWNER_EMAIL = 'eo4884553@gmail.com';
 let state = loadState();
 migrateState();
 // o "valor recebido" salvo pode estar desatualizado em relação ao que os integrantes da Bateria
@@ -776,6 +781,129 @@ if(HOSTED){
     }
     render();
   });
+}
+/* ---------------- Extrato da Conta (conciliação bancária, aba pessoal) ---------------- */
+// carrega a lib de PDF só quando alguém de fato usa a aba (ninguém mais baixa esses ~2MB à toa).
+// pdfjs-dist 4.x só distribui build ESM — por isso import() dinâmico em vez de <script src>.
+let pdfjsLibPromise = null;
+function ensurePdfJs(){
+  if(pdfjsLibPromise) return pdfjsLibPromise;
+  pdfjsLibPromise = import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs').then(lib=>{
+    lib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs';
+    return lib;
+  });
+  return pdfjsLibPromise;
+}
+// "1.234,56" -> 1234.56 (formato brasileiro: ponto de milhar, vírgula decimal); sinal de menos
+// em qualquer posição (ex. "-150,00" ou "150,00-", comum em extrato) marca valor negativo
+function extratoParseBRNumber(raw){
+  const negative = /-/.test(raw);
+  const normalized = raw.replace(/[^\d,.]/g,'').replace(/\.(?=\d{3}(?:\D|$))/g,'').replace(',', '.');
+  const n = parseFloat(normalized);
+  if(isNaN(n)) return 0;
+  return negative ? -Math.abs(n) : n;
+}
+// extrai texto de um PDF preservando a ordem das linhas (agrupando os fragmentos de texto do
+// pdf.js pela posição vertical) — layout varia de banco pra banco, então isso é só o ponto de
+// partida: a tabela de linhas fica sempre editável pra revisão/correção manual depois.
+async function extratoExtrairTextoPdf(file){
+  const pdfjsLib = await ensurePdfJs();
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data: new Uint8Array(buf)}).promise;
+  const linhas = [];
+  for(let p=1; p<=pdf.numPages; p++){
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const porY = new Map();
+    content.items.forEach(it=>{
+      const y = Math.round(it.transform[5]);
+      if(!porY.has(y)) porY.set(y, []);
+      porY.get(y).push(it);
+    });
+    const ys = [...porY.keys()].sort((a,b)=>b-a); // topo pra baixo
+    ys.forEach(y=>{
+      const itens = porY.get(y).sort((a,b)=>a.transform[4]-b.transform[4]); // esquerda pra direita
+      const linha = itens.map(i=>i.str).join(' ').replace(/\s+/g,' ').trim();
+      if(linha) linhas.push(linha);
+    });
+  }
+  return linhas;
+}
+// tenta reconhecer "data | descrição | valor" em cada linha de texto extraída do PDF — heurística,
+// não é garantido pegar 100% certo (cada banco formata diferente, e algumas linhas têm 2 valores:
+// o da transação e o saldo corrente). É só uma sugestão inicial pra tabela editável da aba.
+function extratoParseLinhas(linhasTexto){
+  const DATE_RE = /(\d{2}\/\d{2}\/\d{2,4})/;
+  const VALUE_RE = /-?\s*(?:R\$\s*)?\d{1,3}(?:\.\d{3})*,\d{2}\s*-?/g;
+  const out = [];
+  linhasTexto.forEach(linha=>{
+    const valueMatches = linha.match(VALUE_RE);
+    if(!valueMatches || !valueMatches.length) return;
+    const dateMatch = linha.match(DATE_RE);
+    // com 2+ valores na linha (ex. "valor | saldo"), o penúltimo costuma ser o da transação —
+    // o saldo corrente normalmente é o último número da linha
+    const rawValue = valueMatches.length>1 ? valueMatches[valueMatches.length-2] : valueMatches[0];
+    const valorAssinado = extratoParseBRNumber(rawValue);
+    let descricao = linha;
+    if(dateMatch) descricao = descricao.replace(dateMatch[0], '');
+    valueMatches.forEach(v=>{ descricao = descricao.replace(v, ''); });
+    descricao = descricao.replace(/\s+/g,' ').trim();
+    let data = '';
+    if(dateMatch){
+      const partes = dateMatch[0].split('/');
+      const yyyy = partes[2].length===2 ? '20'+partes[2] : partes[2];
+      data = `${yyyy}-${partes[1]}-${partes[0]}`;
+    }
+    out.push({
+      id: uid(), data, descricao: descricao || '(sem descrição)',
+      valor: Math.round(Math.abs(valorAssinado)*100)/100,
+      tipo: valorAssinado < 0 ? 'saida' : 'entrada',
+    });
+  });
+  return out;
+}
+async function extratoProcessarPdf(file){
+  state.ui.extrato.parsing = true;
+  state.ui.extrato.parseError = null;
+  render();
+  try{
+    const linhasTexto = await extratoExtrairTextoPdf(file);
+    if(!linhasTexto.length){
+      state.ui.extrato.parseError = 'Não consegui extrair texto deste PDF — pode ser uma imagem escaneada sem camada de texto. Use "+ Adicionar linha" pra lançar manualmente.';
+    } else {
+      const novas = extratoParseLinhas(linhasTexto);
+      if(!novas.length){
+        state.ui.extrato.parseError = 'O PDF tem texto, mas não reconheci nenhuma linha com data/valor no formato esperado. Confira o arquivo ou lance manualmente com "+ Adicionar linha".';
+      }
+      state.ui.extrato.linhas = (state.ui.extrato.linhas||[]).concat(novas);
+    }
+  } catch(err){
+    state.ui.extrato.parseError = 'Erro ao ler o PDF: ' + (err && err.message ? err.message : String(err));
+  } finally {
+    state.ui.extrato.parsing = false;
+    render();
+  }
+}
+// achata o histórico cruzado dos 3 domínios (mesma fonte do "Saldo de caixa real") numa lista só,
+// pra comparar com cada linha do extrato por valor. Restituição APROVADA mas ainda não paga fica de
+// fora — dinheiro ainda não saiu do caixa, não é um movimento bancário de verdade ainda.
+const EXTRATO_DOM_LABEL = {main:'Piquinzada 2027', 'feijoada-bloco':'Feijoada do Bloco', 'bateria-piquinzada':'Bateria Piquinzada'};
+function extratoLedgerFlat(){
+  const data = state.ui.saldoHistoricoData;
+  if(!data || !data.porDominio) return [];
+  const out = [];
+  Object.keys(data.porDominio).forEach(domId=>{
+    const dom = data.porDominio[domId];
+    const domLabel = EXTRATO_DOM_LABEL[domId] || domId;
+    (dom.receitas||[]).forEach(r=> out.push({tipo:'entrada', valor:Number(r.valor)||0, data:r.data, label:r.descricao, dom:domLabel}));
+    (dom.custos||[]).forEach(c=> out.push({tipo:'saida', valor:Number(c.valor)||0, data:c.data, label:`${c.fornecedor||'(sem fornecedor)'}${c.subcategoria?' — '+c.subcategoria:''}`, dom:domLabel}));
+    (dom.restituicoes||[]).forEach(r=> out.push({tipo:'saida', valor:Number(r.valor)||0, data:r.data, label:`Restituição — ${r.descricao}`, dom:domLabel}));
+  });
+  return out;
+}
+function extratoFindMatches(linha, ledger){
+  const tol = 0.01;
+  return ledger.filter(l=> l.tipo===linha.tipo && Math.abs(l.valor - (Number(linha.valor)||0)) <= tol);
 }
 // reserva de mesas (Feijoada do Bloco) — diferente do resto do app, QUALQUER usuário aprovado
 // pode reservar (não só admin), então essas ações nunca passam por saveState()/piquinzada:save
@@ -1680,13 +1808,16 @@ const NAV = [
     {id:'riscos', label:'Riscos', ic:'⚠'},
     {id:'gates', label:'Gates PMO', ic:'⛩'},
   ]},
+  {group:'Pessoal', items:[
+    {id:'extrato', label:'Extrato da Conta', ic:'🏦', onlyEmail: EXTRATO_OWNER_EMAIL},
+  ]},
 ];
 if(!state.ui) state.ui = { scenTab:{ entradas:'base', vendas:'base', patrocinios:'base', breakeven:'base', sensibilidade:'base' }, entradasSection:'evento' };
 let currentView = 'dashboard';
 
 function renderNav(){
   $('#navgroups').innerHTML = NAV.map(g=>{
-    const items = g.items.filter(it=> !it.only || it.only===PROJECT_ID);
+    const items = g.items.filter(it=> (!it.only || it.only===PROJECT_ID) && (!it.onlyEmail || it.onlyEmail===USER_EMAIL));
     if(!items.length) return '';
     return `
     <div class="navgroup">
@@ -4116,6 +4247,138 @@ VIEWS.score = function(){
       </div>
     </div>
   </div>`;
+};
+
+/* ================= EXTRATO DA CONTA (conciliação bancária, aba pessoal) ================= */
+function extratoLancarSaidaForm(linha, idx){
+  const groups = state.costGroups||[];
+  const sel = linha.categoriaEscolhida || (groups[0] && groups[0].key) || '';
+  return `<div style="display:flex; flex-direction:column; gap:4px; min-width:160px;">
+    <select data-bind="ui.extrato.linhas.${idx}.categoriaEscolhida" style="font-size:11.5px;">
+      ${groups.map(g=>`<option value="${g.key}" ${g.key===sel?'selected':''}>${esc(g.label)}</option>`).join('')}
+    </select>
+    <button class="btn small" data-action="extratoLancarCusto:${idx}">Confirmar e lançar</button>
+  </div>`;
+}
+const EXTRATO_ENTRADA_HINT = {
+  main: 'Lance em Vendas (ingressos) ou Patrocínios, neste domínio.',
+  'feijoada-bloco': 'Lance em Mesas, Vendas (1º lote) ou Patrocínios, neste domínio.',
+  'bateria-piquinzada': 'Lance em Vendas (contribuição) ou Patrocínios, neste domínio.',
+};
+function extratoLinhaRow(linha, idx, ledger){
+  const matches = extratoFindMatches(linha, ledger);
+  const lancado = matches.length>0 || linha.lancado;
+  const statusHtml = lancado
+    ? `<span class="badge good"><span class="dot"></span>já lançado</span>${matches[0] ? `<div class="hint">${esc(matches[0].dom)} — ${esc(matches[0].label)}</div>` : ''}${matches.length>1 ? `<div class="hint">(+${matches.length-1} outro(s) com esse valor)</div>` : ''}`
+    : `<span class="badge warn"><span class="dot"></span>não lançado</span>`;
+  const acaoHtml = lancado ? '' : (linha.tipo==='saida' ? extratoLancarSaidaForm(linha, idx) : `<div class="hint" style="max-width:210px;">${EXTRATO_ENTRADA_HINT[PROJECT_ID] || 'Lance na tela certa do domínio correspondente.'}</div>`);
+  return `<tr>
+    <td>${tblInput(`ui.extrato.linhas.${idx}.data`, linha.data, {type:'date'})}</td>
+    <td>${tblInput(`ui.extrato.linhas.${idx}.descricao`, linha.descricao, {width:'220px'})}</td>
+    <td class="num">${tblInput(`ui.extrato.linhas.${idx}.valor`, linha.valor, {type:'number', step:'0.01', cls:'num', width:'100px'})}</td>
+    <td><select data-bind="ui.extrato.linhas.${idx}.tipo"><option value="entrada" ${linha.tipo==='entrada'?'selected':''}>Entrada</option><option value="saida" ${linha.tipo==='saida'?'selected':''}>Saída</option></select></td>
+    <td>${statusHtml}</td>
+    <td style="display:flex; gap:6px; align-items:flex-start;">${acaoHtml}<button class="rm" data-action="extratoRemoverLinha:${idx}" title="Remover linha">✕</button></td>
+  </tr>`;
+}
+VIEWS.extrato = function(){
+  if(USER_EMAIL !== EXTRATO_OWNER_EMAIL){
+    return `<div class="topline"><div><h1>Extrato da Conta</h1></div></div><div class="hint">Esta aba não está disponível para o seu usuário.</div>`;
+  }
+  if(!state.ui.extrato) state.ui.extrato = {linhas:[], ledgerRequested:false, parsing:false, parseError:null};
+  if(!state.ui.extrato.ledgerRequested){
+    state.ui.extrato.ledgerRequested = true;
+    requestSaldoHistorico();
+  }
+  const ledger = extratoLedgerFlat();
+  const ledgerPronto = !!state.ui.saldoHistoricoData;
+  const linhas = state.ui.extrato.linhas||[];
+  const naoLancadas = linhas.filter(l=> extratoFindMatches(l, ledger).length===0 && !l.lancado);
+  const rows = linhas.map((l,i)=> extratoLinhaRow(l, i, ledger)).join('');
+
+  return `
+  <div class="topline"><div><h1>Extrato da Conta ${infoIcon('Suba o PDF do extrato bancário (ou lance linhas manualmente) e compare com tudo que já foi lançado nos 3 domínios — ingressos, patrocínios, custos pagos e restituições. O que ainda não bate, você decide: pra saídas, escolhe a categoria e confirma o lançamento (cria o custo de verdade neste domínio); pra entradas, a aba só aponta onde lançar, já que cada domínio guarda receita de um jeito diferente.')}</h1><div class="desc">Aba pessoal — só visível pro seu usuário. Compara contra o caixa dos 3 domínios juntos; lançar uma saída cria o custo neste domínio (${esc(EXTRATO_DOM_LABEL[PROJECT_ID]||PROJECT_ID)} — troque de domínio no topo pra lançar em outro).</div></div></div>
+
+  <div class="section" style="margin-bottom:16px;">
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+      <button class="btn" data-action="extratoEscolherPdf" ${state.ui.extrato.parsing?'disabled':''}>${state.ui.extrato.parsing ? 'Lendo PDF…' : '📄 Escolher PDF do extrato'}</button>
+      <button class="btn small" data-action="extratoAdicionarLinha">+ Adicionar linha</button>
+      ${linhas.length ? `<button class="btn small" data-action="extratoLimpar" data-confirm="Confirmar — remove todas as linhas da tabela">Limpar tabela</button>` : ''}
+      <button class="btn small" data-action="extratoRefreshLedger">🔄 Atualizar comparação</button>
+    </div>
+    <input type="file" id="extratoPdfFileInput" accept="application/pdf" style="display:none;">
+    ${state.ui.extrato.parseError ? `<div class="hint" style="color:var(--bad); margin-top:8px;">${esc(state.ui.extrato.parseError)}</div>` : ''}
+    ${!ledgerPronto ? `<div class="hint" style="margin-top:8px;">Carregando o que já está lançado nos 3 domínios…</div>` : ''}
+  </div>
+
+  ${linhas.length ? `
+  <div class="hint" style="margin-bottom:8px;">${linhas.length} linha(s) no total — ${naoLancadas.length} ainda não lançada(s).</div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Data</th><th>Descrição</th><th class="num">Valor</th><th>Tipo</th><th>Comparação</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>` : `<div class="hint">Nenhuma linha ainda — escolha o PDF do extrato ou adicione linhas manualmente.</div>`}`;
+};
+ACTIONS.extratoEscolherPdf = ()=>{
+  const input = document.getElementById('extratoPdfFileInput');
+  if(!input) return;
+  input.value = '';
+  input.onchange = ()=>{
+    const file = input.files && input.files[0];
+    if(!file) return;
+    extratoProcessarPdf(file);
+  };
+  input.click();
+};
+ACTIONS.extratoAdicionarLinha = ()=>{
+  if(!state.ui.extrato) state.ui.extrato = {linhas:[]};
+  if(!state.ui.extrato.linhas) state.ui.extrato.linhas = [];
+  state.ui.extrato.linhas.push({id:uid(), data:todayISO(), descricao:'', valor:0, tipo:'saida'});
+  render();
+};
+ACTIONS.extratoRemoverLinha = (idx)=>{
+  if(!state.ui.extrato || !state.ui.extrato.linhas) return;
+  state.ui.extrato.linhas.splice(Number(idx),1);
+  render();
+};
+ACTIONS.extratoLimpar = ()=>{
+  if(!state.ui.extrato) return;
+  state.ui.extrato.linhas = [];
+  state.ui.extrato.parseError = null;
+  render();
+};
+ACTIONS.extratoRefreshLedger = ()=>{
+  requestSaldoHistorico();
+  render();
+};
+// cria o custo de verdade neste domínio (mesmo caminho de "Entradas PMO > Custos por categoria >
+// + Adicionar item", só que já preenchido e marcado como pago) — assim o lançamento aparece na
+// tela normal de Custos igual a qualquer outro, sem lógica divergente
+ACTIONS.extratoLancarCusto = (idx)=>{
+  if(READONLY) return;
+  const linha = (state.ui.extrato && state.ui.extrato.linhas || [])[Number(idx)];
+  if(!linha) return;
+  const groupKey = linha.categoriaEscolhida || (state.costGroups[0] && state.costGroups[0].key);
+  const group = state.costGroups.find(g=>g.key===groupKey);
+  if(!group) return;
+  ACTIONS.addCostItem(groupKey);
+  const row = state.custos[state.custos.length-1];
+  const catItem = (state.itemCatalog[groupKey]||[]).find(it=>it.key===row.path[1]);
+  const label = linha.descricao || '(extrato)';
+  if(catItem) catItem.label = label;
+  row.fornecedor = label;
+  row.subcategoria = label;
+  row.grupo = group.label;
+  row.valorContratado = Number(linha.valor)||0;
+  row.valorPago = Number(linha.valor)||0;
+  row.dataPrevista = linha.data || todayISO();
+  row.dataPagamento = linha.data || todayISO();
+  row.status = 'Pago Total';
+  row.obs = 'Lançado a partir do extrato bancário.';
+  linha.lancado = true;
+  saveState(); render();
+  requestSaldoHistorico(); // atualiza a comparação pra esse item já aparecer como "já lançado"
 };
 
 /* ================= BOOT ================= */
