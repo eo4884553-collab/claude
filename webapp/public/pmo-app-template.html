@@ -697,6 +697,14 @@ const USER_EMAIL = (typeof window!=='undefined' && window.__PIQUINZADA_USER_EMAI
 // do app, que também não tem um sistema de permissão granular por pessoa); a criação de custos que
 // ela faz continua passando pela mesma política de escrita de admin do Supabase de sempre.
 const EXTRATO_OWNER_EMAIL = 'emanuel.alef@yahoo.com.br';
+// pilha de desfazer/refazer (ver undoSnapshotStart/undoAplicar/redoAplicar mais abaixo) — precisa
+// ficar declarada AQUI EM CIMA, antes de `let state = loadState()`: logo abaixo tem código de boot
+// que já chama saveState() (corrige o total salvo da Bateria/Feijoada ao abrir) antes de chegar na
+// declaração de undoStack lá embaixo, e "let"/"const" não existem (TDZ) até a própria linha rodar.
+let undoStack = [];
+let redoStack = [];
+let pendingUndoSnapshot = null;
+const UNDO_MAX = 50;
 let state = loadState();
 migrateState();
 // o "valor recebido" salvo pode estar desatualizado em relação ao que os integrantes da Bateria
@@ -1305,14 +1313,9 @@ function initSaveStatusText(){
   else textEl.textContent = 'Pronto — toda alteração salva sozinha aqui';
 }
 // ---------------- Desfazer/Refazer (Ctrl+Z / Ctrl+Shift+Z) ----------------
-// pilha de fotos do state ANTES de cada lançamento que de fato foi salvo — "antes" é capturado em
-// undoSnapshotStart() logo no início de onAction()/onGenericBind()/clique de aba (os 3 únicos
-// pontos de entrada de mutação do usuário), e só é empilhado aqui dentro se a interação realmente
-// terminou chamando saveState() (senão era só navegação/abrir painel, não um "lançamento" de verdade)
-let undoStack = [];
-let redoStack = [];
-let pendingUndoSnapshot = null;
-const UNDO_MAX = 50;
+// (as variáveis undoStack/redoStack/pendingUndoSnapshot/UNDO_MAX ficam declaradas lá em cima,
+// antes de `let state = loadState()` — tem código de boot que já chama saveState() ANTES de
+// chegar aqui embaixo, e "let" não fica disponível até a linha da declaração rodar de verdade)
 function undoSnapshotStart(){
   if(READONLY) return; // convidado nunca chega em saveState() mesmo, não vale a pena nem tirar a foto
   pendingUndoSnapshot = JSON.stringify(state);
