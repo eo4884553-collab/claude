@@ -221,6 +221,19 @@ canvas{max-width:100%;display:block;}
 .risk-banner.good{background:#123524;border:1px solid var(--good);color:#a9f0cf;}
 .risk-banner.warn{background:#3a2e12;border:1px solid var(--warn);color:#ffd98a;}
 
+.insight-list{display:flex;flex-direction:column;gap:8px;}
+.insight-card{border-radius:8px;padding:10px 12px;border:1px solid var(--border);background:var(--panel2);display:flex;flex-direction:column;gap:4px;align-items:flex-start;}
+.insight-card.bad{border-color:var(--bad);background:#241414;}
+.insight-card.warn{border-color:var(--warn);background:#24200f;}
+.insight-card.good{border-color:var(--good);background:#102019;}
+.insight-card .insight-title{font-weight:700;font-size:12.5px;}
+.insight-card.bad .insight-title{color:#ffb3a3;}
+.insight-card.warn .insight-title{color:#ffd98a;}
+.insight-card.good .insight-title{color:#a9f0cf;}
+.insight-card .insight-text{font-size:12px;color:var(--muted);line-height:1.5;}
+.pmo-actions{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;}
+.pmo-actions li{font-size:12.5px;color:var(--text);line-height:1.6;}
+
 /* filter bar */
 .filterbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;padding:8px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;}
 .filterbar label{font-size:10.5px;color:var(--muted);display:flex;flex-direction:column;gap:2px;}
@@ -1194,7 +1207,7 @@ function lineChartSVG({labels, series, refLine, formatValue, height}){
    NAVEGAÇÃO / RENDER PRINCIPAL
    ========================================================================= */
 let currentTab = 'importar';
-let currentSub = {master:'dashboard', fisico:'dashboard'};
+let currentSub = {master:'dashboard', fisico:'dashboard', analise:'checagens'};
 
 document.getElementById('mainTabs').addEventListener('click', (e)=>{
   const btn = e.target.closest('button[data-tab]');
@@ -2844,6 +2857,18 @@ function runAnaliseChecks(){
 }
 
 function renderAnalise(main){
+  const nav = document.createElement('nav'); nav.className='subtabs';
+  [['checagens','Checagens Automáticas'],['margem','Margem & Ofensores'],['pmo','Painel PMO']].forEach(([k,l])=>{
+    const b = document.createElement('button'); b.textContent=l; b.className = currentSub.analise===k?'active':'';
+    b.onclick = ()=>{ currentSub.analise=k; renderApp(); };
+    nav.appendChild(b);
+  });
+  main.appendChild(nav);
+  if(currentSub.analise==='margem') renderAnaliseMargem(main);
+  else if(currentSub.analise==='pmo') renderAnalisePMO(main);
+  else renderAnaliseChecagens(main);
+}
+function renderAnaliseChecagens(main){
   const checks = runAnaliseChecks();
   const totalProblemas = checks.reduce((s,c)=>s+c.rows.length,0);
   const checksComProblema = checks.filter(c=>c.rows.length>0);
@@ -2851,7 +2876,7 @@ function renderAnalise(main){
   const atencao = checks.filter(c=>c.severidade==='warn').reduce((s,c)=>s+c.rows.length,0);
 
   const p = document.createElement('div'); p.className='panel';
-  p.innerHTML = `<h2>Análise${infoIcon('Verificação automática de inconsistências nos dados lançados — quantidades/valores fora do esperado, itens sem disciplina, status desalinhado, contratos vencidos ou com saldo negativo. Cada ocorrência tem um botão "Ajustar" que leva direto ao local do lançamento para corrigir.')}</h2>`;
+  p.innerHTML = `<h2>Checagens Automáticas${infoIcon('Verificação automática de inconsistências nos dados lançados — quantidades/valores fora do esperado, itens sem disciplina, status desalinhado, contratos vencidos ou com saldo negativo. Cada ocorrência tem um botão "Ajustar" que leva direto ao local do lançamento para corrigir.')}</h2>`;
   if(totalProblemas===0){
     p.innerHTML += `<div class="risk-banner good">✔ Nenhuma inconsistência encontrada nas verificações automáticas.</div>`;
   } else {
@@ -2886,6 +2911,257 @@ function renderAnalise(main){
     const cp = document.createElement('div'); cp.className='panel';
     cp.innerHTML = `<p class="hint">Verificações feitas: ${checks.map(c=>c.titulo).join('; ')}.</p>`;
     main.appendChild(cp);
+  }
+}
+
+/* ---------------- ANÁLISE — MARGEM & MAIORES OFENSORES ---------------- */
+// Agrega a margem (faturamento BM − custo realizado) por disciplina e identifica
+// qual disciplina mais corrói o resultado consolidado — e qual fatia do déficit total
+// ela representa, para priorizar onde agir primeiro.
+function computeMarginIntel(){
+  const a = state._agg;
+  const allRows = Object.values(a.byDisc)
+    .filter(d=> d.metaCusto>0 || d.custoRealizado>0 || d.valorMedido>0)
+    .map(d=>{
+      const margem = +(d.valorMedido - d.custoRealizado).toFixed(2);
+      const consumo = d.metaCusto>0 ? d.custoRealizado/d.metaCusto : (d.custoRealizado>0 ? Infinity : 0);
+      const avancoFinDisc = d.valorContratado>0 ? d.valorMedido/d.valorContratado : 0;
+      return Object.assign({margem, consumo, avancoFinDisc}, d);
+    });
+  // Só disciplinas com item medido/faturável entram no ranking de "ofensor de margem" — uma
+  // disciplina 100% de custo indireto (ex.: administração de obra, transporte) nunca tem
+  // faturamento próprio por natureza, então sempre apareceria como "pior margem" sem que isso
+  // reflita um problema real de execução. Elas são reportadas à parte, como custo estrutural.
+  const discRows = allRows.filter(d=>d.valorContratado>0);
+  const overheadRows = allRows.filter(d=>d.valorContratado===0 && d.custoRealizado>0);
+  const negativas = discRows.filter(d=>d.margem<0).sort((x,y)=>x.margem-y.margem);
+  const totalDeficit = +negativas.reduce((s,d)=>s+d.margem,0).toFixed(2);
+  const totalOverhead = +overheadRows.reduce((s,d)=>s+d.custoRealizado,0).toFixed(2);
+  return {discRows, negativas, totalDeficit, maiorOfensor: negativas[0] || null, overheadRows, totalOverhead};
+}
+// Dentro da disciplina ofensora, quais itens de custo específicos mais estouraram
+// a meta — o ponto de ataque mais tático (vs. agir só no nível de disciplina).
+function topCustoOffendersInDisc(disciplina, n){
+  return state.custoItems
+    .filter(it => (it.disciplina||'(sem disciplina)')===disciplina && (it.custoRealizado||0) > (it.metaCusto||0)+0.01)
+    .map(it => Object.assign({}, it, {desvio:+((it.custoRealizado||0)-(it.metaCusto||0)).toFixed(2)}))
+    .sort((x,y)=>y.desvio-x.desvio)
+    .slice(0,n);
+}
+function buildMarginInsights(intel){
+  const a = state._agg;
+  const insights = [];
+  if(intel.maiorOfensor){
+    const pct = intel.totalDeficit<0 ? Math.abs(intel.maiorOfensor.margem/intel.totalDeficit) : 0;
+    const consomeTxt = isFinite(intel.maiorOfensor.consumo) ? `consumiu ${fmtPct(intel.maiorOfensor.consumo)} da meta de custo da disciplina` : 'tem custo realizado sem meta de custo cadastrada';
+    insights.push({sev:'bad', icon:'🎯', titulo:`Maior ofensor: ${intel.maiorOfensor.disciplina}`,
+      texto:`Responsável por ${fmtMoney(intel.maiorOfensor.margem)} de margem negativa — ${fmtPct(pct)} de todo o déficit de margem do projeto. Essa disciplina ${consomeTxt}.`,
+      onJump:()=>jumpToFilter('fisico','analise','fisicoAnalise', intel.maiorOfensor.disciplina)});
+  }
+  intel.negativas.slice(1,4).forEach(d=>{
+    insights.push({sev:'warn', icon:'⚠', titulo:`${d.disciplina} também em margem negativa`,
+      texto:`Margem de ${fmtMoney(d.margem)} nessa disciplina (faturamento BM ${fmtMoney(d.valorMedido)} vs. custo realizado ${fmtMoney(d.custoRealizado)}).`,
+      onJump:()=>jumpToFilter('fisico','analise','fisicoAnalise', d.disciplina)});
+  });
+  const estouradasSemFaturar = intel.discRows.filter(d=> isFinite(d.consumo) && d.consumo>1 && d.avancoFinDisc < d.consumo - 0.15);
+  estouradasSemFaturar.slice(0,3).forEach(d=>{
+    insights.push({sev:'bad', icon:'⛽', titulo:`${d.disciplina}: ritmo de gasto maior que o de faturamento`,
+      texto:`Já consumiu ${fmtPct(d.consumo)} do orçamento de custo, mas faturou apenas ${fmtPct(d.avancoFinDisc)} do valor contratado — o caixa dessa disciplina está sendo queimado mais rápido do que está sendo cobrado.`,
+      onJump:()=>jumpToFilter('fisico','analise','fisicoAnalise', d.disciplina)});
+  });
+  const saldoNeg = (state.contratos||[]).filter(c=>(c.saldo||0)<-0.01);
+  if(saldoNeg.length){
+    const soma = saldoNeg.reduce((s,c)=>s+c.saldo,0);
+    insights.push({sev:'bad', icon:'📄', titulo:`${saldoNeg.length} contrato(s) de fornecedor com saldo negativo`,
+      texto:`Somam ${fmtMoney(soma)} pagos acima do valor contratado — esse passivo pressiona a Margem Real para baixo além do que o custo lançado já mostra. Provável aditivo pendente de registro.`,
+      onJump:()=>jumpToFilter('contratos', null, null, null)});
+  }
+  const gap = a.avancoFisico - a.avancoFinanceiro;
+  if(gap > 0.12){
+    insights.push({sev:'warn', icon:'⏱', titulo:'Avanço físico à frente do financeiro',
+      texto:`A obra avançou ${fmtPct(a.avancoFisico)} fisicamente mas só ${fmtPct(a.avancoFinanceiro)} foi faturado — acelere a aprovação das medições pendentes para equilibrar o fluxo de caixa.`});
+  }
+  if(intel.totalOverhead > 0.01){
+    insights.push({sev:'warn', icon:'🧾', titulo:'Custos indiretos sem contrapartida de faturamento',
+      texto:`${fmtMoney(intel.totalOverhead)} já realizados em disciplinas 100% de custo geral/administrativo (ex.: administração de obra, transporte) — são custos estruturais que reduzem a margem consolidada, mas não entram no ranking de "ofensor" acima porque não têm item medido/faturável correspondente. Acompanhe-os separadamente do desempenho de execução.`});
+  }
+  return insights;
+}
+function renderAnaliseMargem(main){
+  const intel = computeMarginIntel();
+  const insights = buildMarginInsights(intel);
+  const a = state._agg;
+
+  const p = document.createElement('div'); p.className='panel';
+  p.innerHTML = `<h2>Margem & Maiores Ofensores${infoIcon('Identifica quais disciplinas — e, dentro delas, quais itens de custo específicos — mais corroem a margem do projeto (faturamento BM menos custo realizado), para priorizar onde agir primeiro. Vai além das checagens de consistência de dados da aba anterior.')}</h2>`;
+  if(intel.maiorOfensor){
+    const pct = intel.totalDeficit<0 ? Math.abs(intel.maiorOfensor.margem/intel.totalDeficit) : 0;
+    p.innerHTML += `<div class="risk-banner bad">⚠ Maior ofensor de margem: <b>${escapeHtml(intel.maiorOfensor.disciplina)}</b> — ${fmtMoney(intel.maiorOfensor.margem)} (${fmtPct(pct)} de toda a erosão de margem do projeto).</div>`;
+  } else {
+    p.innerHTML += `<div class="risk-banner good">✔ Nenhuma disciplina com margem negativa no momento.</div>`;
+  }
+  const stats = document.createElement('div'); stats.className='stat-grid';
+  stats.appendChild(statTile({label:'Margem atual (consolidada)', value:fmtMoney(a.margemTotal), valueClass:a.margemTotal<0?'bad':'good', info:'Faturamento BM menos custo realizado, somado de todas as disciplinas.'}));
+  stats.appendChild(statTile({label:'Disciplinas com margem negativa', value: intel.negativas.length+' de '+intel.discRows.length, valueClass: intel.negativas.length>0?'bad':'good'}));
+  stats.appendChild(statTile({label:'Déficit total (disciplinas negativas)', value:fmtMoney(intel.totalDeficit), valueClass:'bad', info:'Soma da margem apenas das disciplinas com resultado negativo — representa o total a recuperar para zerar o déficit.'}));
+  stats.appendChild(statTile({label:'Maior ofensor', value: intel.maiorOfensor ? intel.maiorOfensor.disciplina : '—', sub: intel.maiorOfensor ? fmtMoney(intel.maiorOfensor.margem) : 'nenhum', valueClass: intel.maiorOfensor?'bad':'good'}));
+  p.appendChild(stats);
+  main.appendChild(p);
+
+  const rankingPanel = document.createElement('div'); rankingPanel.className='panel';
+  rankingPanel.innerHTML = `<h3>Ranking de disciplinas por margem</h3>`;
+  const rankRows = intel.discRows.slice().sort((x,y)=>x.margem-y.margem);
+  const vc = vizCard('Margem por disciplina (do pior para o melhor resultado)', 'Faturamento BM − custo realizado');
+  vc.setChart(divergingBarChart({rows: rankRows.map(d=>({label:d.disciplina, value:d.margem})), formatValue:fmtMoney}));
+  fillLegend(vc.legend, [{label:'Margem positiva', color:'var(--viz-1)'}, {label:'Margem negativa', color:'var(--viz-critical)'}]);
+  vc.setTable(simpleTable([
+    {label:'Disciplina', key:'disciplina'},
+    {label:'Faturamento BM', align:'num', format:r=>fmtMoney(r.valorMedido)},
+    {label:'Custo realizado', align:'num', format:r=>fmtMoney(r.custoRealizado)},
+    {label:'Margem', align:'num', format:r=>fmtMoney(r.margem)},
+    {label:'% orçamento consumido', align:'num', format:r=>isFinite(r.consumo)?fmtPct(r.consumo):'—'},
+  ], rankRows));
+  rankingPanel.appendChild(vc.card);
+  main.appendChild(rankingPanel);
+
+  if(intel.maiorOfensor){
+    const offItems = topCustoOffendersInDisc(intel.maiorOfensor.disciplina, 8);
+    if(offItems.length){
+      const p2 = document.createElement('div'); p2.className='panel';
+      p2.innerHTML = `<h3>Itens de custo que mais pesam em "${escapeHtml(intel.maiorOfensor.disciplina)}"${infoIcon('Dentro da disciplina com pior margem, os itens de custo (planilha de ORÇAMENTO EXECUTIVO DETALHADO) com maior desvio positivo entre custo realizado e meta — o ponto de ataque mais específico para reduzir o estouro.')}</h3>`;
+      const cols = [
+        {key:'item', label:'Item', width:70},
+        {key:'descricao', label:'Descrição', width:260, wrap:true},
+        {key:'metaCusto', label:'Meta de custo', type:'money', width:120, align:'num'},
+        {key:'custoRealizado', label:'Custo realizado', type:'money', width:130, align:'num'},
+        {key:'desvio', label:'Desvio', type:'money', width:110, align:'num'},
+        {key:'_acao', label:'Ação', width:90, render:()=>`<button class="btn sm" data-act="ir">Ajustar</button>`},
+      ];
+      const rowsWithId = offItems.map((r,i)=>Object.assign({}, r, {id: r.id!=null ? r.id : i}));
+      const tbl = renderTable('analise_offenders', cols, rowsWithId);
+      tbl.querySelector('tbody').addEventListener('click', (e)=>{
+        const btn = e.target.closest('[data-act=ir]');
+        if(!btn) return;
+        const tr = e.target.closest('tr');
+        const row = rowsWithId.find(r=>String(r.id)===tr.dataset.rowId);
+        jumpToFilter('custos', null, 'custos', row.item);
+      });
+      p2.appendChild(tbl);
+      main.appendChild(p2);
+    }
+  }
+
+  const p3 = document.createElement('div'); p3.className='panel';
+  p3.innerHTML = `<h3>Insights e ações recomendadas${infoIcon('Lista gerada automaticamente a partir dos dados atuais do projeto — cada item aponta uma causa concreta e uma ação objetiva, para priorizar onde agir primeiro.')}</h3>`;
+  if(!insights.length){
+    p3.innerHTML += `<p class="hint">Nenhum ponto crítico identificado além das verificações automáticas da aba "Checagens Automáticas".</p>`;
+    main.appendChild(p3);
+  } else {
+    const list = document.createElement('div'); list.className='insight-list';
+    insights.forEach(ins=>{
+      const card = document.createElement('div'); card.className='insight-card '+ins.sev;
+      card.innerHTML = `<div class="insight-title">${ins.icon||'•'} ${escapeHtml(ins.titulo)}</div><div class="insight-text">${escapeHtml(ins.texto)}</div>`;
+      if(ins.onJump){
+        const btn = document.createElement('button'); btn.className='btn sm'; btn.style.marginTop='2px'; btn.textContent='Ver detalhe';
+        btn.onclick = ins.onJump;
+        card.appendChild(btn);
+      }
+      list.appendChild(card);
+    });
+    p3.appendChild(list);
+    main.appendChild(p3);
+  }
+}
+
+/* ---------------- ANÁLISE — PAINEL PMO (projeção de término) ---------------- */
+// Leitura simplificada de Valor Agregado (EVM): usa o avanço físico como proxy do
+// Valor Agregado (EV) sobre o orçamento de custo (BAC), para projetar o custo final
+// (EAC) e a margem ao término assumindo que a eficiência de custo atual (CPI) se mantém.
+function computeEvm(){
+  const a = state._agg;
+  const BAC = a.totalMetaCusto;
+  const AC = a.totalCustoRealizado;
+  const pctFisico = Math.min(1, a.avancoFisico||0);
+  const EV = +(BAC * pctFisico).toFixed(2);
+  const CPI = AC>0 ? EV/AC : null;
+  const ETC = (CPI && CPI>0) ? (BAC-EV)/CPI : Math.max(0, BAC-EV);
+  const EAC = +(AC + ETC).toFixed(2);
+  const VAC = +(BAC - EAC).toFixed(2);
+  const receitaProjetada = +(a.totalContrato * (1+(a.reajustePercent||0))).toFixed(2);
+  const margemOrcada = +(a.totalContrato - a.totalMetaCusto).toFixed(2);
+  const margemProjetada = +(receitaProjetada - EAC).toFixed(2);
+  return {BAC, AC, pctFisico, EV, CPI, ETC:+ETC.toFixed(2), EAC, VAC, receitaProjetada, margemOrcada, margemAtual:a.margemTotal, margemProjetada};
+}
+function buildPmoActions(evm){
+  const a = state._agg;
+  const actions = [];
+  if(evm.CPI!=null && evm.CPI<1){
+    actions.push(`Reduzir o ritmo de estouro de custo: o CPI atual (${evm.CPI.toFixed(2)}) indica que, mantido o padrão, o custo final projetado (EAC) supera o orçamento (BAC) em ${fmtMoney(Math.abs(evm.VAC))}. Priorize revisar produtividade e fornecedores das disciplinas listadas em "Margem & Ofensores".`);
+  }
+  if(evm.margemProjetada < 0 && evm.margemOrcada >= 0){
+    actions.push(`A margem projetada ao término (${fmtMoney(evm.margemProjetada)}) já é negativa mesmo com margem orçada positiva (${fmtMoney(evm.margemOrcada)}) — intervenção necessária antes do fechamento do contrato, sob risco de o projeto converter em prejuízo.`);
+  } else if(evm.margemProjetada < evm.margemOrcada - 0.01){
+    actions.push(`A margem projetada (${fmtMoney(evm.margemProjetada)}) está abaixo da margem orçada original (${fmtMoney(evm.margemOrcada)}) — avalie espaço para aditivo de escopo ou renegociação de fornecedores para recompor parte da diferença.`);
+  }
+  const avancoGap = (a.avancoFisico||0) - (a.avancoFinanceiro||0);
+  if(avancoGap > 0.1){
+    actions.push(`O avanço físico (${fmtPct(a.avancoFisico)}) está ${fmtPct(avancoGap)} à frente do avanço financeiro (${fmtPct(a.avancoFinanceiro)}) — acelere a aprovação e o faturamento das medições pendentes para equilibrar o fluxo de caixa do projeto.`);
+  }
+  const saldoNeg = (state.contratos||[]).filter(c=>(c.saldo||0)<-0.01);
+  if(saldoNeg.length){
+    actions.push(`${saldoNeg.length} contrato(s) de fornecedor com saldo negativo somam ${fmtMoney(saldoNeg.reduce((s,c)=>s+c.saldo,0))} de passivo não refletido no custo lançado — regularize os aditivos pendentes antes de fechar a apuração de margem.`);
+  }
+  const intel = computeMarginIntel();
+  if(intel.maiorOfensor){
+    actions.push(`A disciplina "${intel.maiorOfensor.disciplina}" concentra o maior desvio de margem (${fmtMoney(intel.maiorOfensor.margem)}) — veja os itens de custo específicos na aba "Margem & Ofensores" para um plano de ação tático.`);
+  }
+  return actions;
+}
+function renderAnalisePMO(main){
+  const evm = computeEvm();
+  const a = state._agg;
+
+  const p = document.createElement('div'); p.className='panel';
+  p.innerHTML = `<h2>Painel PMO — Projeção de Término${infoIcon('Leitura simplificada de Valor Agregado (EVM): usa o avanço físico (quantidade medida / quantidade contratada) como proxy do Valor Agregado (EV) sobre a meta de custo (BAC), e o custo realizado como Custo Real (AC). A partir disso projeta o custo final (EAC) e a margem ao término, assumindo que a eficiência de custo atual (CPI) se mantém até o fim da obra. É uma estimativa — não substitui o re-planejamento técnico do cronograma físico.')}</h2>`;
+  const health = evm.CPI==null ? {label:'Sem custo lançado ainda', cls:'warn'} : (evm.CPI>=1 ? {label:'Saudável', cls:'good'} : (evm.CPI>=0.9 ? {label:'Atenção', cls:'warn'} : {label:'Crítico', cls:'bad'}));
+  p.innerHTML += `<div class="risk-banner ${health.cls}">${health.cls==='good'?'✔':'⚠'} Saúde de custo do projeto: <b>${health.label}</b>${evm.CPI!=null ? ` — CPI de ${evm.CPI.toFixed(2)} (cada R$ 1,00 gasto gerou R$ ${evm.CPI.toFixed(2)} de avanço físico equivalente).` : '.'}</div>`;
+
+  const stats = document.createElement('div'); stats.className='stat-grid';
+  stats.appendChild(statTile({label:'BAC — Orçamento total de custo', value:fmtMoney(evm.BAC), info:'Budget at Completion: meta de custo total do orçamento executivo detalhado.'}));
+  stats.appendChild(statTile({label:'AC — Custo realizado até agora', value:fmtMoney(evm.AC), info:'Actual Cost: custo realizado/aplicado lançado até o momento.'}));
+  stats.appendChild(statTile({label:'EV — Valor agregado', value:fmtMoney(evm.EV), info:'Earned Value: avanço físico (%) aplicado sobre o orçamento total — quanto do orçamento "deveria" ter sido gasto para o avanço físico atual.'}));
+  stats.appendChild(statTile({label:'CPI — Índice de desempenho de custo', value: evm.CPI!=null ? evm.CPI.toFixed(2) : '—', valueClass: evm.CPI==null ? '' : (evm.CPI>=1?'good':'bad'), info:'CPI = EV / AC. Acima de 1,00: custo eficiente (gastando menos que o avanço entregue). Abaixo de 1,00: estourando o orçamento em relação ao avanço físico.'}));
+  stats.appendChild(statTile({label:'EAC — Custo projetado ao término', value:fmtMoney(evm.EAC), valueClass: evm.EAC>evm.BAC?'bad':'good', info:'Estimate at Completion: custo final projetado, assumindo que o CPI atual se mantém até o fim da obra.'}));
+  stats.appendChild(statTile({label:'VAC — Variação ao término', value:fmtMoney(evm.VAC), valueClass: evm.VAC<0?'bad':'good', info:'Variance at Completion: BAC − EAC. Negativo indica estouro de orçamento projetado.'}));
+  p.appendChild(stats);
+  main.appendChild(p);
+
+  const pMeter = document.createElement('div'); pMeter.className='panel';
+  pMeter.innerHTML = `<h3>Avanço físico x avanço financeiro${infoIcon('Quando o avanço financeiro (faturamento) fica muito atrás do avanço físico, o caixa do projeto sofre mesmo com a obra andando dentro do esperado.')}</h3>`;
+  pMeter.appendChild(meterEl({label:'Avanço físico (qtd. medida / qtd. contratada)', value:a.qtdMedidaTotal, max:a.qtdContratadaTotal, formatValue:(v,m,pc)=>fmtPct(pc)}));
+  pMeter.appendChild(meterEl({label:'Avanço financeiro (faturamento BM / total contrato)', value:a.totalMedidoBM, max:a.totalContrato, formatValue:(v,m,pc)=>fmtPct(pc)}));
+  main.appendChild(pMeter);
+
+  const pMargem = document.createElement('div'); pMargem.className='panel';
+  pMargem.innerHTML = `<h3>Margem: orçada x atual x projetada ao término${infoIcon('Margem orçada: total do contrato − orçamento de custo (plano original). Margem atual: faturamento já medido − custo já realizado. Margem projetada: receita contratada (com reajuste) − EAC, ou seja, o resultado esperado se o projeto terminar no ritmo de custo atual.')}</h3>`;
+  const statsM = document.createElement('div'); statsM.className='stat-grid';
+  statsM.appendChild(statTile({label:'Margem orçada (plano original)', value:fmtMoney(evm.margemOrcada), valueClass: evm.margemOrcada<0?'bad':'good'}));
+  statsM.appendChild(statTile({label:'Margem atual', value:fmtMoney(evm.margemAtual), valueClass: evm.margemAtual<0?'bad':'good'}));
+  statsM.appendChild(statTile({label:'Margem projetada ao término', value:fmtMoney(evm.margemProjetada), valueClass: evm.margemProjetada<0?'bad':'good', info:'Receita contratada projetada (com reajuste) menos o custo final projetado (EAC).'}));
+  pMargem.appendChild(statsM);
+  main.appendChild(pMargem);
+
+  const actions = buildPmoActions(evm);
+  const pA = document.createElement('div'); pA.className='panel';
+  pA.innerHTML = `<h3>Ações recomendadas para melhorar a conversão do projeto${infoIcon('Recomendações de nível gerencial, geradas a partir dos indicadores acima — priorize pela ordem listada.')}</h3>`;
+  if(!actions.length){
+    pA.innerHTML += `<div class="risk-banner good">✔ Indicadores dentro do esperado — sem ação corretiva de margem necessária no momento.</div>`;
+    main.appendChild(pA);
+  } else {
+    const ol = document.createElement('ol'); ol.className='pmo-actions';
+    actions.forEach(a=>{ const li=document.createElement('li'); li.textContent=a; ol.appendChild(li); });
+    pA.appendChild(ol);
+    main.appendChild(pA);
   }
 }
 
