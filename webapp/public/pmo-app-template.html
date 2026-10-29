@@ -81,7 +81,8 @@ nav.groups{padding:14px 10px 20px; flex:1;}
 .pq-readonly input, .pq-readonly select{pointer-events:none; background:var(--surface-2); color:var(--text-dim);}
 .pq-readonly .mesa-guest-form input, .pq-readonly .mesa-guest-form select{pointer-events:auto; background:var(--surface); color:var(--text);}
 .pq-readonly button[data-action]:not([data-action^="setEntradasSection"]):not(.guest-ok),
-.pq-readonly #resetBtn, .pq-readonly #saveIconBtn{display:none;}
+.pq-readonly #resetBtn, .pq-readonly #saveIconBtn, .pq-readonly #undoBtn, .pq-readonly #redoBtn{display:none;}
+.pq-readonly .save-row:has(#undoBtn){display:none;}
 #sidebar .foot button[disabled]{opacity:.6; cursor:default;}
 .save-row{display:flex; align-items:center; gap:8px;}
 .save-icon-btn{
@@ -258,6 +259,8 @@ button.mesa-btn.selected{outline:3px solid var(--accent); outline-offset:2px;}
 .saldo-hist-lightbox .lb-bar{display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; justify-content:center; width:100%; max-width:960px;}
 .saldo-hist-lightbox .lb-viewport{flex:1 1 auto; width:100%; max-width:960px; overflow-y:auto; border-radius:10px; background:var(--surface); padding:20px; box-sizing:border-box;}
 .saldo-hist-lightbox .lb-close{cursor:pointer;}
+.lb-row-click{cursor:pointer;}
+.lb-row-click:hover td{background:var(--accent-soft);}
 .saldo-kpi-clickable{cursor:pointer;}
 .saldo-kpi-clickable:hover{outline:2px solid var(--accent); outline-offset:2px;}
 /* marcador vermelho (mesa reservada/paga) sobreposto na foto 3D — igual à bolinha numerada
@@ -328,6 +331,11 @@ h1 .info-ic, h2 .info-ic{ top:-3px; }
       <div class="save-row">
         <button id="saveIconBtn" type="button" class="save-icon-btn" title="Salvar agora neste navegador">💾</button>
         <div id="saveStatus" class="save-status" data-state="saved"><span class="save-text">Pronto</span></div>
+      </div>
+      <div class="save-row" style="margin-top:6px;">
+        <button id="undoBtn" type="button" class="save-icon-btn" title="Desfazer o último lançamento (Ctrl+Z)" disabled>↩️</button>
+        <button id="redoBtn" type="button" class="save-icon-btn" title="Refazer (Ctrl+Shift+Z)" disabled>↪️</button>
+        <span class="hint" style="font-size:11px;">Desfazer/Refazer (Ctrl+Z)</span>
       </div>
       <button id="exportBtn" type="button" title="Baixa um .html independente com os dados desta tela no instante do clique">⭳ Exportar HTML (dados atuais)</button>
       <button id="resetBtn" type="button">Restaurar exemplo</button>
@@ -1296,8 +1304,58 @@ function initSaveStatusText(){
   else if(stateSource==='storage') textEl.textContent = 'Carregado do salvamento automático deste navegador';
   else textEl.textContent = 'Pronto — toda alteração salva sozinha aqui';
 }
+// ---------------- Desfazer/Refazer (Ctrl+Z / Ctrl+Shift+Z) ----------------
+// pilha de fotos do state ANTES de cada lançamento que de fato foi salvo — "antes" é capturado em
+// undoSnapshotStart() logo no início de onAction()/onGenericBind()/clique de aba (os 3 únicos
+// pontos de entrada de mutação do usuário), e só é empilhado aqui dentro se a interação realmente
+// terminou chamando saveState() (senão era só navegação/abrir painel, não um "lançamento" de verdade)
+let undoStack = [];
+let redoStack = [];
+let pendingUndoSnapshot = null;
+const UNDO_MAX = 50;
+function undoSnapshotStart(){
+  if(READONLY) return; // convidado nunca chega em saveState() mesmo, não vale a pena nem tirar a foto
+  pendingUndoSnapshot = JSON.stringify(state);
+}
+function undoConsumirSnapshotPendente(){
+  if(pendingUndoSnapshot===null) return;
+  undoStack.push(pendingUndoSnapshot);
+  if(undoStack.length>UNDO_MAX) undoStack.shift();
+  redoStack = []; // um lançamento novo invalida qualquer "refazer" de uma desfeita anterior
+  pendingUndoSnapshot = null;
+  updateUndoRedoButtons();
+}
+function undoRestaurar(snapshotJson){
+  const restored = JSON.parse(snapshotJson);
+  Object.keys(state).forEach(k=> delete state[k]); // mantém a MESMA referência de `state`
+  Object.assign(state, restored);
+}
+function undoAplicar(){
+  if(READONLY || !undoStack.length) return;
+  redoStack.push(JSON.stringify(state));
+  if(redoStack.length>UNDO_MAX) redoStack.shift();
+  undoRestaurar(undoStack.pop());
+  pendingUndoSnapshot = null; // o restore em si não deve virar um novo item pra desfazer
+  saveState(); render();
+  updateUndoRedoButtons();
+}
+function redoAplicar(){
+  if(READONLY || !redoStack.length) return;
+  undoStack.push(JSON.stringify(state));
+  if(undoStack.length>UNDO_MAX) undoStack.shift();
+  undoRestaurar(redoStack.pop());
+  pendingUndoSnapshot = null;
+  saveState(); render();
+  updateUndoRedoButtons();
+}
+function updateUndoRedoButtons(){
+  const u = document.getElementById('undoBtn'), r = document.getElementById('redoBtn');
+  if(u) u.disabled = !undoStack.length;
+  if(r) r.disabled = !redoStack.length;
+}
 function saveState(){
   if(READONLY) return; // segunda trava (a primeira e nao desenhar controles de edicao) — nunca escreve em modo convidado
+  undoConsumirSnapshotPendente();
   // na Bateria, "valor recebido em caixa" nao vem de venda de ingresso — e o que os proprios
   // integrantes ja pagaram de verdade. Mantem sincronizado aqui (ponto unico de gravacao) pra
   // cobrir qualquer forma de editar as parcelas (adicionar/remover pessoa ou parcela, editar
@@ -1755,13 +1813,17 @@ function mesasFeijoadaDatedAmounts(kind){
 function mesasFeijoadaTotalAnual(){
   return sum((state.mesasFeijoada||[]).filter(m=>m.dataPagamento).map(m=> Number(m.valorPago)||0));
 }
-// quanto as mesas já PAGAS da Feijoada contribuem pra Vendas — cada mesa vira 4 ingressos,
-// e o valor pago por ela conta como receita. Usa mesaEffectiveStatus (igual ao resto do app:
-// mesa com data/valor de pagamento conta como paga mesmo se o campo status ainda não foi salvo).
+// quanto as mesas da Feijoada contribuem pra Vendas/Dashboard. O VALOR entra assim que o dinheiro
+// é recebido, mesmo que a mesa ainda esteja só "reservada" com pagamento PARCIAL — dinheiro em
+// caixa é dinheiro em caixa, não espera a reserva fechar (ver pedido do usuário: pagamento parcial
+// tem que contar na receita/saldo). Já os INGRESSOS (ocupação confirmada, 4 por mesa) só contam
+// quando a mesa está de fato "paga" — isso é sobre lugares confirmados, não sobre caixa.
 function mesasFeijoadaVendaBreakdown(){
   let ingressos = 0, valor = 0;
   (state.mesasFeijoada||[]).forEach(m=>{
-    if(mesaEffectiveStatus(m)==='paga'){ ingressos += 4; valor += Number(m.valorPago)||0; }
+    const pago = Number(m.valorPago)||0;
+    if(pago>0) valor += pago;
+    if(mesaEffectiveStatus(m)==='paga') ingressos += 4;
   });
   return {ingressos, valor};
 }
@@ -1807,7 +1869,10 @@ function entDatedAmountsForKey(k, scen, kind){
     // "contribuicoesBateria" (venda.valorRecebido é só um espelho dele) — contar aqui também
     // dobraria o valor no total de entradas
     if(PROJECT_ID==='bateria-piquinzada') return [];
-    const recebido = Number(state.venda && state.venda.valorRecebido)||0;
+    // na Feijoada do Bloco o dinheiro das mesas já tem a própria linha ("receitaMesas", ver acima)
+    // — aqui conta só o que foi vendido fora das mesas ("1º lote"), senão o valor pago nas mesas
+    // entraria duplicado no total de entradas (uma vez aqui, outra na linha de Mesas)
+    const recebido = PROJECT_ID==='feijoada-bloco' ? (Number(state.venda && state.venda.valorRecebidoLote1)||0) : (Number(state.venda && state.venda.valorRecebido)||0);
     if(!recebido) return [];
     const mes = Math.max(0, currentMonthIdxClamped());
     return [{mes, valor: recebido}];
@@ -2028,6 +2093,7 @@ function wireGenericInputs(){
   });
   $$('#view [data-tab]').forEach(el=>{
     el.addEventListener('click', ()=>{
+      undoSnapshotStart();
       const [group,val] = el.dataset.tab.split(':');
       setPath(state, group.split('.'), val);
       saveState(); render();
@@ -2041,6 +2107,7 @@ function onGenericBind(e){
   // (nem nuvem nem localStorage), entao fica liberado pra convidado mesmo em modo somente leitura
   const isUiOnly = path[0]==='ui';
   if(READONLY && !isUiOnly) return; // defesa extra — os campos ja vem escondidos/travados por CSS em modo convidado
+  if(!isUiOnly) undoSnapshotStart(); // campo ui.* nunca chama saveState(), não precisa de foto
   let val = el.value;
   const kind = coerceType(el);
   if(kind==='number') val = val===''?0:Number(val);
@@ -2107,7 +2174,7 @@ function onEnterCommit(e){
 // acoes que so navegam a tela (nao alteram dados do projeto) — continuam liberadas em modo convidado
 // reserva de mesa é a UNICA area do app onde convidado tambem grava de verdade (ver schema.sql,
 // secao 11) — por isso essas acoes de mesa entram aqui, mesmo nao sendo "so navegacao"
-const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa', 'openSaldoHistorico', 'closeSaldoHistorico', 'setSaldoHistoricoFiltro', 'openMesasLista', 'closeMesasLista', 'openScenarioBreakdown', 'closeScenarioBreakdown']);
+const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa', 'openSaldoHistorico', 'closeSaldoHistorico', 'setSaldoHistoricoFiltro', 'openMesasLista', 'closeMesasLista', 'mesaListaAbrirMesa', 'openScenarioBreakdown', 'closeScenarioBreakdown']);
 function onAction(e){
   const el = e.currentTarget || e.target.closest('[data-action]');
   const [action, ...args] = el.dataset.action.split(':');
@@ -2121,6 +2188,7 @@ function onAction(e){
     el._armTimer = setTimeout(()=>{ el.dataset.armed=''; el.textContent = el.dataset.origLabel; el.classList.remove('confirm-armed'); }, 3000);
     return;
   }
+  undoSnapshotStart();
   ACTIONS[action] && ACTIONS[action](...args);
 }
 const ACTIONS = {};
@@ -2472,6 +2540,21 @@ VIEWS.dashboard = function(){
   ${state.ui.saldoHistoricoOpen ? saldoHistoricoLightbox() : ''}
   ${state.ui.scenarioBreakdownOpen ? scenarioBreakdownLightbox() : ''}`;
 };
+// campo de busca reutilizável em qualquer lupa — filtra client-side (sem mexer em state/render,
+// só esconde/mostra <tr>), funciona em qualquer lupa mesmo com várias tabelas dentro (ex.: o
+// histórico de saldo tem receitas/custos/restituições em tabelas separadas)
+function lbSearchInput(placeholder){
+  return `<input type="search" class="lb-search" placeholder="${esc(placeholder||'Buscar…')}" oninput="piquinzadaFiltrarLupa(this)" style="margin-left:auto; padding:5px 10px; font-size:13px; border:1px solid var(--border); border-radius:8px; min-width:180px;">`;
+}
+function piquinzadaFiltrarLupa(input){
+  const termo = (input.value||'').toLowerCase().trim();
+  const lightbox = input.closest('.saldo-hist-lightbox');
+  if(!lightbox) return;
+  lightbox.querySelectorAll('tbody tr').forEach(tr=>{
+    const bate = !termo || tr.textContent.toLowerCase().includes(termo);
+    tr.style.display = bate ? '' : 'none';
+  });
+}
 // "de onde vem" a Receita total / Custo total de um cenário do Dashboard — não é uma consulta
 // nova, é a mesma conta que computeScenario() já faz (ver função acima), só exibida separada por
 // componente em vez de só o total — então o que aparece aqui bate exatamente com o KPI de origem
@@ -2517,7 +2600,8 @@ function scenarioBreakdownLightbox(){
   <div class="saldo-hist-lightbox" data-action="closeScenarioBreakdown">
     <div class="lb-bar" onclick="event.stopPropagation();">
       <span class="hint" style="font-weight:600; color:var(--text);">${esc(titulo)}</span>
-      <button class="btn small lb-close guest-ok" data-action="closeScenarioBreakdown" style="margin-left:auto;">Fechar ✕</button>
+      ${lbSearchInput('Buscar componente…')}
+      <button class="btn small lb-close guest-ok" data-action="closeScenarioBreakdown">Fechar ✕</button>
     </div>
     <div class="lb-viewport" onclick="event.stopPropagation();">
       <div class="tablewrap"><table>
@@ -2686,7 +2770,8 @@ function saldoHistoricoLightbox(){
   <div class="saldo-hist-lightbox" data-action="closeSaldoHistorico">
     <div class="lb-bar" onclick="event.stopPropagation();">
       <span class="hint" style="font-weight:600; color:var(--text);">Histórico do saldo de caixa compartilhado</span>
-      <button class="btn small lb-close guest-ok" data-action="closeSaldoHistorico" style="margin-left:auto;">Fechar ✕</button>
+      ${lbSearchInput('Buscar fornecedor, descrição…')}
+      <button class="btn small lb-close guest-ok" data-action="closeSaldoHistorico">Fechar ✕</button>
     </div>
     <div class="lb-viewport" onclick="event.stopPropagation();">
       ${body}
@@ -3758,14 +3843,16 @@ function mesasListaLightbox(){
   const dataFmt = (d)=> d ? new Date(d+'T00:00:00').toLocaleDateString('pt-BR') : '—';
   const colCount = filtro==='pagas' ? 6 : 5;
   const nomesPessoas = (m)=> (m.pessoas||[]).map(p=> (p&&p.nome) ? p.nome : p).filter(Boolean).join(', ') || '—';
-  const rows = mesas.length ? mesas.map(m=> filtro==='pagas' ? `<tr>
+  // clicar em qualquer linha abre direto o painel de reserva daquela mesa (fecha a lupa) — não
+  // precisa mais ficar procurando a mesa no mapa depois de achar o nome aqui
+  const rows = mesas.length ? mesas.map(m=> filtro==='pagas' ? `<tr data-action="mesaListaAbrirMesa:${m.numero}" class="lb-row-click" title="Abrir a mesa ${m.numero}">
       <td class="num mono">${m.numero}</td>
       <td>${esc(m.reservadoPor||'(sem nome)')}</td>
       <td>${esc(m.telefone||'—')}</td>
       <td>${esc(nomesPessoas(m))}</td>
       <td>${dataFmt(m.dataPagamento)}</td>
       <td class="num mono" style="color:var(--good);">${fmtCur2(Number(m.valorPago)||0)}</td>
-    </tr>` : `<tr>
+    </tr>` : `<tr data-action="mesaListaAbrirMesa:${m.numero}" class="lb-row-click" title="Abrir a mesa ${m.numero}">
       <td class="num mono">${m.numero}</td>
       <td>${esc(m.reservadoPor||'(sem nome)')}</td>
       <td>${esc(m.telefone||'—')}</td>
@@ -3780,9 +3867,11 @@ function mesasListaLightbox(){
   <div class="saldo-hist-lightbox" data-action="closeMesasLista">
     <div class="lb-bar" onclick="event.stopPropagation();">
       <span class="hint" style="font-weight:600; color:var(--text);">${titulo} — ${mesas.length} mesa${mesas.length!==1?'s':''}</span>
-      <button class="btn small lb-close guest-ok" data-action="closeMesasLista" style="margin-left:auto;">Fechar ✕</button>
+      ${lbSearchInput('Buscar nome, telefone…')}
+      <button class="btn small lb-close guest-ok" data-action="closeMesasLista">Fechar ✕</button>
     </div>
     <div class="lb-viewport" onclick="event.stopPropagation();">
+      <div class="hint" style="margin-bottom:8px;">Clique numa linha pra abrir a reserva daquela mesa.</div>
       <div class="tablewrap"><table>
         <thead><tr>${theadCols}</tr></thead>
         <tbody>${rows}</tbody>
@@ -3794,6 +3883,16 @@ function mesasListaLightbox(){
 ACTIONS.openMesasLista = (filtro)=>{
   state.ui.mesasListaOpen = true;
   state.ui.mesasListaFiltro = filtro || 'reservadas';
+  render();
+};
+// clicar numa linha da lupa de mesas reservadas/pagas abre direto o painel de reserva daquela
+// mesa (e fecha a lupa) — evita ter que fechar, achar a mesa no mapa e clicar de novo
+ACTIONS.mesaListaAbrirMesa = (numero)=>{
+  numero = Number(numero);
+  state.ui.mesasListaOpen = false;
+  state.ui.mesaSelecionada = numero;
+  const m = (state.mesasFeijoada||[]).find(mm=> mm.numero===numero);
+  if(m) mesaFormInit(m);
   render();
 };
 ACTIONS.closeMesasLista = ()=>{
@@ -4748,6 +4847,35 @@ if(mobileMenuBtn){
 // salvamento ja e automatico a cada alteracao (ver saveState); este botao so confirma
 // visualmente que os dados atuais ja estao gravados neste navegador, para quem quiser ter certeza
 $('#saveIconBtn').addEventListener('click', ()=>{ saveState(); });
+
+// Desfazer/Refazer: botões na barra lateral + atalho Ctrl+Z / Ctrl+Shift+Z em qualquer lugar do
+// app (ver undoAplicar/redoAplicar). Dentro de um campo de texto/número em edição, deixa o
+// Ctrl+Z nativo do navegador funcionar normalmente (desfazer a digitação), não intercepta.
+$('#undoBtn').addEventListener('click', undoAplicar);
+$('#redoBtn').addEventListener('click', redoAplicar);
+document.addEventListener('keydown', (e)=>{
+  if((e.key!=='z' && e.key!=='Z') || !(e.ctrlKey || e.metaKey)) return;
+  const ael = document.activeElement;
+  const tag = ael && ael.tagName;
+  const isTextField = tag==='INPUT' || tag==='TEXTAREA';
+  if(isTextField && ael.dataset.bind){
+    // campo ligado por data-bind: depois de commitar (change/Enter/Tab), o foco volta sozinho pro
+    // próprio campo (ver "preserveFocus" em onGenericBind) — então SÓ deixa o Ctrl+Z nativo do
+    // campo acontecer se ainda tiver uma edição NÃO commitada (valor digitado ainda diferente do
+    // que já está salvo no state); já commitado, Ctrl+Z desfaz o LANÇAMENTO, não fica preso no campo
+    const kind = coerceType(ael);
+    let liveVal = ael.value;
+    if(kind==='number') liveVal = liveVal===''?0:Number(liveVal);
+    else if(kind==='pct') liveVal = liveVal===''?0:Number(liveVal)/100;
+    const committed = getPath(state, ael.dataset.bind.split('.'));
+    if(liveVal!==committed) return; // ainda digitando, nao commitado — deixa o undo nativo do campo
+    ael.blur();
+  } else if(isTextField || (ael && ael.isContentEditable)){
+    return; // campo de texto sem data-bind (ex. busca de uma lupa) — undo nativo normal
+  }
+  e.preventDefault();
+  if(e.shiftKey) redoAplicar(); else undoAplicar();
+});
 
 /* ---------------- exportar snapshot .html (com os dados atuais embutidos) ---------------- */
 function buildExportHtml(){
