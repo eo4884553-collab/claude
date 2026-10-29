@@ -42,7 +42,7 @@ export async function fetchSharedCashHistory() {
     supabase.from('org_cash').select('saldo_inicial').eq('id', 'main').maybeSingle(),
     supabase.from('project_state').select('id,data').in('id', PROJECTS.map((p) => p.id)),
     supabase.from('reimbursements').select('project_id,descricao,valor,user_email,paid_at,data_compra,status').in('status', ['pago', 'aprovado']),
-    supabase.from('mesa_reservas').select('numero,reservado_por,status,valor_pago,data_pagamento').eq('project_id', 'feijoada-bloco'),
+    supabase.from('mesa_reservas').select('numero,reservado_por,pessoas,status,valor_pago,data_pagamento').eq('project_id', 'feijoada-bloco'),
   ]);
   if (e1) throw e1;
   if (e2) throw e2;
@@ -99,9 +99,12 @@ export async function fetchSharedCashHistory() {
 
   (mesaRows || []).forEach((m) => {
     const valor = Number(m.valor_pago) || 0;
-    const paga = m.status === 'paga' || !!m.data_pagamento || valor > 0;
-    if (!paga || !valor) return;
-    porDominio['feijoada-bloco'].receitas.push({ descricao: `Mesa ${m.numero} — ${m.reservado_por || '(sem nome)'}`, valor, data: m.data_pagamento, tipo: 'ingressos' });
+    if (!valor) return;
+    // mostra quem reservou E pra quem (nomes das pessoas na mesa) — sem isso não dá pra saber qual
+    // Pix do extrato bate com qual mesa quando tem várias reservas parecidas
+    const nomesPessoas = Array.isArray(m.pessoas) ? m.pessoas.map((p) => (p && p.nome) || p).filter(Boolean).join(', ') : '';
+    const descricao = `Mesa ${m.numero} — reservado por ${m.reservado_por || '(sem nome)'}${nomesPessoas ? ` — pessoas: ${nomesPessoas}` : ''}${m.status !== 'paga' ? ' (pagamento parcial)' : ''}`;
+    porDominio['feijoada-bloco'].receitas.push({ descricao, valor, data: m.data_pagamento, tipo: 'ingressos', mesaStatus: m.status, mesaNumero: m.numero });
   });
 
   (reimbRows || []).forEach((r) => {

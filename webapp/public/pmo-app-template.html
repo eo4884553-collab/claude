@@ -925,7 +925,7 @@ function extratoLedgerFlat(){
     const domLabel = EXTRATO_DOM_LABEL[domId] || domId;
     // separador "|" (não ":") no id — vai dentro de um data-action que o dispatcher corta por ":",
     // então um id com ":" quebraria o parse dos argumentos (ver ACTIONS.extratoToggleVinculo)
-    (dom.receitas||[]).forEach((r,i)=> out.push({id:`${domId}|receitas|${i}`, tipo:'entrada', valor:Number(r.valor)||0, data:r.data, dom:domLabel, categoria:extratoReceitaCategoria(r), item:r.descricao||'(sem descrição)'}));
+    (dom.receitas||[]).forEach((r,i)=> out.push({id:`${domId}|receitas|${i}`, tipo:'entrada', valor:Number(r.valor)||0, data:r.data, dom:domLabel, categoria:extratoReceitaCategoria(r), item:r.descricao||'(sem descrição)', agregado:!!r.agregado}));
     (dom.custos||[]).forEach((c,i)=> out.push({id:`${domId}|custos|${i}`, tipo:'saida', valor:Number(c.valor)||0, data:c.data, dom:domLabel, categoria:c.grupo||'Custo', item:`${c.fornecedor||'(sem fornecedor)'}${c.subcategoria && c.subcategoria!==c.grupo ? ' — '+c.subcategoria : ''}`}));
     (dom.restituicoes||[]).forEach((r,i)=> out.push({id:`${domId}|restituicoes|${i}`, tipo:'saida', valor:Number(r.valor)||0, data:r.data, dom:domLabel, categoria:'Restituição de Caixa', item:r.descricao}));
   });
@@ -943,13 +943,105 @@ function extratoAgruparCandidatos(candidatos){
   });
   return [...grupos.values()];
 }
+// "pendentes" são lançamentos que AINDA NÃO foram pagos (mesa reservada sem pagar/pagar só uma
+// parte, parcela de patrocínio ou de contribuição da bateria sem data de pagamento, custo não
+// totalmente pago) — diferente dos "candidatos" (que só comparam o que JÁ está pago), vincular um
+// pendente REGISTRA o pagamento de verdade (é a mesma ação de ir lá na tela normal e marcar como
+// pago, só que disparada direto daqui). Só aparecem pendentes do domínio ATUAL (troque de domínio
+// no topo pra ver/lançar os de outro) — cada um já tem tudo que a ação de registrar precisa.
+function extratoPendentesLocais(linha){
+  const out = [];
+  if(linha.tipo==='entrada'){
+    if(PROJECT_ID==='feijoada-bloco'){
+      (state.mesasFeijoada||[]).forEach(m=>{
+        if(mesaEffectiveStatus(m)==='livre' || mesaEffectiveStatus(m)==='paga') return;
+        const pessoasNomes = (m.pessoas||[]).map(p=> (p&&p.nome)||p).filter(Boolean).join(', ');
+        out.push({
+          kind:'mesa', numero:m.numero, categoria:'Mesa',
+          item:`Mesa ${m.numero} — reservado por ${m.reservadoPor||'(sem nome)'}${pessoasNomes?' — pessoas: '+pessoasNomes:''} — já pago: ${fmtCur2(Number(m.valorPago)||0)}`,
+        });
+      });
+    }
+    ((state.patrocinios && state.patrocinios.base) || []).forEach((t,tierIdx)=>{
+      (t.fechamentos||[]).forEach((f,fIdx)=>{
+        (f.parcelas||[]).forEach((p,pIdx)=>{
+          if(p.dataPagamento) return;
+          out.push({
+            kind:'patrocinio', tierIdx, fIdx, pIdx, categoria:'Patrocínio', valorEsperado:Number(p.valor)||0,
+            item:`${f.empresa||'(sem empresa)'} — ${t.cota||'cota'} — parcela ${fmtCur2(Number(p.valor)||0)}${p.dataPrevista?` (prevista ${p.dataPrevista.split('-').reverse().join('/')})`:''}`,
+          });
+        });
+      });
+    });
+    if(PROJECT_ID==='bateria-piquinzada'){
+      (state.contribuintesBateria||[]).forEach((pessoa,pessoaIdx)=>{
+        (pessoa.parcelas||[]).forEach((pc,pcIdx)=>{
+          if(pc.dataPagamento) return;
+          out.push({
+            kind:'bateria', pessoaIdx, pcIdx, categoria:'Contribuição', valorEsperado:Number(pc.valor)||0,
+            item:`${pessoa.nome||'(sem nome)'} — parcela ${fmtCur2(Number(pc.valor)||0)}`,
+          });
+        });
+      });
+    }
+  } else {
+    (state.custos||[]).forEach(c=>{
+      if(c.status==='Pago Total' || c.status==='Cancelado') return;
+      out.push({
+        kind:'custo', custoId:c.id, categoria:c.grupo||'Custo',
+        item:`${c.fornecedor||'(sem fornecedor)'}${c.subcategoria && c.subcategoria!==c.grupo ? ' — '+c.subcategoria : ''} — já pago: ${fmtCur2(Number(c.valorPago)||0)}${c.valorContratado?' de '+fmtCur2(Number(c.valorContratado)||0):''}`,
+      });
+    });
+  }
+  return out;
+}
+function extratoAgruparPendentes(pendentes){
+  const grupos = new Map();
+  pendentes.forEach(p=>{
+    if(!grupos.has(p.categoria)) grupos.set(p.categoria, []);
+    grupos.get(p.categoria).push(p);
+  });
+  return [...grupos.entries()].map(([categoria,itens])=>({categoria,itens}));
+}
+// controle de registrar pagamento de cada pendente — mesa e custo deixam digitar o valor (pode ser
+// parcial); patrocínio e bateria já têm o valor da parcela fixo, só confirma
+function extratoPendenteControle(linha, idx, p){
+  const valorSugerido = (Math.round((Number(linha.valor)||0)*100)/100).toFixed(2);
+  if(p.kind==='mesa'){
+    return `<div style="display:flex; gap:4px; align-items:center; margin-top:2px; padding-left:8px;">
+      <input type="number" step="0.01" id="extratoPendenteValor_${idx}_mesa_${p.numero}" value="${valorSugerido}" style="width:76px; font-size:11px;">
+      <button class="btn small" data-action="extratoRegistrarMesaPendente:${idx}:${p.numero}">Registrar pagamento</button>
+    </div>`;
+  }
+  if(p.kind==='patrocinio'){
+    return `<div style="padding-left:8px; margin-top:2px;"><button class="btn small" data-action="extratoRegistrarPatrocinioPendente:${idx}:${p.tierIdx}:${p.fIdx}:${p.pIdx}">Registrar pagamento</button></div>`;
+  }
+  if(p.kind==='bateria'){
+    return `<div style="padding-left:8px; margin-top:2px;"><button class="btn small" data-action="extratoRegistrarBateriaPendente:${idx}:${p.pessoaIdx}:${p.pcIdx}">Registrar pagamento</button></div>`;
+  }
+  if(p.kind==='custo'){
+    return `<div style="display:flex; gap:4px; align-items:center; margin-top:2px; padding-left:8px;">
+      <input type="number" step="0.01" id="extratoPendenteValor_${idx}_custo_${p.custoId}" value="${valorSugerido}" style="width:76px; font-size:11px;">
+      <select id="extratoPendenteStatus_${idx}_custo_${p.custoId}" style="font-size:11px;">
+        <option value="Pago Total">Pago Total</option>
+        <option value="Pago Parcial">Pago Parcial</option>
+      </select>
+      <button class="btn small" data-action="extratoRegistrarCustoPendente:${idx}:${p.custoId}">Registrar</button>
+    </div>`;
+  }
+  return '';
+}
 // candidatos pra vincular uma linha do extrato: mesmo tipo (entrada/saída) e data próxima (até 10
-// dias) — ou sem data (ex.: receita agregada, que não tem data individual). A janela de data evita
-// uma lista enorme com TODO lançamento do mesmo tipo em qualquer mês do projeto.
+// dias) — ou sem data (ex.: patrocínio sem parcela individual). A janela de data evita uma lista
+// enorme com TODO lançamento do mesmo tipo em qualquer mês do projeto. Receita AGREGADA (ex.:
+// "Ingressos vendidos"/"1º lote", um número só somando várias vendas soltas) fica de fora — não dá
+// pra vincular uma transação do extrato a uma FATIA de um total agregado de forma confiável (ver
+// "Lançar venda avulsa" em extratoLinhaRow, que é o jeito certo de tratar esse caso).
 function extratoCandidatosParaLinha(linha, ledger){
   const dataLinha = linha.data ? new Date(linha.data+'T00:00:00') : null;
   return ledger.filter(l=>{
     if(l.tipo !== linha.tipo) return false;
+    if(l.agregado) return false;
     if(!dataLinha || !l.data) return true;
     const dataCand = new Date(l.data+'T00:00:00');
     const diffDias = Math.abs((dataCand-dataLinha)/86400000);
@@ -1955,13 +2047,6 @@ function onGenericBind(e){
   else if(kind==='pct') val = val===''?0:Number(val)/100;
   setPath(state, path, val);
   if(isUiOnly){
-    // preencher Data de pagamento ou Valor pago no formulario admin de mesa implica que o
-    // pagamento foi confirmado — muda o Status pra "Paga" sozinho, senao a mesa fica com os
-    // dados de pagamento preenchidos mas continua aparecendo "reservada" (laranja) no mapa
-    if(path[0]==='ui' && path[1]==='mesaForm' && (path[2]==='dataPagamento' || path[2]==='valorPago') && state.ui.mesaForm){
-      const temPagamento = !!state.ui.mesaForm.dataPagamento || Number(state.ui.mesaForm.valorPago)>0;
-      if(temPagamento && state.ui.mesaForm.status==='reservada') state.ui.mesaForm.status = 'paga';
-    }
     if(!el.dataset.norerender) render();
     return;
   }
@@ -3387,9 +3472,13 @@ const MESA_ADMIN_STATUS = ['reservada','paga']; // "livre" nao e um status grava
 // mapa, rotulo, contadores), mesmo que o campo status em si ainda esteja "reservada" — cobre
 // mesas que ficaram com esse descompasso antes do status passar a se auto-ajustar (ver
 // onGenericBind/mesaFormInit). Nunca grava nada sozinho, só decide o que mostrar na tela.
+// o status de uma mesa é sempre o que foi explicitamente gravado (reservada/paga/livre) — NÃO
+// inferido por ter data de pagamento ou valor pago, porque isso impedia representar pagamento
+// PARCIAL (a mesa ficava "paga" sozinha assim que qualquer valor era lançado, mesmo que fosse só
+// uma entrada por conta do valor total). Quem decide quando uma mesa está quitada é o status
+// gravado mesmo; o valor pago é só informativo (ver computeMesasSummary e a tela da mesa).
 function mesaEffectiveStatus(m){
-  if(m.status==='paga' || m.status==='livre') return m.status;
-  return (m.dataPagamento || Number(m.valorPago)>0) ? 'paga' : m.status;
+  return (m && m.status) || 'livre';
 }
 function computeMesasSummary(){
   const mesas = state.mesasFeijoada||[];
@@ -3516,6 +3605,7 @@ function mesaPagamentoFields(m){
       ${fld('Data de pagamento', 'ui.mesaForm.dataPagamento', {kind:'date'})}
       ${fld('Valor pago', 'ui.mesaForm.valorPago', {kind:'currency'})}
     </div>
+    <div class="hint" style="margin-top:8px;">Pagamento parcial? Deixe o Status em "Reservada" e lance só o valor já recebido — o Status não muda sozinho. Troque pra "Paga" quando a mesa estiver quitada.</div>
     ${m.lancadoPorEmail ? `<div class="hint" style="margin-top:8px;">Último lançamento de pagamento registrado por: ${esc(m.lancadoPorEmail)}</div>` : ''}
     <div style="margin-top:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
       ${state.ui.mesaForm.comprovantePath
@@ -3666,7 +3756,8 @@ function mesasListaLightbox(){
   const mesas = (state.mesasFeijoada||[]).filter(m=> mesaEffectiveStatus(m)===statusAlvo).slice().sort((a,b)=> a.numero-b.numero);
   const titulo = filtro==='pagas' ? 'Mesas pagas' : 'Mesas reservadas (ainda não pagas)';
   const dataFmt = (d)=> d ? new Date(d+'T00:00:00').toLocaleDateString('pt-BR') : '—';
-  const colCount = filtro==='pagas' ? 5 : 4;
+  const colCount = filtro==='pagas' ? 5 : 5;
+  const nomesPessoas = (m)=> (m.pessoas||[]).map(p=> (p&&p.nome) ? p.nome : p).filter(Boolean).join(', ') || '—';
   const rows = mesas.length ? mesas.map(m=> filtro==='pagas' ? `<tr>
       <td class="num mono">${m.numero}</td>
       <td>${esc(m.reservadoPor||'(sem nome)')}</td>
@@ -3677,11 +3768,12 @@ function mesasListaLightbox(){
       <td class="num mono">${m.numero}</td>
       <td>${esc(m.reservadoPor||'(sem nome)')}</td>
       <td>${esc(m.telefone||'—')}</td>
-      <td>${(m.pessoas||[]).length}</td>
+      <td>${esc(nomesPessoas(m))}</td>
+      <td class="num mono" style="color:${Number(m.valorPago)>0?'var(--warn)':'var(--text-dim)'};">${Number(m.valorPago)>0 ? fmtCur2(Number(m.valorPago)) + ' (parcial)' : '—'}</td>
     </tr>`).join('') : `<tr><td colspan="${colCount}" class="hint">Nenhuma mesa ${filtro==='pagas'?'paga':'reservada'} ainda.</td></tr>`;
   const theadCols = filtro==='pagas'
     ? '<th class="num">Mesa</th><th>Reservado por</th><th>Telefone</th><th>Data pagto</th><th class="num">Valor pago</th>'
-    : '<th class="num">Mesa</th><th>Reservado por</th><th>Telefone</th><th class="num">Pessoas</th>';
+    : '<th class="num">Mesa</th><th>Reservado por</th><th>Telefone</th><th>Pessoas</th><th class="num">Pago até agora</th>';
   const totalPago = filtro==='pagas' ? sum(mesas.map(m=>Number(m.valorPago)||0)) : null;
   return `
   <div class="saldo-hist-lightbox" data-action="closeMesasLista">
@@ -4381,13 +4473,41 @@ function extratoLinhaRow(linha, idx, ledger){
           </div>`).join('')}
       </div>`
     : `<div class="hint" style="margin-top:4px;">Nenhum lançamento do mesmo tipo perto dessa data.</div>`;
-  const acaoHtml = bate ? '' : (linha.tipo==='saida' ? extratoLancarSaidaForm(linha, idx) : `<div class="hint" style="max-width:220px; margin-top:4px;">${EXTRATO_ENTRADA_HINT[PROJECT_ID] || 'Lance na tela certa do domínio correspondente.'}</div>`);
+  // pendentes (ainda não pagos) deste domínio — registrar um pendente REGISTRA o pagamento de
+  // verdade (mesa/parcela/custo), não é só reconciliação; por isso ficam separados dos candidatos
+  // já pagos acima, com seu próprio controle de ação em vez de caixinha
+  const pendentes = bate ? [] : extratoPendentesLocais(linha);
+  const pendentesHtml = pendentes.length
+    ? `<div style="margin-top:6px; border-top:1px dashed var(--border); padding-top:4px;">
+        <div style="font-weight:700; font-size:10px; color:var(--warn); text-transform:uppercase; letter-spacing:.03em;">Pendentes em ${esc(EXTRATO_DOM_LABEL[PROJECT_ID]||PROJECT_ID)} — registrar pagamento</div>
+        ${extratoAgruparPendentes(pendentes).map(g=>`
+          <div style="margin-top:4px;">
+            <div style="font-weight:700; font-size:10px; color:var(--text-dim);">${esc(g.categoria)}</div>
+            ${g.itens.map(p=>`<div style="padding-left:4px; margin-top:3px;"><div>${esc(p.item)}</div>${extratoPendenteControle(linha, idx, p)}</div>`).join('')}
+          </div>`).join('')}
+      </div>`
+    : '';
+  // receita agregada (ex.: "Ingressos vendidos"/"1º lote") não tem um lançamento individual pra
+  // vincular — o jeito certo é lançar a venda avulsa direto (soma no total do domínio), não tentar
+  // "achar" uma fatia de um número agregado único
+  const podeVendaAvulsa = linha.tipo==='entrada' && (PROJECT_ID==='main' || PROJECT_ID==='feijoada-bloco');
+  const vendaAvulsaHtml = (!bate && podeVendaAvulsa)
+    ? `<div style="margin-top:6px; border-top:1px dashed var(--border); padding-top:4px;">
+        <div class="hint">Ou, se for venda avulsa de ingresso (fora de mesa/parcela já cadastrada — ex.: 2 ingressos individuais num Pix só):</div>
+        <div style="display:flex; gap:4px; align-items:center; margin-top:2px;">
+          <span class="hint">Qtd. ingressos:</span>
+          <input type="number" step="1" min="1" id="extratoVendaAvulsaQtd_${idx}" value="1" style="width:48px; font-size:11px;">
+          <button class="btn small" data-action="extratoLancarVendaAvulsa:${idx}">Lançar venda avulsa</button>
+        </div>
+      </div>`
+    : '';
+  const acaoHtml = bate ? '' : (linha.tipo==='saida' ? extratoLancarSaidaForm(linha, idx) : (pendentes.length || podeVendaAvulsa ? '' : `<div class="hint" style="max-width:220px; margin-top:4px;">${EXTRATO_ENTRADA_HINT[PROJECT_ID] || 'Lance na tela certa do domínio correspondente.'}</div>`));
   return `<tr>
     <td>${tblInput(`ui.extrato.linhas.${idx}.data`, linha.data, {type:'date'})}</td>
     <td>${tblInput(`ui.extrato.linhas.${idx}.descricao`, linha.descricao, {width:'220px'})}</td>
     <td class="num">${tblInput(`ui.extrato.linhas.${idx}.valor`, linha.valor, {type:'number', step:'0.01', cls:'num', width:'100px'})}</td>
     <td><select data-bind="ui.extrato.linhas.${idx}.tipo"><option value="entrada" ${linha.tipo==='entrada'?'selected':''}>Entrada</option><option value="saida" ${linha.tipo==='saida'?'selected':''}>Saída</option></select></td>
-    <td style="min-width:260px;">${badgeHtml}${listaHtml}${acaoHtml}</td>
+    <td style="min-width:280px;">${badgeHtml}${listaHtml}${acaoHtml}${pendentesHtml}${vendaAvulsaHtml}</td>
     <td><button class="rm" data-action="extratoRemoverLinha:${idx}" title="Remover linha">✕</button></td>
   </tr>`;
 }
@@ -4506,6 +4626,84 @@ ACTIONS.extratoLancarCusto = (idx)=>{
   linha.lancado = true;
   saveState(); render();
   requestSaldoHistorico(); // atualiza a comparação pra esse item já aparecer como "já lançado"
+};
+// venda avulsa de ingresso (sem mesa/parcela cadastrada) — soma direto no total do domínio. É o
+// jeito certo de tratar uma receita agregada (ex.: 2 ingressos individuais num Pix só): não dá
+// pra "achar" uma fatia de um número agregado, então aqui o valor entra de verdade no total.
+ACTIONS.extratoLancarVendaAvulsa = (idx)=>{
+  if(READONLY) return;
+  const linha = (state.ui.extrato && state.ui.extrato.linhas || [])[Number(idx)];
+  if(!linha || linha.tipo!=='entrada') return;
+  const valor = Number(linha.valor)||0;
+  if(!valor) return;
+  const qtdInput = document.getElementById(`extratoVendaAvulsaQtd_${idx}`);
+  const qtd = qtdInput ? Math.max(1, Math.round(Number(qtdInput.value)||1)) : 1;
+  if(PROJECT_ID==='main'){
+    state.venda.valorRecebido = (Number(state.venda.valorRecebido)||0) + valor;
+    state.venda.vendidosHoje = (Number(state.venda.vendidosHoje)||0) + qtd;
+  } else if(PROJECT_ID==='feijoada-bloco'){
+    state.venda.valorRecebidoLote1 = (Number(state.venda.valorRecebidoLote1)||0) + valor;
+    state.venda.vendidosHojeLote1 = (Number(state.venda.vendidosHojeLote1)||0) + qtd;
+  } else {
+    return;
+  }
+  linha.lancado = true;
+  saveState(); render();
+};
+// pendentes: registrar REGISTRA o pagamento de verdade (mesma ação da tela normal de cada tipo),
+// não é só reconciliação — por isso mexe no state de verdade, não só no vínculo da linha
+ACTIONS.extratoRegistrarMesaPendente = (idx, numero)=>{
+  if(READONLY) return;
+  const linha = (state.ui.extrato && state.ui.extrato.linhas || [])[Number(idx)];
+  if(!linha) return;
+  const input = document.getElementById(`extratoPendenteValor_${idx}_mesa_${numero}`);
+  const valorAgora = input ? Number(input.value)||0 : 0;
+  if(!valorAgora) return;
+  const m = (state.mesasFeijoada||[]).find(mm=> mm.numero===Number(numero));
+  if(!m) return;
+  const novoValorPago = (Number(m.valorPago)||0) + valorAgora;
+  requestMesaPagamento(Number(numero), m.status||'reservada', linha.data||todayISO(), novoValorPago, null);
+  linha.lancado = true;
+  render();
+};
+ACTIONS.extratoRegistrarPatrocinioPendente = (idx, tierIdx, fIdx, pIdx)=>{
+  if(READONLY) return;
+  const linha = (state.ui.extrato && state.ui.extrato.linhas || [])[Number(idx)];
+  if(!linha) return;
+  const t = state.patrocinios.base[Number(tierIdx)];
+  const f = t && t.fechamentos[Number(fIdx)];
+  const p = f && f.parcelas[Number(pIdx)];
+  if(!p) return;
+  p.dataPagamento = linha.data || todayISO();
+  linha.lancado = true;
+  saveState(); render();
+};
+ACTIONS.extratoRegistrarBateriaPendente = (idx, pessoaIdx, pcIdx)=>{
+  if(READONLY) return;
+  const linha = (state.ui.extrato && state.ui.extrato.linhas || [])[Number(idx)];
+  if(!linha) return;
+  const pessoa = state.contribuintesBateria[Number(pessoaIdx)];
+  const pc = pessoa && pessoa.parcelas[Number(pcIdx)];
+  if(!pc) return;
+  pc.dataPagamento = linha.data || todayISO();
+  linha.lancado = true;
+  saveState(); render();
+};
+ACTIONS.extratoRegistrarCustoPendente = (idx, custoId)=>{
+  if(READONLY) return;
+  const linha = (state.ui.extrato && state.ui.extrato.linhas || [])[Number(idx)];
+  const valorInput = document.getElementById(`extratoPendenteValor_${idx}_custo_${custoId}`);
+  const statusInput = document.getElementById(`extratoPendenteStatus_${idx}_custo_${custoId}`);
+  const valorAgora = valorInput ? Number(valorInput.value)||0 : 0;
+  if(!linha || !valorAgora) return;
+  const row = state.custos.find(c=>c.id===custoId);
+  if(!row) return;
+  row.valorPago = (Number(row.valorPago)||0) + valorAgora;
+  row.dataPagamento = linha.data || todayISO();
+  row.status = (statusInput && statusInput.value) || 'Pago Total';
+  if(!Number(row.valorContratado)) row.valorContratado = row.valorPago;
+  linha.lancado = true;
+  saveState(); render();
 };
 
 /* ================= BOOT ================= */
