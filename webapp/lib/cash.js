@@ -123,6 +123,59 @@ export async function fetchSharedCashHistory() {
   return { saldoInicial, porDominio };
 }
 
+// previsões (ainda NÃO pagas) de entrada e saída, cross-domain — mesmo espírito do histórico
+// realizado acima, mas pro lado "o que ainda está por vir": custos com data prevista mas sem
+// pagamento, parcelas de patrocínio previstas e ainda não pagas, e parcelas de contribuintes da
+// Bateria previstas e ainda não pagas. Mesas (Feijoada) ficam de fora de propósito: não existe
+// preço fixo por mesa, então não dá pra "prever" um valor futuro confiável (ver nota em
+// mesasFeijoadaDatedAmounts, no motor local) — só entra o que tem valor e data combinados de verdade.
+export async function fetchSharedCashForecast() {
+  const { data: states, error } = await supabase.from('project_state').select('id,data').in('id', PROJECTS.map((p) => p.id));
+  if (error) throw error;
+
+  const porDominio = {};
+  PROJECTS.forEach((p) => { porDominio[p.id] = { receitasPrevistas: [], custosPrevistos: [] }; });
+
+  (states || []).forEach((row) => {
+    const d = row.data || {};
+    const dom = porDominio[row.id];
+    if (!dom) return;
+    (d.custos || []).forEach((c) => {
+      if (c.dataPagamento || !c.dataPrevista) return;
+      const valor = Number(c.valorContratado) || 0;
+      if (!valor) return;
+      dom.custosPrevistos.push({
+        fornecedor: c.fornecedor || '(sem fornecedor)',
+        subcategoria: c.subcategoria || c.grupo || '',
+        grupo: c.grupo || '',
+        valor, dataPrevista: c.dataPrevista,
+      });
+    });
+    (d.patrocinios?.base || []).forEach((t) => {
+      (t.fechamentos || []).forEach((f) => {
+        (f.parcelas || []).forEach((p) => {
+          if (p.dataPagamento || !p.dataPrevista) return;
+          const valor = Number(p.valor) || 0;
+          if (!valor) return;
+          dom.receitasPrevistas.push({ descricao: `${f.empresa || '(sem empresa)'} — ${t.cota || 'patrocínio'}`, valor, dataPrevista: p.dataPrevista, tipo: 'patrocinio' });
+        });
+      });
+    });
+    if (row.id === 'bateria-piquinzada') {
+      (d.contribuintesBateria || []).forEach((p) => {
+        (p.parcelas || []).forEach((pc) => {
+          if (pc.dataPagamento || !pc.dataPrevista) return;
+          const valor = Number(pc.valor) || 0;
+          if (!valor) return;
+          dom.receitasPrevistas.push({ descricao: `${p.nome || '(sem nome)'} — parcela`, valor, dataPrevista: pc.dataPrevista, tipo: 'ingressos' });
+        });
+      });
+    }
+  });
+
+  return { porDominio };
+}
+
 export async function setSharedCashSaldoInicial(valor, userId) {
   const { error } = await supabase
     .from('org_cash')
