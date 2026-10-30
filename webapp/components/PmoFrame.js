@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import { PROJECTS } from '../lib/projects';
 import { approvedReimbursementsTotal } from '../lib/reimbursements';
 import { fetchEffectiveRole } from '../lib/roles';
-import { fetchSharedCashBalance, setSharedCashSaldoInicial, fetchSharedCashHistory } from '../lib/cash';
+import { fetchSharedCashBalance, setSharedCashSaldoInicial, fetchSharedCashHistory, fetchSharedCashForecast } from '../lib/cash';
 import { fetchMesasFeijoada, reservarMesa, atualizarMinhaMesa, cancelarMesa, adminSalvarMesa, registrarPagamentoMesa, moverMesaReserva } from '../lib/mesas';
 
 const SEED_MARKER = '/* __PIQUINZADA_STATE_SEED__ */';
@@ -202,6 +202,18 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
             iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:saldo-historico-result', ok: true, ...hist }, '*');
           } catch (e) {
             iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:saldo-historico-result', ok: false, error: e.message || String(e) }, '*');
+          }
+        })();
+      }
+      // previsões (ainda não pagas) de entrada/saída, cross-domain — mesmo padrão do histórico
+      // realizado acima, só busca quando a pessoa abre esse drill-down
+      if (d.type === 'piquinzada:saldo-previsao') {
+        (async () => {
+          try {
+            const prev = await fetchSharedCashForecast();
+            iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:saldo-previsao-result', ok: true, ...prev }, '*');
+          } catch (e) {
+            iframeRef.current?.contentWindow?.postMessage({ type: 'piquinzada:saldo-previsao-result', ok: false, error: e.message || String(e) }, '*');
           }
         })();
       }

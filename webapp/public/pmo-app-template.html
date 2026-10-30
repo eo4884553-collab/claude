@@ -259,6 +259,16 @@ button.mesa-btn.selected{outline:3px solid var(--accent); outline-offset:2px;}
 .saldo-hist-lightbox .lb-bar{display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; justify-content:center; width:100%; max-width:960px;}
 .saldo-hist-lightbox .lb-viewport{flex:1 1 auto; width:100%; max-width:960px; overflow-y:auto; border-radius:10px; background:var(--surface); padding:20px; box-sizing:border-box;}
 .saldo-hist-lightbox .lb-close{cursor:pointer;}
+/* imprimir uma lupa aberta: só entra em ação quando <body> ganha .printing-lightbox (ver
+   ACTIONS.imprimirLupa) — esconde todo o resto da página sem reorganizar o layout (visibility, não
+   display), e solta a lupa do fundo escuro/scroll limitado pra imprimir numa folha normal */
+@media print{
+  body.printing-lightbox > *{visibility:hidden;}
+  body.printing-lightbox .saldo-hist-lightbox{visibility:visible; position:absolute; inset:0; background:#fff; padding:0; display:block; overflow:visible;}
+  body.printing-lightbox .saldo-hist-lightbox *{visibility:visible;}
+  body.printing-lightbox .saldo-hist-lightbox .lb-bar{display:none;}
+  body.printing-lightbox .saldo-hist-lightbox .lb-viewport{max-width:100%; overflow:visible; background:#fff; padding:0; color:#000;}
+}
 .lb-row-click{cursor:pointer;}
 .lb-row-click:hover td{background:var(--accent-soft);}
 .saldo-kpi-clickable{cursor:pointer;}
@@ -794,6 +804,26 @@ if(HOSTED){
       state.ui.saldoHistoricoError = null;
     } else {
       state.ui.saldoHistoricoError = d.error || 'Erro ao carregar histórico.';
+    }
+    render();
+  });
+}
+// previsões (ainda não pagas) de entrada/saída por trás do saldo compartilhado — mesmo padrão do
+// histórico realizado acima, só pede quando o painel é aberto
+function requestSaldoPrevisao(){
+  if(!HOSTED || typeof window==='undefined') return;
+  window.parent.postMessage({type:'piquinzada:saldo-previsao'}, '*');
+}
+if(HOSTED){
+  window.addEventListener('message', (ev)=>{
+    const d = ev.data;
+    if(!d || typeof d!=='object' || d.type!=='piquinzada:saldo-previsao-result') return;
+    state.ui.saldoPrevisaoLoading = false;
+    if(d.ok){
+      state.ui.saldoPrevisaoData = { porDominio: d.porDominio };
+      state.ui.saldoPrevisaoError = null;
+    } else {
+      state.ui.saldoPrevisaoError = d.error || 'Erro ao carregar previsões.';
     }
     render();
   });
@@ -2177,7 +2207,7 @@ function onEnterCommit(e){
 // acoes que so navegam a tela (nao alteram dados do projeto) — continuam liberadas em modo convidado
 // reserva de mesa é a UNICA area do app onde convidado tambem grava de verdade (ver schema.sql,
 // secao 11) — por isso essas acoes de mesa entram aqui, mesmo nao sendo "so navegacao"
-const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa', 'openSaldoHistorico', 'closeSaldoHistorico', 'setSaldoHistoricoFiltro', 'openMesasLista', 'closeMesasLista', 'mesaListaAbrirMesa', 'openScenarioBreakdown', 'closeScenarioBreakdown']);
+const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa', 'openSaldoHistorico', 'closeSaldoHistorico', 'setSaldoHistoricoFiltro', 'openMesasLista', 'closeMesasLista', 'mesaListaAbrirMesa', 'openScenarioBreakdown', 'closeScenarioBreakdown', 'openRitmistasLista', 'closeRitmistasLista', 'imprimirLupa', 'openPrevisoesCaixa', 'closePrevisoesCaixa']);
 function onAction(e){
   const el = e.currentTarget || e.target.closest('[data-action]');
   const [action, ...args] = el.dataset.action.split(':');
@@ -2478,6 +2508,7 @@ VIEWS.dashboard = function(){
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:custos" title="Clique para ver as linhas"><div class="lbl">Pago em custos (todos) 🔎</div><div class="kpi-value">${fmtCur2(det.totalPagoCustos||0)}</div></div>
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:restituicoes" title="Clique para ver as linhas"><div class="lbl">Pago em restituições (todos) 🔎</div><div class="kpi-value">${fmtCur2(det.totalPagoRestituicoes||0)}</div></div>
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:restituicoesAprovadas" title="Clique para ver quais são"><div class="lbl">Restituições aprovadas — a pagar (todos) 🔎</div><div class="kpi-value" style="color:var(--warn)">${fmtCur2(det.totalRestituicoesAprovadas||0)}</div></div>
+        <div class="kpi saldo-kpi-clickable" data-action="openPrevisoesCaixa" title="Clique para ver as previsões de entrada e saída, com opção de imprimir"><div class="lbl">Previsões de entrada/saída 🔎</div><div class="kpi-value">Ver / imprimir</div></div>
       </div>
       <div class="hint" style="margin-top:8px;">Clique em qualquer card pra ver o histórico completo — item a item, por domínio. "Recebido" inclui ingressos vendidos, mesas pagas (Feijoada), contribuições (Bateria) e parcelas de patrocínio já pagas, nos 3 domínios. "Restituições aprovadas — a pagar" já foi aprovada mas o dinheiro ainda não saiu do caixa, então não entra no saldo atual — é só controle do que falta pagar.</div>
       ${!HOSTED ? `<div class="hint" style="margin-top:4px;">O saldo compartilhado só fica disponível no app publicado (conectado ao Supabase) — não neste arquivo local.</div>` : ''}`;
@@ -2541,7 +2572,8 @@ VIEWS.dashboard = function(){
     </div>
   </div>
   ${state.ui.saldoHistoricoOpen ? saldoHistoricoLightbox() : ''}
-  ${state.ui.scenarioBreakdownOpen ? scenarioBreakdownLightbox() : ''}`;
+  ${state.ui.scenarioBreakdownOpen ? scenarioBreakdownLightbox() : ''}
+  ${state.ui.previsoesCaixaOpen ? previsoesCaixaLightbox() : ''}`;
 };
 // campo de busca reutilizável em qualquer lupa — filtra client-side (sem mexer em state/render,
 // só esconde/mostra <tr>), funciona em qualquer lupa mesmo com várias tabelas dentro (ex.: o
@@ -2558,6 +2590,16 @@ function piquinzadaFiltrarLupa(input){
     tr.style.display = bate ? '' : 'none';
   });
 }
+// botão de imprimir reutilizável em qualquer lupa — ver ACTIONS.imprimirLupa e o @media print
+// (classe .printing-lightbox no body) que isola só o conteúdo da lupa aberta na hora de imprimir
+function lbPrintButton(){
+  return `<button class="btn small guest-ok" data-action="imprimirLupa" title="Imprimir esta tela">🖨️ Imprimir</button>`;
+}
+ACTIONS.imprimirLupa = ()=>{
+  document.body.classList.add('printing-lightbox');
+  window.print();
+};
+if(typeof window!=='undefined') window.addEventListener('afterprint', ()=> document.body.classList.remove('printing-lightbox'));
 // "de onde vem" a Receita total / Custo total de um cenário do Dashboard — não é uma consulta
 // nova, é a mesma conta que computeScenario() já faz (ver função acima), só exibida separada por
 // componente em vez de só o total — então o que aparece aqui bate exatamente com o KPI de origem
@@ -2774,6 +2816,7 @@ function saldoHistoricoLightbox(){
     <div class="lb-bar" onclick="event.stopPropagation();">
       <span class="hint" style="font-weight:600; color:var(--text);">Histórico do saldo de caixa compartilhado</span>
       ${lbSearchInput('Buscar fornecedor, descrição…')}
+      ${lbPrintButton()}
       <button class="btn small lb-close guest-ok" data-action="closeSaldoHistorico">Fechar ✕</button>
     </div>
     <div class="lb-viewport" onclick="event.stopPropagation();">
@@ -2795,6 +2838,91 @@ ACTIONS.closeSaldoHistorico = ()=>{
 };
 ACTIONS.setSaldoHistoricoFiltro = (filtro)=>{
   state.ui.saldoHistoricoFiltro = filtro || 'todos';
+  render();
+};
+// previsões (ainda não pagas) de entrada/saída, cross-domain — o lado "o que está por vir" do
+// saldo de caixa compartilhado (ver saldoHistoricoLightbox acima, que é o já REALIZADO). Cada
+// domínio mostra separado: receitas previstas (parcelas de patrocínio/Bateria com data e ainda
+// sem pagamento) e custos previstos (itens com valor contratado e data prevista, ainda sem pagar).
+function previsoesCaixaDomainBlock(domId, dom){
+  const dataFmt = (d)=> d ? new Date(d+'T00:00:00').toLocaleDateString('pt-BR') : '—';
+  const receitas = (dom.receitasPrevistas||[]).slice().sort((a,b)=> (a.dataPrevista||'').localeCompare(b.dataPrevista||''));
+  const custos = (dom.custosPrevistos||[]).slice().sort((a,b)=> (a.dataPrevista||'').localeCompare(b.dataPrevista||''));
+  const totalReceitas = sum(receitas.map(r=>r.valor));
+  const totalCustos = sum(custos.map(c=>c.valor));
+  const receitasRows = receitas.length ? receitas.map(r=>`<tr>
+      <td>${esc(r.descricao)}</td>
+      <td>${dataFmt(r.dataPrevista)}</td>
+      <td class="num mono" style="color:var(--good);">${fmtCur2(r.valor)}</td>
+    </tr>`).join('') : `<tr><td colspan="3" class="hint">Nenhuma receita prevista em aberto.</td></tr>`;
+  const custosRows = custos.length ? custos.map(c=>`<tr>
+      <td>${esc(c.fornecedor)}${c.subcategoria ? ` <span class="hint">(${esc(c.subcategoria)})</span>` : ''}</td>
+      <td>${dataFmt(c.dataPrevista)}</td>
+      <td class="num mono" style="color:var(--bad);">${fmtCur2(c.valor)}</td>
+    </tr>`).join('') : `<tr><td colspan="3" class="hint">Nenhum custo previsto em aberto.</td></tr>`;
+  return `
+  <div class="section" style="margin-top:14px;">
+    <h3 style="margin:0 0 8px;">${esc(SALDO_HIST_DOMAIN_LABEL[domId]||domId)} <span class="hint">previsto: entra ${fmtCur2(totalReceitas)} / sai ${fmtCur2(totalCustos)}</span></h3>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Receita prevista</th><th>Data prevista</th><th class="num">Valor</th></tr></thead>
+      <tbody>${receitasRows}</tbody>
+      <tfoot><tr><td colspan="2">Total a receber</td><td class="num mono" style="font-weight:700;">${fmtCur2(totalReceitas)}</td></tr></tfoot>
+    </table></div>
+    <div class="tablewrap" style="margin-top:10px;"><table>
+      <thead><tr><th>Custo previsto</th><th>Data prevista</th><th class="num">Valor</th></tr></thead>
+      <tbody>${custosRows}</tbody>
+      <tfoot><tr><td colspan="2">Total a pagar</td><td class="num mono" style="font-weight:700;">${fmtCur2(totalCustos)}</td></tr></tfoot>
+    </table></div>
+  </div>`;
+}
+function previsoesCaixaLightbox(){
+  const loading = state.ui.saldoPrevisaoLoading;
+  const error = state.ui.saldoPrevisaoError;
+  const data = state.ui.saldoPrevisaoData;
+  let body;
+  if(loading){
+    body = `<div class="hint" style="padding:30px; text-align:center;">Carregando previsões…</div>`;
+  } else if(error){
+    body = `<div class="callout" style="border-color:var(--bad); background:var(--bad-soft); color:var(--bad);"><strong>Erro ao carregar previsões:</strong> ${esc(error)}</div>`;
+  } else if(data){
+    let totalReceitas = 0, totalCustos = 0;
+    SALDO_HIST_DOMAIN_ORDER.forEach(id=>{
+      const dom = data.porDominio[id] || {};
+      totalReceitas += sum((dom.receitasPrevistas||[]).map(r=>r.valor));
+      totalCustos += sum((dom.custosPrevistos||[]).map(c=>c.valor));
+    });
+    const resumo = `<div class="gridN">
+      <div class="kpi"><div class="lbl">A receber (previsto)</div><div class="kpi-value" style="color:var(--good);">${fmtCur2(totalReceitas)}</div></div>
+      <div class="kpi"><div class="lbl">A pagar (previsto)</div><div class="kpi-value" style="color:var(--bad);">${fmtCur2(totalCustos)}</div></div>
+      <div class="kpi"><div class="lbl">Saldo projetado (se tudo entrar/sair como previsto)</div><div class="kpi-value" style="color:${totalReceitas-totalCustos>=0?'var(--good)':'var(--bad)'}">${fmtCur2(totalReceitas-totalCustos)}</div></div>
+    </div>
+    <div class="hint" style="margin-top:8px;">Só entram aqui itens com DATA prevista e valor já combinado, e que ainda não foram pagos — custos com valor contratado, parcelas de patrocínio e de contribuintes da Bateria. Mesas (Feijoada) não têm preço fixo combinado antecipadamente, então não entram nessa previsão (só aparecem no saldo já realizado, quando o pagamento acontece).</div>`;
+    body = resumo + SALDO_HIST_DOMAIN_ORDER.map(id=> previsoesCaixaDomainBlock(id, data.porDominio[id] || {})).join('');
+  } else {
+    body = `<div class="hint" style="padding:30px; text-align:center;">Sem dados.</div>`;
+  }
+  return `
+  <div class="saldo-hist-lightbox" data-action="closePrevisoesCaixa">
+    <div class="lb-bar" onclick="event.stopPropagation();">
+      <span class="hint" style="font-weight:600; color:var(--text);">Previsões de entrada e saída (todos os domínios)</span>
+      ${lbSearchInput('Buscar fornecedor, descrição…')}
+      ${lbPrintButton()}
+      <button class="btn small lb-close guest-ok" data-action="closePrevisoesCaixa">Fechar ✕</button>
+    </div>
+    <div class="lb-viewport" onclick="event.stopPropagation();">
+      ${body}
+    </div>
+  </div>`;
+}
+ACTIONS.openPrevisoesCaixa = ()=>{
+  state.ui.previsoesCaixaOpen = true;
+  state.ui.saldoPrevisaoLoading = true;
+  state.ui.saldoPrevisaoError = null;
+  render();
+  requestSaldoPrevisao();
+};
+ACTIONS.closePrevisoesCaixa = ()=>{
+  state.ui.previsoesCaixaOpen = false;
   render();
 };
 
@@ -3133,11 +3261,73 @@ VIEWS.vendas = function(){
         <div class="kpi"><div class="lbl">Velocidade média (ing./dia)</div><div class="kpi-value">${fmtNum(trk.velocidade,2)}</div></div>
         <div class="kpi"><div class="lbl">Venda diária necessária</div><div class="kpi-value">${fmtNum(trk.vendaDiariaNecessaria,2)}</div></div>
         <div class="kpi"><div class="lbl">Projeção de público final</div><div class="kpi-value">${fmtInt(trk.projecaoFinal)}</div></div>
+        ${PROJECT_ID==='bateria-piquinzada' ? `<div class="kpi saldo-kpi-clickable guest-ok" data-action="openRitmistasLista" title="Clique para ver por instrumento, quem são e quanto cada um pagou/está em atraso"><div class="lbl">Total de ritmistas 🔎</div><div class="kpi-value">${fmtInt((state.contribuintesBateria||[]).length)}</div></div>` : ''}
       </div>
     </div>
   </div>
-  ${PROJECT_ID==='bateria-piquinzada' ? viewContribuintesBateria() : ''}`;
+  ${PROJECT_ID==='bateria-piquinzada' ? viewContribuintesBateria() : ''}
+  ${state.ui.ritmistasListaOpen ? ritmistasLightbox() : ''}`;
 };
+// agrupa os integrantes da Bateria por instrumento (campo Obs.) — responde "quantos ritmistas por
+// categoria, quem são, e quanto cada um já pagou / está em atraso" sem abrir pessoa a pessoa.
+// "Em atraso" = parcela com data prevista já passada e ainda sem data de pagamento.
+function contribuintesBateriaPorInstrumento(){
+  const hoje = todayISO();
+  const grupos = new Map();
+  (state.contribuintesBateria||[]).forEach(c=>{
+    const instrumento = (c.obs||'').trim() || 'Sem instrumento';
+    if(!grupos.has(instrumento)) grupos.set(instrumento, []);
+    const parcelas = c.parcelas||[];
+    const pago = sum(parcelas.filter(p=>p.dataPagamento).map(p=> Number(p.valor)||0));
+    const emAtraso = sum(parcelas.filter(p=> !p.dataPagamento && p.dataPrevista && p.dataPrevista<hoje).map(p=> Number(p.valor)||0));
+    grupos.get(instrumento).push({nome:c.nome, pago, emAtraso});
+  });
+  return [...grupos.entries()].map(([instrumento,pessoas])=>({
+    instrumento,
+    pessoas: pessoas.slice().sort((a,b)=> a.nome.localeCompare(b.nome,'pt-BR')),
+    totalPessoas: pessoas.length,
+    totalPago: sum(pessoas.map(p=>p.pago)),
+    totalEmAtraso: sum(pessoas.map(p=>p.emAtraso)),
+  })).sort((a,b)=> a.instrumento.localeCompare(b.instrumento,'pt-BR'));
+}
+function ritmistasLightbox(){
+  const grupos = contribuintesBateriaPorInstrumento();
+  const totalPessoas = sum(grupos.map(g=>g.totalPessoas));
+  const totalPago = sum(grupos.map(g=>g.totalPago));
+  const totalEmAtraso = sum(grupos.map(g=>g.totalEmAtraso));
+  const corpo = grupos.map(g=> `
+    <div style="margin-bottom:18px;">
+      <div style="font-weight:700; font-size:13px; margin-bottom:6px; text-transform:uppercase; letter-spacing:.02em;">${esc(g.instrumento)}
+        <span class="hint" style="font-weight:400; text-transform:none; letter-spacing:normal;"> — ${g.totalPessoas} pessoa${g.totalPessoas!==1?'s':''} · pago ${fmtCur2(g.totalPago)}${g.totalEmAtraso>0?` · <span style="color:var(--bad); font-weight:600;">em atraso ${fmtCur2(g.totalEmAtraso)}</span>`:''}</span>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Nome</th><th class="num">Pago</th><th class="num">Em atraso</th></tr></thead>
+        <tbody>${g.pessoas.map(p=>`<tr>
+          <td>${esc(p.nome)}</td>
+          <td class="num mono" style="color:var(--good);">${fmtCur2(p.pago)}</td>
+          <td class="num mono" style="color:${p.emAtraso>0?'var(--bad)':'var(--text-dim)'};">${p.emAtraso>0?fmtCur2(p.emAtraso):'—'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </div>`).join('');
+  return `
+  <div class="saldo-hist-lightbox" data-action="closeRitmistasLista">
+    <div class="lb-bar" onclick="event.stopPropagation();">
+      <span class="hint" style="font-weight:600; color:var(--text);">Ritmistas por instrumento — ${totalPessoas} no total</span>
+      ${lbSearchInput('Buscar nome ou instrumento…')}
+      <button class="btn small lb-close guest-ok" data-action="closeRitmistasLista">Fechar ✕</button>
+    </div>
+    <div class="lb-viewport" onclick="event.stopPropagation();">
+      <div class="gridN" style="margin-bottom:16px;">
+        <div class="kpi"><div class="lbl">Total de ritmistas</div><div class="kpi-value">${fmtInt(totalPessoas)}</div></div>
+        <div class="kpi"><div class="lbl">Total pago</div><div class="kpi-value" style="color:var(--good);">${fmtCur2(totalPago)}</div></div>
+        <div class="kpi"><div class="lbl">Total em atraso</div><div class="kpi-value" style="color:${totalEmAtraso>0?'var(--bad)':'inherit'};">${fmtCur2(totalEmAtraso)}</div></div>
+      </div>
+      ${corpo || '<div class="hint">Nenhum integrante cadastrado ainda.</div>'}
+    </div>
+  </div>`;
+}
+ACTIONS.openRitmistasLista = ()=>{ state.ui.ritmistasListaOpen = true; render(); };
+ACTIONS.closeRitmistasLista = ()=>{ state.ui.ritmistasListaOpen = false; render(); };
 ACTIONS.addLot = (scen)=>{ state.vendas[scen].push({id:uid(), lote:'Novo lote', preco:100, pctMix:0}); saveState(); render(); };
 ACTIONS.rmLot = (scen,i)=>{ state.vendas[scen].splice(Number(i),1); saveState(); render(); };
 
@@ -4202,6 +4392,7 @@ VIEWS.fluxo = function(){
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:custos" title="Clique para ver as linhas"><div class="lbl">Pago em custos (todos) 🔎</div><div class="kpi-value">${fmtCur2(det.totalPagoCustos||0)}</div></div>
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:restituicoes" title="Clique para ver as linhas"><div class="lbl">Pago em restituições (todos) 🔎</div><div class="kpi-value">${fmtCur2(det.totalPagoRestituicoes||0)}</div></div>
         <div class="kpi saldo-kpi-clickable" data-action="openSaldoHistorico:restituicoesAprovadas" title="Clique para ver quais são"><div class="lbl">Restituições aprovadas — a pagar (todos) 🔎</div><div class="kpi-value" style="color:var(--warn)">${fmtCur2(det.totalRestituicoesAprovadas||0)}</div></div>
+        <div class="kpi saldo-kpi-clickable" data-action="openPrevisoesCaixa" title="Clique para ver as previsões de entrada e saída, com opção de imprimir"><div class="lbl">Previsões de entrada/saída 🔎</div><div class="kpi-value">Ver / imprimir</div></div>
       </div>
       <div class="hint" style="margin-top:8px;">Clique em qualquer card pra ver o histórico completo — item a item, por domínio. "Recebido" inclui ingressos vendidos, mesas pagas (Feijoada), contribuições (Bateria) e parcelas de patrocínio já pagas, nos 3 domínios. "Restituições aprovadas — a pagar" já foi aprovada mas o dinheiro ainda não saiu do caixa, então não entra no saldo atual — é só controle do que falta pagar.</div>
       ${HOSTED ? `<label class="field" style="flex-direction:row; align-items:center; gap:6px; margin-top:10px; max-width:320px;">
@@ -4254,7 +4445,8 @@ VIEWS.fluxo = function(){
     <h2>Capital de giro por cenário <span class="hint">reutiliza as mesmas distribuições mensais acima</span></h2>
     <div class="gridN">${SCEN.map(s=>`<div class="kpi"><div class="lbl">${SCEN_LABEL[s]}</div><div class="kpi-value">${fmtCur(capGiroFor(s))}</div></div>`).join('')}</div>
   </div>
-  ${state.ui.saldoHistoricoOpen ? saldoHistoricoLightbox() : ''}`;
+  ${state.ui.saldoHistoricoOpen ? saldoHistoricoLightbox() : ''}
+  ${state.ui.previsoesCaixaOpen ? previsoesCaixaLightbox() : ''}`;
 };
 
 /* ================= BREAK-EVEN ================= */
