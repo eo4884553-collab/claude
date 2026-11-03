@@ -2348,7 +2348,7 @@ function onEnterCommit(e){
 // acoes que so navegam a tela (nao alteram dados do projeto) — continuam liberadas em modo convidado
 // reserva de mesa é a UNICA area do app onde convidado tambem grava de verdade (ver schema.sql,
 // secao 11) — por isso essas acoes de mesa entram aqui, mesmo nao sendo "so navegacao"
-const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa', 'openSaldoHistorico', 'closeSaldoHistorico', 'setSaldoHistoricoFiltro', 'openMesasLista', 'closeMesasLista', 'mesaListaAbrirMesa', 'openScenarioBreakdown', 'closeScenarioBreakdown', 'openRitmistasLista', 'closeRitmistasLista', 'imprimirLupa', 'openPrevisoesCaixa', 'closePrevisoesCaixa']);
+const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa', 'openSaldoHistorico', 'closeSaldoHistorico', 'setSaldoHistoricoFiltro', 'openMesasLista', 'closeMesasLista', 'mesaListaAbrirMesa', 'mesaListaVerComprovante', 'mesaListaAnexarComprovante', 'openScenarioBreakdown', 'closeScenarioBreakdown', 'openRitmistasLista', 'closeRitmistasLista', 'imprimirLupa', 'openPrevisoesCaixa', 'closePrevisoesCaixa']);
 function onAction(e){
   const el = e.currentTarget || e.target.closest('[data-action]');
   const [action, ...args] = el.dataset.action.split(':');
@@ -4133,6 +4133,20 @@ function mesaTrocaFields(m){
 // quem reservou nem só admin (ex.: alguém ajudando a cobrar na entrada da festa). Reaproveitado
 // no painel de quem reservou e no painel de quem está só olhando a mesa de outra pessoa; fica
 // registrado quem fez o último lançamento (lancadoPorEmail) pra dar pra conferir depois.
+// botões de ver/anexar/remover comprovante + o input de arquivo escondido que eles disparam —
+// extraído à parte porque tanto o formulário de pagamento (convidado aprovado) quanto o painel do
+// admin precisam dos dois, e os dois leem/gravam o mesmo rascunho (ui.mesaForm.comprovantePath)
+function mesaComprovanteBlock(m){
+  return `<div style="margin-top:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+      <span class="lbl">Comprovante:</span>
+      ${state.ui.mesaForm.comprovantePath
+        ? `<button class="btn small guest-ok" data-action="viewComprovanteMesaPagamento" title="Ver comprovante anexado">📎 Ver comprovante</button>
+           <button class="rm guest-ok" data-action="rmComprovanteMesaPagamento" title="Remover anexo">✕</button>`
+        : `<button class="btn small guest-ok" data-action="attachComprovanteMesaPagamento:${m.numero}" ${state.ui.mesaUploadBusy?'disabled':''} title="Anexar comprovante do pagamento (ex.: print do PIX)">📎 Anexar comprovante</button>`}
+      ${state.ui.mesaUploadBusy ? `<span class="hint">Enviando…</span>` : ''}
+    </div>
+    <input type="file" id="mesaComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
+}
 function mesaPagamentoFields(m){
   const curStatus = (state.ui.mesaForm && state.ui.mesaForm.status) || 'reservada';
   const statusOptions = MESA_ADMIN_STATUS.map(s=>`<option value="${s}" ${s===curStatus?'selected':''}>${MESA_STATUS_LABEL[s]}</option>`).join('');
@@ -4147,18 +4161,11 @@ function mesaPagamentoFields(m){
     </div>
     <div class="hint" style="margin-top:8px;">Pagamento parcial? Deixe o Status em "Reservada" e lance só o valor já recebido — o Status não muda sozinho. Troque pra "Paga" quando a mesa estiver quitada.</div>
     ${m.lancadoPorEmail ? `<div class="hint" style="margin-top:8px;">Último lançamento de pagamento registrado por: ${esc(m.lancadoPorEmail)}</div>` : ''}
-    <div style="margin-top:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-      ${state.ui.mesaForm.comprovantePath
-        ? `<button class="btn small guest-ok" data-action="viewComprovanteMesaPagamento" title="Ver comprovante anexado">📎 Ver comprovante</button>
-           <button class="rm guest-ok" data-action="rmComprovanteMesaPagamento" title="Remover anexo">✕</button>`
-        : `<button class="btn small guest-ok" data-action="attachComprovanteMesaPagamento:${m.numero}" ${state.ui.mesaUploadBusy?'disabled':''} title="Anexar comprovante do pagamento (ex.: print do PIX)">📎 Anexar comprovante</button>`}
-      ${state.ui.mesaUploadBusy ? `<span class="hint">Enviando…</span>` : ''}
-    </div>
+    ${mesaComprovanteBlock(m)}
     ${mesaErroBox()}
     <button class="btn primary guest-ok" style="margin-top:10px;" data-action="savePagamentoMesa:${m.numero}" ${(state.ui.mesaFormBusy||state.ui.mesaUploadBusy)?'disabled':''}>Salvar pagamento</button>
   </div>
-  ${(USER_ID && m.lancadoPorUserId===USER_ID) ? mesaTrocaFields(m) : ''}
-  <input type="file" id="mesaComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
+  ${(USER_ID && m.lancadoPorUserId===USER_ID) ? mesaTrocaFields(m) : ''}`;
 }
 function mesaPanelClaim(m){
   return `<div class="section mesa-guest-form" style="border:2px solid var(--accent); background:var(--accent-soft);">
@@ -4219,6 +4226,11 @@ function mesaPanelAdmin(m){
       ${fld('Valor pago', 'ui.mesaForm.valorPago', {kind:'currency'})}
     </div>
     ${m.lancadoPorEmail ? `<div class="hint" style="margin-top:4px;">Último lançamento de pagamento registrado por: ${esc(m.lancadoPorEmail)}</div>` : ''}
+    ${m.status!=='livre' ? `<div style="margin-top:12px; padding-top:12px; border-top:1px dashed var(--border);">
+      ${mesaComprovanteBlock(m)}
+      <div class="hint" style="margin-top:4px;">Salvo separado do resto do formulário, com o Status/Data/Valor mostrados acima.</div>
+      <button class="btn small" style="margin-top:8px;" data-action="savePagamentoMesa:${m.numero}" ${(state.ui.mesaFormBusy||state.ui.mesaUploadBusy)?'disabled':''}>💾 Salvar comprovante</button>
+    </div>` : ''}
     ${mesaPessoasEditor()}
     <div style="margin-top:12px;">
       ${fld('Observação', 'ui.mesaForm.obs', {kind:'text'})}
@@ -4296,8 +4308,14 @@ function mesasListaLightbox(){
   const mesas = (state.mesasFeijoada||[]).filter(m=> mesaEffectiveStatus(m)===statusAlvo).slice().sort((a,b)=> a.numero-b.numero);
   const titulo = filtro==='pagas' ? 'Mesas pagas' : 'Mesas reservadas (ainda não pagas)';
   const dataFmt = (d)=> d ? new Date(d+'T00:00:00').toLocaleDateString('pt-BR') : '—';
-  const colCount = filtro==='pagas' ? 6 : 5;
+  const colCount = filtro==='pagas' ? 7 : 5;
   const nomesPessoas = (m)=> (m.pessoas||[]).map(p=> (p&&p.nome) ? p.nome : p).filter(Boolean).join(', ') || '—';
+  // comprovante direto na lista de mesas pagas: ver (se já tem) ou anexar (se ainda não tem) sem
+  // precisar abrir a mesa primeiro e procurar o campo lá dentro — onclick="stopPropagation" pra não
+  // disparar também o clique da linha (que abriria o painel da mesa)
+  const comprovanteCell = (m)=> `<td onclick="event.stopPropagation();">${m.comprovantePath
+    ? `<button class="btn small guest-ok" data-action="mesaListaVerComprovante:${m.numero}" title="Ver comprovante anexado">📎 Ver</button>`
+    : `<button class="btn small guest-ok" data-action="mesaListaAnexarComprovante:${m.numero}" title="Anexar comprovante do pagamento desta mesa">📎 Anexar</button>`}</td>`;
   // clicar em qualquer linha abre direto o painel de reserva daquela mesa (fecha a lupa) — não
   // precisa mais ficar procurando a mesa no mapa depois de achar o nome aqui
   const rows = mesas.length ? mesas.map(m=> filtro==='pagas' ? `<tr data-action="mesaListaAbrirMesa:${m.numero}" class="lb-row-click" title="Abrir a mesa ${m.numero}">
@@ -4306,6 +4324,7 @@ function mesasListaLightbox(){
       <td>${esc(m.telefone||'—')}</td>
       <td>${esc(nomesPessoas(m))}</td>
       <td>${dataFmt(m.dataPagamento)}</td>
+      ${comprovanteCell(m)}
       <td class="num mono" style="color:var(--good);">${fmtCur2(Number(m.valorPago)||0)}</td>
     </tr>` : `<tr data-action="mesaListaAbrirMesa:${m.numero}" class="lb-row-click" title="Abrir a mesa ${m.numero}">
       <td class="num mono">${m.numero}</td>
@@ -4315,7 +4334,7 @@ function mesasListaLightbox(){
       <td class="num mono" style="color:${Number(m.valorPago)>0?'var(--warn)':'var(--text-dim)'};">${Number(m.valorPago)>0 ? fmtCur2(Number(m.valorPago)) + ' (parcial)' : '—'}</td>
     </tr>`).join('') : `<tr><td colspan="${colCount}" class="hint">Nenhuma mesa ${filtro==='pagas'?'paga':'reservada'} ainda.</td></tr>`;
   const theadCols = filtro==='pagas'
-    ? '<th class="num">Mesa</th><th>Reservado por</th><th>Telefone</th><th>Pessoas</th><th>Data pagto</th><th class="num">Valor pago</th>'
+    ? '<th class="num">Mesa</th><th>Reservado por</th><th>Telefone</th><th>Pessoas</th><th>Data pagto</th><th>Comprovante</th><th class="num">Valor pago</th>'
     : '<th class="num">Mesa</th><th>Reservado por</th><th>Telefone</th><th>Pessoas</th><th class="num">Pago até agora</th>';
   const totalPago = filtro==='pagas' ? sum(mesas.map(m=>Number(m.valorPago)||0)) : null;
   return `
@@ -4330,11 +4349,23 @@ function mesasListaLightbox(){
       <div class="tablewrap"><table>
         <thead><tr>${theadCols}</tr></thead>
         <tbody>${rows}</tbody>
-        ${totalPago!=null ? `<tfoot><tr><td colspan="5">Total pago</td><td class="num mono" style="font-weight:700;">${fmtCur2(totalPago)}</td></tr></tfoot>` : ''}
+        ${totalPago!=null ? `<tfoot><tr><td colspan="6">Total pago</td><td class="num mono" style="font-weight:700;">${fmtCur2(totalPago)}</td></tr></tfoot>` : ''}
       </table></div>
     </div>
   </div>`;
 }
+// ver/anexar comprovante direto na linha da lista de mesas pagas, sem precisar abrir o painel da
+// mesa primeiro — ver lê direto de m.comprovantePath (já é o dado salvo de verdade, não precisa de
+// rascunho); anexar abre o painel daquela mesa (que já inicializa o rascunho certo, ver
+// mesaFormInit) e na sequência já dispara o seletor de arquivo, igual clicar no botão lá dentro.
+ACTIONS.mesaListaVerComprovante = (numero)=>{
+  const m = (state.mesasFeijoada||[]).find(mm=> mm.numero===Number(numero));
+  if(m && m.comprovantePath) requestComprovanteView(m.comprovantePath);
+};
+ACTIONS.mesaListaAnexarComprovante = (numero)=>{
+  ACTIONS.mesaListaAbrirMesa(numero);
+  ACTIONS.attachComprovanteMesaPagamento(numero);
+};
 ACTIONS.openMesasLista = (filtro)=>{
   state.ui.mesasListaOpen = true;
   state.ui.mesasListaFiltro = filtro || 'reservadas';
