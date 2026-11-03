@@ -389,7 +389,7 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
         ref={iframeRef}
         title={project.label}
         style={{ flex: 1, border: 'none', width: '100%', display: status === 'ready' ? 'block' : 'none' }}
-        sandbox="allow-scripts allow-same-origin allow-downloads allow-forms"
+        sandbox="allow-scripts allow-same-origin allow-downloads allow-forms allow-modals"
       />
     </div>
   );
