@@ -1286,9 +1286,15 @@ function migrateState(){
     });
     delete state.ativacoes;
   }
-  // marca "bebida" nos itens de catálogo salvos antes do campo Tipo existir
+  // marca "bebida" nos itens de catálogo salvos antes do campo Tipo existir; migra o vínculo de
+  // mão de obra de "1 só" (maoDeObraLink, string) pra "vários" (maoDeObraLinks, lista) — permite
+  // somar o custo de mais de uma equipe/item na mesma linha (ex.: Garçons + Monitores)
   SCEN.forEach(s=>{
-    ((state.entradas[s]&&state.entradas[s].bebidas)||[]).forEach(b=>{ if(!b.tipo) b.tipo='bebida'; });
+    ((state.entradas[s]&&state.entradas[s].bebidas)||[]).forEach(b=>{
+      if(!b.tipo) b.tipo='bebida';
+      if(!Array.isArray(b.maoDeObraLinks)) b.maoDeObraLinks = b.maoDeObraLink ? [b.maoDeObraLink] : [];
+      delete b.maoDeObraLink;
+    });
   });
   // mapa de mesas (Feijoada do Bloco) — estados salvos antes disso nao tem essa lista; se ja
   // existir mas com menos de 100 (ex.: versao antiga com outro numero), completa o que falta
@@ -1535,7 +1541,7 @@ function custoCategoriaOptionsFlat(scen){
 // inteiro pra cada bebida separadamente (o que dobraria o custo de mão de obra no total do evento).
 function maoDeObraLinkQtdCompartilhada(scen, link){
   const bebidas = (state.entradas[scen] && state.entradas[scen].bebidas) || [];
-  return sum(bebidas.filter(b=> b.maoDeObraLink===link).map(b=> Number(b.qtdComprada)||0));
+  return sum(bebidas.filter(b=> (b.maoDeObraLinks||[]).includes(link)).map(b=> Number(b.qtdComprada)||0));
 }
 // margem liquida por unidade de uma bebida/ativacao: preco de venda menos custo do produto,
 // mao de obra operacional (pra servir) e taxa de cartao sobre o preco de venda. "Quantidade
@@ -1543,27 +1549,34 @@ function maoDeObraLinkQtdCompartilhada(scen, link){
 // compradas) — não uma estimativa de "quantas pessoas consomem"; é assim que dá pra ver o lucro
 // sobre o material de verdade investido, batendo com o que saiu do bolso (nota fiscal/comprovante
 // em Custos), em vez de uma projeção por pessoa que pode não ter nada a ver com o que foi comprado.
-// "Mão de obra/unid." pode ser digitada na mão OU vinculada (b.maoDeObraLink = "groupKey:itemKey")
-// a um item de Custos por categoria — nesse caso o valor vira automaticamente o total desse item
-// dividido pela Quantidade comprada COMPARTILHADA entre todas as linhas vinculadas ao mesmo item
-// (ex.: 2 garçons x R$100 cada = R$200; 100 Heineken + 100 refri vinculados à mesma equipe = 200
-// unidades no total → R$1/un. pra CADA uma das duas linhas, batendo R$100+R$100=R$200 no total —
-// não R$2/un. pra cada uma, que somaria R$400 e dobraria o custo real da equipe).
+// "Mão de obra/unid." pode ser digitada na mão OU vinculada a UM OU MAIS itens de Custos por
+// categoria (b.maoDeObraLinks = ["groupKey:itemKey", ...] — ex.: Monitores + Garçons servindo a
+// mesma bebida) — nesse caso o valor vira a SOMA de cada item vinculado dividido pela Quantidade
+// comprada COMPARTILHADA entre todas as linhas vinculadas àquele item específico (ex.: 2 garçons x
+// R$100 cada = R$200; 100 Heineken + 100 refri vinculados à mesma equipe = 200 unidades no total →
+// R$1/un. pra CADA uma das duas linhas, batendo R$100+R$100=R$200 no total — não R$2/un. pra cada
+// uma, que somaria R$400 e dobraria o custo real da equipe). Cada vínculo é rateado separadamente,
+// então um item (ex.: Heineken) pode somar R$1/un. de Garçons + R$0,50/un. de Monitores = R$1,50/un.
 function bebidaCalc(b, scen){
   const custoUnit = Number(b.custoUnit)||0;
   const precoVenda = Number(b.precoVenda)||0;
   const taxaCartaoPct = Number(b.taxaCartaoPct)||0;
   const qtdComprada = Number(b.qtdComprada)||0;
   let custoOperacionalUnit = Number(b.custoOperacionalUnit)||0;
-  let maoDeObraLinkInfo = null;
-  if(b.maoDeObraLink && scen){
-    const [gk, ik] = b.maoDeObraLink.split(':');
-    const total = custoCategoriaItemTotal(scen, gk, ik);
-    const qtdCompartilhada = maoDeObraLinkQtdCompartilhada(scen, b.maoDeObraLink);
-    custoOperacionalUnit = qtdCompartilhada>0 ? total/qtdCompartilhada : 0;
-    const itemDef = (state.itemCatalog[gk]||[]).find(it=>it.key===ik);
-    const groupDef = (state.costGroups||[]).find(g=>g.key===gk);
-    maoDeObraLinkInfo = {groupKey:gk, itemKey:ik, total, qtdCompartilhada, itemLabel: itemDef?itemDef.label:'(item removido)', groupLabel: groupDef?groupDef.label:gk};
+  let maoDeObraLinkInfos = [];
+  const links = Array.isArray(b.maoDeObraLinks) ? b.maoDeObraLinks : [];
+  if(links.length && scen){
+    custoOperacionalUnit = 0;
+    links.forEach(link=>{
+      const [gk, ik] = link.split(':');
+      const total = custoCategoriaItemTotal(scen, gk, ik);
+      const qtdCompartilhada = maoDeObraLinkQtdCompartilhada(scen, link);
+      const valorUnit = qtdCompartilhada>0 ? total/qtdCompartilhada : 0;
+      custoOperacionalUnit += valorUnit;
+      const itemDef = (state.itemCatalog[gk]||[]).find(it=>it.key===ik);
+      const groupDef = (state.costGroups||[]).find(g=>g.key===gk);
+      maoDeObraLinkInfos.push({link, groupKey:gk, itemKey:ik, total, qtdCompartilhada, valorUnit, itemLabel: itemDef?itemDef.label:'(item removido)', groupLabel: groupDef?groupDef.label:gk});
+    });
   }
   const taxaCartaoValor = precoVenda*taxaCartaoPct;
   const margemUnit = precoVenda - custoUnit - custoOperacionalUnit - taxaCartaoValor;
@@ -1576,7 +1589,7 @@ function bebidaCalc(b, scen){
   const prob = b.tipo==='ativacao' ? (Number(b.prob)||0) : 1;
   return {
     custoUnit, precoVenda, custoOperacionalUnit, taxaCartaoPct, qtdComprada, qtdTotal, prob,
-    taxaCartaoValor, margemUnit, margemPct, maoDeObraLinkInfo,
+    taxaCartaoValor, margemUnit, margemPct, maoDeObraLinkInfos,
     receitaItemTotal: precoVenda*qtdTotal*prob, margemItemTotal: margemUnit*qtdTotal*prob,
     // custo "cheio" (SEM ponderar por probabilidade) — é o que de fato se paga se a ativação
     // acontecer de verdade; usado só pra sugerir o valor inicial do Custo vinculado (ver
@@ -3170,22 +3183,32 @@ function costGroupBlock(scen, group){
 // Custos por categoria pra vincular (ex.: "Operação: Garçons") — quando vinculado, o valor some de
 // ser digitável e passa a mostrar automaticamente (total do item ÷ Quantidade comprada); sem link,
 // continua o campo numérico manual de sempre (ver bebidaCalc).
+// coluna "Mão de obra/unid." do catálogo: aceita vincular MAIS DE UM item de Custos por categoria
+// na mesma bebida/ativação (ex.: Garçons + Monitores servindo a mesma cerveja) — o valor mostrado é
+// a SOMA de cada vínculo (cada um já rateado pela sua própria Quantidade comprada compartilhada,
+// ver bebidaCalc). Cada vínculo vira um "chip" com seu valor e um ✕ pra remover; um <select>
+// embaixo adiciona um novo vínculo (só lista itens que essa linha ainda não usa). Sem nenhum
+// vínculo, volta a ser o campo numérico manual de sempre.
 function maoDeObraCell(scen, i, r){
   const opts = custoCategoriaOptionsFlat(scen);
-  const atual = r.maoDeObraLink || '';
-  const selectHtml = `<select data-bind="entradas.${scen}.bebidas.${i}.maoDeObraLink" style="font-size:11px; width:100%; max-width:160px;">
-    <option value="">— manual —</option>
-    ${opts.map(o=>{
-      const val = `${o.groupKey}:${o.itemKey}`;
-      return `<option value="${val}" ${atual===val?'selected':''}>${esc(o.groupLabel)}: ${esc(o.itemLabel)}</option>`;
-    }).join('')}
-  </select>`;
-  const info = r.maoDeObraLinkInfo;
-  const compartilhado = info && info.qtdCompartilhada > r.qtdComprada;
-  const valorHtml = info
-    ? `<div class="mono" title="${esc(fmtCur2(info.total))} (${esc(info.groupLabel)}: ${esc(info.itemLabel)}) ÷ ${fmtInt(info.qtdCompartilhada)} un.${compartilhado ? ' no total, somando outras linhas vinculadas ao mesmo item' : ''} = ${esc(fmtCur2(r.custoOperacionalUnit))}/un.">${fmtCur2(r.custoOperacionalUnit)}${compartilhado ? ` <span class="hint" style="font-size:10px;">(÷${fmtInt(info.qtdCompartilhada)})</span>` : ''}</div>`
+  const linkedSet = new Set((r.maoDeObraLinks||[]).filter(Boolean));
+  const available = opts.filter(o=> !linkedSet.has(`${o.groupKey}:${o.itemKey}`));
+  const addSelectHtml = available.length ? `<select style="font-size:11px; width:100%; max-width:160px;" onchange="if(this.value){ undoSnapshotStart(); ACTIONS.addMaoDeObraLink('${scen}', ${i}, this.value); }">
+    <option value="">+ vincular item…</option>
+    ${available.map(o=>`<option value="${o.groupKey}:${o.itemKey}">${esc(o.groupLabel)}: ${esc(o.itemLabel)}</option>`).join('')}
+  </select>` : '';
+  const infos = r.maoDeObraLinkInfos||[];
+  const chips = infos.map(info=>{
+    const compartilhado = info.qtdCompartilhada > r.qtdComprada;
+    return `<div class="hint" style="font-size:10px; display:flex; align-items:center; gap:4px; justify-content:flex-end; white-space:nowrap;" title="${esc(fmtCur2(info.total))} (${esc(info.groupLabel)}: ${esc(info.itemLabel)}) ÷ ${fmtInt(info.qtdCompartilhada)} un.${compartilhado ? ' no total, somando outras linhas vinculadas ao mesmo item' : ''} = ${esc(fmtCur2(info.valorUnit))}/un.">
+      <span>${esc(info.groupLabel)}: ${esc(info.itemLabel)} ${esc(fmtCur2(info.valorUnit))}${compartilhado ? ` (÷${fmtInt(info.qtdCompartilhada)})` : ''}</span>
+      <button class="rm" style="padding:0 3px;" data-action="rmMaoDeObraLink:${scen}:${i}:${info.groupKey}:${info.itemKey}" title="Remover vínculo">✕</button>
+    </div>`;
+  }).join('');
+  const valorTotalHtml = infos.length
+    ? `<div class="mono">${fmtCur2(r.custoOperacionalUnit)}</div>`
     : tblInput(`entradas.${scen}.bebidas.${i}.custoOperacionalUnit`, r.custoOperacionalUnit, {type:'number', step:'0.1', cls:'num'});
-  return `<div style="display:flex; flex-direction:column; gap:3px; align-items:flex-end;">${valorHtml}${selectHtml}</div>`;
+  return `<div style="display:flex; flex-direction:column; gap:3px; align-items:flex-end; min-width:150px;">${valorTotalHtml}${chips}${addSelectHtml}</div>`;
 }
 VIEWS.entradas = function(){
   const scen = state.ui.scenTab.entradas;
@@ -3274,7 +3297,7 @@ VIEWS.entradas = function(){
     }).join('');
     body = `<div class="section" style="margin:0 0 16px;">
       <h3 style="margin:0 0 6px; font-size:14.5px;">Catálogo detalhado de bebidas/ativações</h3>
-      <div class="hint">Cadastre cada tipo de bebida (ou ativação) com custo do produto, preço de venda, mão de obra operacional para servir e taxa de cartão. Em "Quantidade comprada", informe o total de UNIDADES QUE VOCÊ REALMENTE COMPROU desse item (ex.: 24 latas de cerveja, 300 copos) — não uma estimativa de quantas pessoas vão consumir. É assim que a margem/custo aqui batem com o material de verdade investido (nota fiscal, comprovante em Custos), pra você ver o lucro sobre o que foi comprado. Em "Mão de obra/unid.", dá pra <strong>vincular</strong> a um item de <strong>Custos por categoria</strong> (ex.: "Operação: Garçons", 2 pessoas × R$100 cada = R$200) em vez de digitar um valor solto — o sistema divide automaticamente esse total pela Quantidade comprada (R$200 ÷ 100 cervejas = R$2,00/un.) e mantém os dois sempre batendo. Se <strong>mais de uma linha vincular o mesmo item</strong> (ex.: Heineken e refrigerante vinculados à mesma equipe de bar), o custo dessa equipe é <strong>rateado pela soma das Quantidades compradas das duas</strong> — 100 Heineken + 100 refri = 200 unidades, R$200 ÷ 200 = R$1,00/un. pra cada uma das duas linhas (nunca R$2,00/un. pra cada, que dobraria o custo real da equipe no total do evento). Selecione "— manual —" pra voltar a digitar um valor próprio. A margem total do item é calculada automaticamente, e essa mesma linha alimenta todas as outras abas que dependem dela (Vendas › Ativações, Custos › Marketing, Fluxo de Caixa, Dashboard, Orçamento x Real) — sem precisar lançar de novo em nenhuma delas. Itens marcados <strong>Tipo: Ativação</strong> ganham Probabilidade (pondera receita e margem, igual Patrocínio) e aparecem automaticamente na aba <strong>Vendas › Ativações</strong>, onde dá pra marcar Estágio (se ocorreu ou não) e lançar parcelas reais — sem duplicar o lançamento. Para <strong>qualquer item</strong> (bebida ou ativação), o custo real de compra/execução também vira automaticamente uma linha rastreável em <strong>Custos › Marketing</strong>, onde você lança fornecedor, valor pago, datas e anexa o(s) comprovante(s) — a coluna "Custo (Base)" abaixo mostra o status dessa linha sem precisar trocar de aba. Ao cadastrar pelo menos 1 item aqui, o catálogo substitui a estimativa simplificada abaixo.</div>
+      <div class="hint">Cadastre cada tipo de bebida (ou ativação) com custo do produto, preço de venda, mão de obra operacional para servir e taxa de cartão. Em "Quantidade comprada", informe o total de UNIDADES QUE VOCÊ REALMENTE COMPROU desse item (ex.: 24 latas de cerveja, 300 copos) — não uma estimativa de quantas pessoas vão consumir. É assim que a margem/custo aqui batem com o material de verdade investido (nota fiscal, comprovante em Custos), pra você ver o lucro sobre o que foi comprado. Em "Mão de obra/unid.", dá pra <strong>vincular um ou mais itens</strong> de <strong>Custos por categoria</strong> (ex.: "Operação: Garçons", 2 pessoas × R$100 cada = R$200) em vez de digitar um valor solto — o sistema divide automaticamente esse total pela Quantidade comprada (R$200 ÷ 100 cervejas = R$2,00/un.) e mantém os dois sempre batendo; precisando de mais de uma equipe na mesma bebida (ex.: Garçons + Monitores), vincule os dois que o valor mostrado soma os dois. Se <strong>mais de uma linha vincular o mesmo item</strong> (ex.: Heineken e refrigerante vinculados à mesma equipe de bar), o custo dessa equipe é <strong>rateado pela soma das Quantidades compradas das duas</strong> — 100 Heineken + 100 refri = 200 unidades, R$200 ÷ 200 = R$1,00/un. pra cada uma das duas linhas (nunca R$2,00/un. pra cada, que dobraria o custo real da equipe no total do evento). Remova um vínculo (✕) a qualquer momento pra voltar a digitar o valor manualmente. A margem total do item é calculada automaticamente, e essa mesma linha alimenta todas as outras abas que dependem dela (Vendas › Ativações, Custos › Marketing, Fluxo de Caixa, Dashboard, Orçamento x Real) — sem precisar lançar de novo em nenhuma delas. Itens marcados <strong>Tipo: Ativação</strong> ganham Probabilidade (pondera receita e margem, igual Patrocínio) e aparecem automaticamente na aba <strong>Vendas › Ativações</strong>, onde dá pra marcar Estágio (se ocorreu ou não) e lançar parcelas reais — sem duplicar o lançamento. Para <strong>qualquer item</strong> (bebida ou ativação), o custo real de compra/execução também vira automaticamente uma linha rastreável em <strong>Custos › Marketing</strong>, onde você lança fornecedor, valor pago, datas e anexa o(s) comprovante(s) — a coluna "Custo (Base)" abaixo mostra o status dessa linha sem precisar trocar de aba. Ao cadastrar pelo menos 1 item aqui, o catálogo substitui a estimativa simplificada abaixo.</div>
       <div class="tablewrap" style="margin-top:10px;">
         <table>
           <thead><tr><th>Tipo</th><th>Bebida/ativação</th><th class="num">Custo unit. (R$)</th><th class="num">Preço venda (R$)</th><th class="num">Mão de obra/unid. (R$)</th><th class="num">Taxa cartão (%)</th><th class="num">Quantidade comprada</th><th class="num">Prob. %</th><th class="num">Margem unit.</th><th class="num">Margem %</th><th class="num">Margem total</th><th>Custo (Base)</th><th></th></tr></thead>
@@ -3344,11 +3367,27 @@ ACTIONS.setEntradasSection = (id)=>{ state.ui.entradasSection = id; saveState();
 ACTIONS.addBebida = (scen)=>{
   // qtdComprada começa em 0 — o usuário preenche com a quantidade real que vai comprar desse item
   // (ex.: 24 latas de cerveja), não uma estimativa por pessoa
-  state.entradas[scen].bebidas.push({id:uid(), nome:'Nova bebida', tipo:'bebida', custoUnit:0, precoVenda:0, custoOperacionalUnit:0, taxaCartaoPct:0, qtdComprada:0, prob:1, estagio:'Prospecção', parcelas:[]});
+  state.entradas[scen].bebidas.push({id:uid(), nome:'Nova bebida', tipo:'bebida', custoUnit:0, precoVenda:0, custoOperacionalUnit:0, taxaCartaoPct:0, qtdComprada:0, maoDeObraLinks:[], prob:1, estagio:'Prospecção', parcelas:[]});
   saveState(); render();
 };
 ACTIONS.rmBebida = (scen, idx)=>{
   state.entradas[scen].bebidas.splice(Number(idx),1);
+  saveState(); render();
+};
+// vincula/desvincula um item de Custos por categoria na "Mão de obra/unid." de uma bebida/ativação
+// — uma linha pode ter vários vínculos ao mesmo tempo (ver bebidaCalc), cada um somado ao total
+ACTIONS.addMaoDeObraLink = (scen, idx, link)=>{
+  const b = state.entradas[scen].bebidas[Number(idx)];
+  if(!b) return;
+  if(!Array.isArray(b.maoDeObraLinks)) b.maoDeObraLinks = [];
+  if(link && !b.maoDeObraLinks.includes(link)) b.maoDeObraLinks.push(link);
+  saveState(); render();
+};
+ACTIONS.rmMaoDeObraLink = (scen, idx, groupKey, itemKey)=>{
+  const b = state.entradas[scen].bebidas[Number(idx)];
+  if(!b) return;
+  const link = groupKey+':'+itemKey;
+  b.maoDeObraLinks = (b.maoDeObraLinks||[]).filter(l=> l!==link);
   saveState(); render();
 };
 // cria uma categoria de custo nova (alem das 5 padrao) — cada evento pode ter suas proprias
