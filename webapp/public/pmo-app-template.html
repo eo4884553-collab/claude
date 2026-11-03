@@ -1503,7 +1503,7 @@ function computeAtivacoes(scen){
   const items = ((state.entradas[scen]||{}).bebidas||[]).filter(b=> b.tipo==='ativacao');
   let confirmado=0, pipeline=0, esperado=0, nominal=0;
   items.forEach(b=>{
-    const calc = bebidaCalc(b);
+    const calc = bebidaCalc(b, scen);
     const nominalItem = calc.precoVenda*calc.qtdTotal;
     nominal += nominalItem;
     esperado += calc.receitaItemTotal;
@@ -1511,18 +1511,49 @@ function computeAtivacoes(scen){
   });
   return {confirmado, pipeline, esperado, nominal, nItens: items.length};
 }
+// total de um item do catalogo de Custos por categoria (Entradas PMO > Custos por categoria) —
+// mesma leitura que costGroupBlock/computeCustosSummary ja fazem: Operacao guarda {qty,unitCost}
+// (total = qty*unitCost), os demais grupos guardam so um numero
+function custoCategoriaItemTotal(scen, groupKey, itemKey){
+  const raw = getPath(state.entradas[scen], [groupKey, itemKey]);
+  return groupKey==='operacao' ? opItemTotal(raw) : (Number(raw)||0);
+}
+// lista achatada de todo item de Custos por categoria disponivel pra vincular como mao de obra de
+// uma bebida/ativacao (ver bebidaCalc) — usada pra montar o <select> da coluna "Mão de obra/unid."
+function custoCategoriaOptionsFlat(scen){
+  const out = [];
+  (state.costGroups||[]).forEach(g=>{
+    (state.itemCatalog[g.key]||[]).forEach(item=>{
+      out.push({groupKey:g.key, itemKey:item.key, groupLabel:g.label, itemLabel:item.label, total: custoCategoriaItemTotal(scen, g.key, item.key)});
+    });
+  });
+  return out;
+}
 // margem liquida por unidade de uma bebida/ativacao: preco de venda menos custo do produto,
 // mao de obra operacional (pra servir) e taxa de cartao sobre o preco de venda. "Quantidade
 // comprada" é a quantidade REAL de material investido nesse item (ex.: 24 latas de cerveja
 // compradas) — não uma estimativa de "quantas pessoas consomem"; é assim que dá pra ver o lucro
 // sobre o material de verdade investido, batendo com o que saiu do bolso (nota fiscal/comprovante
 // em Custos), em vez de uma projeção por pessoa que pode não ter nada a ver com o que foi comprado.
-function bebidaCalc(b){
+// "Mão de obra/unid." pode ser digitada na mão OU vinculada (b.maoDeObraLink = "groupKey:itemKey")
+// a um item de Custos por categoria — nesse caso o valor vira automaticamente o total desse item
+// dividido pela Quantidade comprada (ex.: 2 garçons x R$100 cada = R$200, ÷ 100 cervejas = R$2/un),
+// pra não ter que digitar (e manter desatualizado) um número que já existe em Custos por categoria.
+function bebidaCalc(b, scen){
   const custoUnit = Number(b.custoUnit)||0;
   const precoVenda = Number(b.precoVenda)||0;
-  const custoOperacionalUnit = Number(b.custoOperacionalUnit)||0;
   const taxaCartaoPct = Number(b.taxaCartaoPct)||0;
   const qtdComprada = Number(b.qtdComprada)||0;
+  let custoOperacionalUnit = Number(b.custoOperacionalUnit)||0;
+  let maoDeObraLinkInfo = null;
+  if(b.maoDeObraLink && scen){
+    const [gk, ik] = b.maoDeObraLink.split(':');
+    const total = custoCategoriaItemTotal(scen, gk, ik);
+    custoOperacionalUnit = qtdComprada>0 ? total/qtdComprada : 0;
+    const itemDef = (state.itemCatalog[gk]||[]).find(it=>it.key===ik);
+    const groupDef = (state.costGroups||[]).find(g=>g.key===gk);
+    maoDeObraLinkInfo = {groupKey:gk, itemKey:ik, total, itemLabel: itemDef?itemDef.label:'(item removido)', groupLabel: groupDef?groupDef.label:gk};
+  }
   const taxaCartaoValor = precoVenda*taxaCartaoPct;
   const margemUnit = precoVenda - custoUnit - custoOperacionalUnit - taxaCartaoValor;
   const margemPct = precoVenda ? margemUnit/precoVenda : 0;
@@ -1534,7 +1565,7 @@ function bebidaCalc(b){
   const prob = b.tipo==='ativacao' ? (Number(b.prob)||0) : 1;
   return {
     custoUnit, precoVenda, custoOperacionalUnit, taxaCartaoPct, qtdComprada, qtdTotal, prob,
-    taxaCartaoValor, margemUnit, margemPct,
+    taxaCartaoValor, margemUnit, margemPct, maoDeObraLinkInfo,
     receitaItemTotal: precoVenda*qtdTotal*prob, margemItemTotal: margemUnit*qtdTotal*prob,
     // custo "cheio" (SEM ponderar por probabilidade) — é o que de fato se paga se a ativação
     // acontecer de verdade; usado só pra sugerir o valor inicial do Custo vinculado (ver
@@ -1547,7 +1578,7 @@ function bebidaCalc(b){
 // nao se multiplica de novo pelo total de pagantes do evento (ver computeScenario)
 function computeBebidas(scen){
   const list = (state.entradas[scen].bebidas)||[];
-  const rows = list.map(b=> Object.assign({}, b, bebidaCalc(b)));
+  const rows = list.map(b=> Object.assign({}, b, bebidaCalc(b, scen)));
   const receitaCatalogoTotal = sum(rows.map(r=>r.receitaItemTotal));
   const margemCatalogoTotal = sum(rows.map(r=>r.margemItemTotal));
   return {rows, receitaCatalogoTotal, margemCatalogoTotal, ativo: rows.length>0};
@@ -1994,7 +2025,7 @@ function syncAtivacaoCustos(){
   const bebidas = (state.entradas.base && state.entradas.base.bebidas) || [];
   bebidas.forEach(b=>{
     const pathKey = 'ativacao_'+b.id;
-    const calc = bebidaCalc(b);
+    const calc = bebidaCalc(b, 'base');
     const valorAuto = Math.round(calc.custoItemCheio*100)/100;
     const existing = state.custos.find(c=> c.path[0]==='marketing' && c.path[1]===pathKey);
     if(existing){
@@ -3124,6 +3155,26 @@ function costGroupBlock(scen, group){
     <button class="btn small" style="margin-top:10px;" data-action="addCostItem:${group.key}">+ Adicionar item em ${group.label}</button>
   </div>`;
 }
+// célula "Mão de obra/unid." do catálogo de bebidas/ativações: um <select> escolhe um item de
+// Custos por categoria pra vincular (ex.: "Operação: Garçons") — quando vinculado, o valor some de
+// ser digitável e passa a mostrar automaticamente (total do item ÷ Quantidade comprada); sem link,
+// continua o campo numérico manual de sempre (ver bebidaCalc).
+function maoDeObraCell(scen, i, r){
+  const opts = custoCategoriaOptionsFlat(scen);
+  const atual = r.maoDeObraLink || '';
+  const selectHtml = `<select data-bind="entradas.${scen}.bebidas.${i}.maoDeObraLink" style="font-size:11px; width:100%; max-width:160px;">
+    <option value="">— manual —</option>
+    ${opts.map(o=>{
+      const val = `${o.groupKey}:${o.itemKey}`;
+      return `<option value="${val}" ${atual===val?'selected':''}>${esc(o.groupLabel)}: ${esc(o.itemLabel)}</option>`;
+    }).join('')}
+  </select>`;
+  const info = r.maoDeObraLinkInfo;
+  const valorHtml = info
+    ? `<div class="mono" title="${esc(fmtCur2(info.total))} (${esc(info.groupLabel)}: ${esc(info.itemLabel)}) ÷ ${fmtInt(r.qtdComprada)} un. = ${esc(fmtCur2(r.custoOperacionalUnit))}/un.">${fmtCur2(r.custoOperacionalUnit)}</div>`
+    : tblInput(`entradas.${scen}.bebidas.${i}.custoOperacionalUnit`, r.custoOperacionalUnit, {type:'number', step:'0.1', cls:'num'});
+  return `<div style="display:flex; flex-direction:column; gap:3px; align-items:flex-end;">${valorHtml}${selectHtml}</div>`;
+}
 VIEWS.entradas = function(){
   const scen = state.ui.scenTab.entradas;
   const e = state.entradas[scen];
@@ -3198,7 +3249,7 @@ VIEWS.entradas = function(){
       <td>${tblInput(`entradas.${scen}.bebidas.${i}.nome`, r.nome)}</td>
       <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.custoUnit`, r.custoUnit, {type:'number', step:'0.1', cls:'num'})}</td>
       <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.precoVenda`, r.precoVenda, {type:'number', step:'0.1', cls:'num'})}</td>
-      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.custoOperacionalUnit`, r.custoOperacionalUnit, {type:'number', step:'0.1', cls:'num'})}</td>
+      <td class="num">${maoDeObraCell(scen, i, r)}</td>
       <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.taxaCartaoPct`, Math.round(r.taxaCartaoPct*1000)/10, {type:'number', step:'0.1', cls:'num', kind:'pct'})}</td>
       <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.qtdComprada`, r.qtdComprada, {type:'number', step:'1', cls:'num'})}</td>
       <td class="num">${r.tipo==='ativacao' ? tblInput(`entradas.${scen}.bebidas.${i}.prob`, Math.round((Number(r.prob)||0)*1000)/10, {type:'number', step:'1', cls:'num', kind:'pct', width:'62px'}) : '<span class="hint">—</span>'}</td>
@@ -3211,7 +3262,7 @@ VIEWS.entradas = function(){
     }).join('');
     body = `<div class="section" style="margin:0 0 16px;">
       <h3 style="margin:0 0 6px; font-size:14.5px;">Catálogo detalhado de bebidas/ativações</h3>
-      <div class="hint">Cadastre cada tipo de bebida (ou ativação) com custo do produto, preço de venda, mão de obra operacional para servir e taxa de cartão. Em "Quantidade comprada", informe o total de UNIDADES QUE VOCÊ REALMENTE COMPROU desse item (ex.: 24 latas de cerveja, 300 copos) — não uma estimativa de quantas pessoas vão consumir. É assim que a margem/custo aqui batem com o material de verdade investido (nota fiscal, comprovante em Custos), pra você ver o lucro sobre o que foi comprado. A margem total do item é calculada automaticamente, e essa mesma linha alimenta todas as outras abas que dependem dela (Vendas › Ativações, Custos › Marketing, Fluxo de Caixa, Dashboard, Orçamento x Real) — sem precisar lançar de novo em nenhuma delas. Itens marcados <strong>Tipo: Ativação</strong> ganham Probabilidade (pondera receita e margem, igual Patrocínio) e aparecem automaticamente na aba <strong>Vendas › Ativações</strong>, onde dá pra marcar Estágio (se ocorreu ou não) e lançar parcelas reais — sem duplicar o lançamento. Para <strong>qualquer item</strong> (bebida ou ativação), o custo real de compra/execução também vira automaticamente uma linha rastreável em <strong>Custos › Marketing</strong>, onde você lança fornecedor, valor pago, datas e anexa o(s) comprovante(s) — a coluna "Custo (Base)" abaixo mostra o status dessa linha sem precisar trocar de aba. Ao cadastrar pelo menos 1 item aqui, o catálogo substitui a estimativa simplificada abaixo.</div>
+      <div class="hint">Cadastre cada tipo de bebida (ou ativação) com custo do produto, preço de venda, mão de obra operacional para servir e taxa de cartão. Em "Quantidade comprada", informe o total de UNIDADES QUE VOCÊ REALMENTE COMPROU desse item (ex.: 24 latas de cerveja, 300 copos) — não uma estimativa de quantas pessoas vão consumir. É assim que a margem/custo aqui batem com o material de verdade investido (nota fiscal, comprovante em Custos), pra você ver o lucro sobre o que foi comprado. Em "Mão de obra/unid.", dá pra <strong>vincular</strong> a um item de <strong>Custos por categoria</strong> (ex.: "Operação: Garçons", 2 pessoas × R$100 cada = R$200) em vez de digitar um valor solto — o sistema divide automaticamente esse total pela Quantidade comprada (R$200 ÷ 100 cervejas = R$2,00/un.) e mantém os dois sempre batendo; selecione "— manual —" pra voltar a digitar um valor próprio. A margem total do item é calculada automaticamente, e essa mesma linha alimenta todas as outras abas que dependem dela (Vendas › Ativações, Custos › Marketing, Fluxo de Caixa, Dashboard, Orçamento x Real) — sem precisar lançar de novo em nenhuma delas. Itens marcados <strong>Tipo: Ativação</strong> ganham Probabilidade (pondera receita e margem, igual Patrocínio) e aparecem automaticamente na aba <strong>Vendas › Ativações</strong>, onde dá pra marcar Estágio (se ocorreu ou não) e lançar parcelas reais — sem duplicar o lançamento. Para <strong>qualquer item</strong> (bebida ou ativação), o custo real de compra/execução também vira automaticamente uma linha rastreável em <strong>Custos › Marketing</strong>, onde você lança fornecedor, valor pago, datas e anexa o(s) comprovante(s) — a coluna "Custo (Base)" abaixo mostra o status dessa linha sem precisar trocar de aba. Ao cadastrar pelo menos 1 item aqui, o catálogo substitui a estimativa simplificada abaixo.</div>
       <div class="tablewrap" style="margin-top:10px;">
         <table>
           <thead><tr><th>Tipo</th><th>Bebida/ativação</th><th class="num">Custo unit. (R$)</th><th class="num">Preço venda (R$)</th><th class="num">Mão de obra/unid. (R$)</th><th class="num">Taxa cartão (%)</th><th class="num">Quantidade comprada</th><th class="num">Prob. %</th><th class="num">Margem unit.</th><th class="num">Margem %</th><th class="num">Margem total</th><th>Custo (Base)</th><th></th></tr></thead>
@@ -3350,7 +3401,7 @@ function ativacaoTableRows(scen){
   const openParc = state.ui.ativacaoParcelasOpen || {};
   const bebidas = (state.entradas[scen]||{}).bebidas||[];
   return bebidas.map((a,i)=> ({a,i})).filter(x=> x.a.tipo==='ativacao').map(({a,i})=>{
-    const calc = bebidaCalc(a);
+    const calc = bebidaCalc(a, scen);
     const asum = ativacaoParcelaSummary(a);
     const isParcOpen = !!openParc[a.id];
     const custo = scen==='base' ? ativacaoCustoLink(a.id) : null;
