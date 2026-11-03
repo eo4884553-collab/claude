@@ -653,10 +653,10 @@ function freshMesasFeijoada(){
   return Array.from({length:100}, (_,i)=> freshMesa(i+1));
 }
 function freshState(){
-  const entradas = {}; const vendas = {}; const patrocinios = {};
-  SCEN.forEach((s,i)=>{ entradas[s]=entradaDefaults(i,s); vendas[s]=vendaDefaults(s); patrocinios[s]=patrocinioDefaults(s); });
+  const entradas = {}; const vendas = {}; const patrocinios = {}; const ativacoes = {};
+  SCEN.forEach((s,i)=>{ entradas[s]=entradaDefaults(i,s); vendas[s]=vendaDefaults(s); patrocinios[s]=patrocinioDefaults(s); ativacoes[s]=[]; });
   return {
-    entradas, vendas, patrocinios,
+    entradas, vendas, patrocinios, ativacoes,
     itemCatalog: defaultItemCatalog(),
     costGroups: defaultCostGroups(),
     stageProb: Object.assign({}, DEFAULT_STAGE_PROB),
@@ -1260,6 +1260,9 @@ function migrateState(){
   if(state.venda && state.venda.valorRecebido===undefined) state.venda.valorRecebido = 0;
   // rastreio de pagamentos por pessoa (Bateria) — estados salvos antes disso nao tem essa lista
   if(!state.contribuintesBateria) state.contribuintesBateria = [];
+  // pipeline de ativações (aba Vendas) — estados salvos antes disso nao tem essa lista por cenario
+  if(!state.ativacoes) state.ativacoes = {};
+  SCEN.forEach(s=>{ if(!state.ativacoes[s]) state.ativacoes[s] = []; });
   // mapa de mesas (Feijoada do Bloco) — estados salvos antes disso nao tem essa lista; se ja
   // existir mas com menos de 100 (ex.: versao antiga com outro numero), completa o que falta
   if(!state.mesasFeijoada) state.mesasFeijoada = freshMesasFeijoada();
@@ -1454,6 +1457,31 @@ function computePatrocinio(scen){
   });
   return {nCotas, contratado, pipeline, esperado, nominal};
 }
+// catálogo de ESTÁGIOS do pipeline de ativações (aba Vendas) — mesma ideia de Patrocínios: é só
+// uma etiqueta de acompanhamento, não entra na conta. "Não convertida" é o estágio terminal de
+// quem foi proposto mas não virou negócio — fica registrado sem entrar no caixa.
+const ATIVACAO_ESTAGIOS = ['Prospecção','Negociação','Proposta Enviada','Confirmada','Não convertida'];
+function ativacaoDefaults(){
+  return {id:uid(), nome:'', valorEstimado:0, prob:0.3, estagio:'Prospecção', obs:'', parcelas:[]};
+}
+// pipeline de ativações que podem gerar receita (aba Vendas) — mesma lógica de Patrocínio:
+// Receita ponderada = Valor estimado × Probabilidade; o Estágio é só uma etiqueta (não altera o
+// cálculo — quem decide se virou receita de verdade é ter parcela com valor e data, ver
+// ativacoesDatedAmounts). O "esperado" soma na linha "Bar / Ativações" do cenário (ver
+// receitaConsumo em computeScenario), igual ao patrocínio soma na própria linha.
+function computeAtivacoes(scen){
+  const items = state.ativacoes[scen]||[];
+  let confirmado=0, pipeline=0, esperado=0, nominal=0;
+  items.forEach(a=>{
+    const valor = Number(a.valorEstimado)||0;
+    const prob = Number(a.prob)||0;
+    const ponderada = valor*prob;
+    nominal += valor;
+    esperado += ponderada;
+    if(a.estagio==='Confirmada') confirmado += ponderada; else pipeline += ponderada;
+  });
+  return {confirmado, pipeline, esperado, nominal, nItens: items.length};
+}
 // margem liquida por unidade de uma bebida/ativacao: preco de venda menos custo do produto,
 // mao de obra operacional (pra servir) e taxa de cartao sobre o preco de venda. "Nº de pessoas"
 // é a quantidade de pessoas a que ESSE item se aplica — nem todo item vale pra todo mundo que
@@ -1504,6 +1532,7 @@ function computeScenario(scen, overrides){
   const ov = overrides || {};
   const v = computeVendas(scen);
   const p = computePatrocinio(scen);
+  const at = computeAtivacoes(scen);
   const g = computeCustoGroups(scen);
 
   const pagantesFactor = ov.pagantesFactor ?? 1;
@@ -1533,7 +1562,11 @@ function computeScenario(scen, overrides){
   // escalando pelo total de pagantes, por ser uma média geral por pessoa
   const beb = computeBebidas(scen);
   const margemConsumoTotal = beb.ativo ? beb.margemCatalogoTotal : e.consumoBruto*(1-e.custoOpConsumoPct)*pagantes;
-  const receitaConsumo = margemConsumoTotal * consumoFactor;
+  // receita de ativações (pipeline ponderado, ver computeAtivacoes) soma na mesma linha do cenário
+  // que o consumo por pessoa ("Bar / Ativações" no Fluxo de Caixa) — fica fora do consumoFactor
+  // porque ativações já têm sua própria probabilidade por item, independente da sensibilidade de
+  // consumo per capita
+  const receitaConsumo = margemConsumoTotal * consumoFactor + at.esperado;
   const margemConsumoPP = pagantes ? margemConsumoTotal/pagantes : 0;
 
   const patrocinio = p.esperado * patroFactor;
@@ -1579,6 +1612,7 @@ function computeScenario(scen, overrides){
     custoTotal, resultado, margem, receitaPP, custoPP, contribPP, beSem, beCom, pctCapBe, mseg,
     patroMin, cobertura, status, classif,
     patroContratado: p.contratado, patroPipeline: p.pipeline, patroNominal: p.nominal, nCotas: p.nCotas,
+    ativacoesConfirmado: at.confirmado, ativacoesPipeline: at.pipeline, ativacoesEsperado: at.esperado, ativacoesNominal: at.nominal, nAtivacoes: at.nItens,
     custoDiretos, subAtracoes, subEstrutura, subOperacao: g.subOperacao, subMarketing: g.subMarketing,
     subLogistica: g.subLogistica, subExtra: g.subExtra, extraGroups: g.extraGroups,
     tributosValor, contingenciaValor, despesasAdm: e.outros.despesasAdm, restituicoesAprovadas,
@@ -1797,6 +1831,24 @@ function patrocinioDatedAmounts(scen, kind){
   })));
   return out;
 }
+// idem para as parcelas de ativações (aba Vendas) — cada parcela com data (paga ou prevista) cai
+// no mês exato; ativações sem parcelas cadastradas continuam usando o % manual da linha
+// "Bar / Ativações" (ver entDatedAmountsForKey). kind: mesmo filtro real/previsto de
+// patrocinioDatedAmounts acima — é isso que faz o Fluxo de Caixa reagir sozinho ao que é lançado
+// aqui, sem precisar editar a linha "Bar / Ativações" na mão também.
+function ativacoesDatedAmounts(scen, kind){
+  const out = [];
+  (state.ativacoes[scen]||[]).forEach(a=> (a.parcelas||[]).forEach(p=>{
+    const valor = Number(p.valor)||0;
+    if(!valor) return;
+    const isReal = !!p.dataPagamento;
+    if(kind==='real' && !isReal) return;
+    if(kind==='previsto' && isReal) return;
+    const mes = monthIndexForDate(p.dataPagamento || p.dataPrevista);
+    if(mes!=null) out.push({mes, valor});
+  }));
+  return out;
+}
 // contribuições de pessoas da Bateria (só existe nesse domínio) — cada parcela com data (paga ou
 // prevista) cai no mês exato, igual patrocínio; o total anual é a soma de TODAS as parcelas.
 // kind: mesmo filtro real/previsto de patrocinioDatedAmounts acima.
@@ -1893,6 +1945,7 @@ function monthlyDatedPlusRemainder(totalAnnual, datedAmounts, pctRow){
 // ser reaproveitado tanto no cálculo do fluxo quanto na sinalização visual da tabela de %
 function entDatedAmountsForKey(k, scen, kind){
   if(k==='patrocinio') return patrocinioDatedAmounts(scen, kind);
+  if(k==='receitaConsumo') return ativacoesDatedAmounts(scen, kind);
   if(k==='contribuicoesBateria') return contribuintesBateriaDatedAmounts(kind);
   if(k==='receitaMesas') return mesasFeijoadaDatedAmounts(kind);
   // Ingressos: diferente de Patrocínio/Custos (que têm data por parcela/item), aqui só existe UM
@@ -2294,6 +2347,7 @@ ACTIONS.replicateScenario = (domain, toScen)=>{
   if(domain==='entradas') state.entradas[toScen] = clone(state.entradas[fromScen]);
   else if(domain==='vendas') state.vendas[toScen] = clone(state.vendas[fromScen]);
   else if(domain==='patrocinios') state.patrocinios[toScen] = clone(state.patrocinios[fromScen]);
+  else if(domain==='ativacoes') state.ativacoes[toScen] = clone(state.ativacoes[fromScen]);
   else return;
   saveState(); render();
 };
@@ -3169,6 +3223,50 @@ ACTIONS.rmCostItem = (groupKey, idx)=>{
 };
 
 /* ================= VENDAS ================= */
+// soma das parcelas de UMA ativação: total parcelado, quanto já foi pago (tem dataPagamento) e
+// quanto falta — mesmo padrão de fechamentoParcelaSummary (Patrocínios), só que direto na ativação
+// (não existe "empresa fechando a cota": cada ativação é um negócio só, convertido ou não).
+function ativacaoParcelaSummary(a){
+  const parcelas = a.parcelas||[];
+  const total = sum(parcelas.map(p=> Number(p.valor)||0));
+  const pago = sum(parcelas.filter(p=>p.dataPagamento).map(p=> Number(p.valor)||0));
+  return {total, pago, pendente: total-pago, n: parcelas.length};
+}
+// linhas da tabela de ativações (aba Vendas) — cada ativação pode expandir pra mostrar/editar suas
+// parcelas, igual Patrocínios faz com os fechamentos de cada cota.
+function ativacaoTableRows(scen){
+  const openParc = state.ui.ativacaoParcelasOpen || {};
+  return (state.ativacoes[scen]||[]).map((a,i)=>{
+    const valor = Number(a.valorEstimado)||0;
+    const prob = Number(a.prob)||0;
+    const ponderada = valor*prob;
+    const asum = ativacaoParcelaSummary(a);
+    const isParcOpen = !!openParc[a.id];
+    const mainRow = `<tr>
+      <td>${tblInput(`ativacoes.${scen}.${i}.nome`, a.nome, {width:'220px'})}</td>
+      <td class="num">${tblInput(`ativacoes.${scen}.${i}.valorEstimado`, valor, {type:'number', step:'100', cls:'num'})}</td>
+      <td><select id="${mkId('ativacoes.'+scen+'.'+i+'.estagio')}" data-bind="ativacoes.${scen}.${i}.estagio">${ATIVACAO_ESTAGIOS.map(s=>`<option value="${s}" ${s===a.estagio?'selected':''}>${s}</option>`).join('')}</select></td>
+      <td class="num">${tblInput(`ativacoes.${scen}.${i}.prob`, Math.round(prob*1000)/10, {type:'number', step:'1', cls:'num', kind:'pct', width:'62px'})}</td>
+      <td class="num mono">${fmtCur(ponderada)}</td>
+      <td><button class="btn small" data-action="toggleAtivacaoParcelas:${a.id}">${asum.n ? `📅 ${asum.n} parcela${asum.n>1?'s':''}` : '📅 Parcelas'}</button></td>
+      <td><button class="rm" data-action="rmAtivacao:${scen}:${i}">✕</button></td>
+    </tr>`;
+    if(!isParcOpen) return mainRow;
+    const parcelaRows = (a.parcelas||[]).map((pc,pi)=>`<tr>
+      <td class="num">${tblInput(`ativacoes.${scen}.${i}.parcelas.${pi}.valor`, pc.valor, {type:'number', step:'100', cls:'num'})}</td>
+      <td>${tblInput(`ativacoes.${scen}.${i}.parcelas.${pi}.dataPrevista`, pc.dataPrevista, {type:'date'})}</td>
+      <td>${tblInput(`ativacoes.${scen}.${i}.parcelas.${pi}.dataPagamento`, pc.dataPagamento, {type:'date'})}</td>
+      <td>${parcelaStatusBadge(pc)}</td>
+      <td><button class="rm" data-action="rmParcelaAtivacao:${scen}:${i}:${pi}">✕</button></td>
+    </tr>`).join('');
+    return mainRow + `<tr><td colspan="7" style="background:var(--surface-2); padding:10px 14px;">
+      <div style="font-size:12.5px; font-weight:700; margin-bottom:6px;">Parcelas de "${esc(a.nome||'(sem nome)')}" ${asum.n?`<span class="hint" style="font-weight:400;">— pago ${fmtCur(asum.pago)} de ${fmtCur(asum.total)}</span>`:''}</div>
+      <table style="width:auto; min-width:560px;"><thead><tr><th class="num">Valor</th><th>Data prevista</th><th>Data de pagamento</th><th>Status</th><th></th></tr></thead>
+      <tbody>${parcelaRows || `<tr><td colspan="5" class="hint">Nenhuma parcela ainda.</td></tr>`}</tbody></table>
+      <button class="btn small" style="margin-top:8px;" data-action="addParcelaAtivacao:${scen}:${i}">+ Adicionar parcela</button>
+    </td></tr>`;
+  }).join('');
+}
 VIEWS.vendas = function(){
   const scen = state.ui.scenTab.vendas;
   const v = computeVendas(scen);
@@ -3189,6 +3287,8 @@ VIEWS.vendas = function(){
   const pctWarn = Math.abs(pctSum-1)>0.005
     ? `<div class="hint" style="color:var(--warn); margin-top:6px;">Os % mix somam ${fmtPct(pctSum)} — a quantidade de cada lote é normalizada automaticamente para o total continuar batendo com os pagantes (${fmtInt(totalPagantes)}), mas o ideal é ajustar os % até somarem 100%.</div>`
     : '';
+  const ativacaoRows = ativacaoTableRows(scen);
+  const at = computeAtivacoes(scen);
 
   return `
   <div class="topline"><div><h1>Vendas de ingressos${infoIcon('Cadastre os lotes de venda de cada cenário. A quantidade total já vem travada nos pagantes calculados em Entradas PMO (capacidade × conversão) — aqui você só define o preço e o % mix de cada lote, e a quantidade de ingressos é gerada automaticamente. Mais abaixo, registre quantos ingressos já foram vendidos de verdade.')}</h1><div class="desc">Fonte única dos lotes de ingresso por cenário, mais o acompanhamento de vendas realizadas.</div></div></div>
@@ -3211,6 +3311,24 @@ VIEWS.vendas = function(){
       <div class="kpi"><div class="lbl">Ticket médio planejado</div><div class="kpi-value">${fmtCur2(v.ticketMedio)}</div></div>
       <div class="kpi"><div class="lbl">Receita bruta planejada</div><div class="kpi-value">${fmtCur(v.receitaBruta)}</div></div>
       <div class="kpi"><div class="lbl">Receita líquida planejada</div><div class="kpi-value">${fmtCur(v.receitaLiquida)}</div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Ativações ${infoIcon('Pipeline de ativações que podem gerar receita (ex.: experiência de marca, patrocínio pontual de um espaço), cadastradas aqui mesmo sem saber ainda se vão virar venda. Receita ponderada = Valor estimado × Probabilidade — o Estágio é só uma etiqueta de acompanhamento (não altera o cálculo). Quando a ativação é confirmada, clique em "Parcelas" e cadastre valor + data de cada parcela: elas alimentam o Fluxo de Caixa automaticamente, no mês certo, sem precisar lançar de novo lá — com data de pagamento é "Realizado", só com data prevista é "Previsto".')}</h2>
+    <div class="hint">Cenário ${SCEN_LABEL[scen]} — a receita ponderada soma na linha "Bar / Ativações" do Fluxo de Caixa.</div>
+    <div class="tablewrap" style="margin-top:8px;">
+      <table>
+        <thead><tr><th>Ativação</th><th class="num">Valor estimado</th><th>Estágio</th><th class="num">Prob. %</th><th class="num">Receita ponderada</th><th>Parcelas</th><th></th></tr></thead>
+        <tbody>${ativacaoRows || `<tr><td colspan="7" class="hint">Nenhuma ativação cadastrada ainda.</td></tr>`}</tbody>
+        <tfoot><tr><td>Total</td><td class="num mono">${fmtCur(at.nominal)}</td><td></td><td></td><td class="num mono">${fmtCur(at.esperado)}</td><td></td><td></td></tr></tfoot>
+      </table>
+    </div>
+    <button class="btn small" style="margin-top:10px;" data-action="addAtivacao:${scen}">+ Adicionar ativação</button>
+    <div class="gridN" style="margin-top:16px;">
+      <div class="kpi"><div class="lbl">Ativações confirmadas</div><div class="kpi-value">${fmtCur(at.confirmado)}</div></div>
+      <div class="kpi"><div class="lbl">Ativações em pipeline</div><div class="kpi-value">${fmtCur(at.pipeline)}</div></div>
+      <div class="kpi"><div class="lbl">Receita ponderada (esperado)</div><div class="kpi-value">${fmtCur(at.esperado)}</div></div>
     </div>
   </div>
 
@@ -3333,6 +3451,24 @@ ACTIONS.openRitmistasLista = ()=>{ state.ui.ritmistasListaOpen = true; render();
 ACTIONS.closeRitmistasLista = ()=>{ state.ui.ritmistasListaOpen = false; render(); };
 ACTIONS.addLot = (scen)=>{ state.vendas[scen].push({id:uid(), lote:'Novo lote', preco:100, pctMix:0}); saveState(); render(); };
 ACTIONS.rmLot = (scen,i)=>{ state.vendas[scen].splice(Number(i),1); saveState(); render(); };
+ACTIONS.addAtivacao = (scen)=>{ state.ativacoes[scen].push(ativacaoDefaults()); saveState(); render(); };
+ACTIONS.rmAtivacao = (scen,i)=>{ state.ativacoes[scen].splice(Number(i),1); saveState(); render(); };
+ACTIONS.toggleAtivacaoParcelas = (ativacaoId)=>{
+  if(!state.ui.ativacaoParcelasOpen) state.ui.ativacaoParcelasOpen = {};
+  state.ui.ativacaoParcelasOpen[ativacaoId] = !state.ui.ativacaoParcelasOpen[ativacaoId];
+  render(); // so muda a tela (o que esta aberto/fechado nao e um dado do projeto) — nao chama saveState
+};
+ACTIONS.addParcelaAtivacao = (scen,i)=>{
+  const a = state.ativacoes[scen][Number(i)]; if(!a) return;
+  if(!a.parcelas) a.parcelas=[];
+  a.parcelas.push({id:uid(), valor:0, dataPrevista:'', dataPagamento:''});
+  saveState(); render();
+};
+ACTIONS.rmParcelaAtivacao = (scen,i,pi)=>{
+  const a = state.ativacoes[scen][Number(i)]; if(!a || !a.parcelas) return;
+  a.parcelas.splice(Number(pi),1);
+  saveState(); render();
+};
 
 // rastreio de pagamentos por pessoa — só aparece no domínio Bateria Piquinzada (custos rateados
 // entre integrantes: camisas, instrumentos, transporte etc.). Mesmo padrão de parcelas expansíveis
