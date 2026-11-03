@@ -1654,7 +1654,11 @@ function allScenarios(){ const r={}; SCEN.forEach(s=> r[s]=computeScenario(s)); 
 
 function computeCustosSummary(){
   const rows = state.custos.map(c=>{
+    // linha de custo vinculada a uma ativação (ver syncAtivacaoCustos) não tem um "orçamento
+    // inicial" em Entradas PMO pra puxar — o path aponta pro ID da ativação, não pra uma chave
+    // real de state.entradas.base.marketing — fica 0, igual a um item novo de custo sem orçamento
     const orcInicial = c.computed ? computedCostValue(c)
+      : (c.path[1]||'').startsWith('ativacao_') ? 0
       : c.path[0]==='operacao' ? opItemTotal(getPath(state.entradas.base, c.path))
       : getPath(state.entradas.base, c.path);
     const orcAprovado = (c.orcamentoAprovado==null) ? orcInicial : Number(c.orcamentoAprovado);
@@ -3809,10 +3813,19 @@ VIEWS.custos = function(){
   const selected = state.ui.custosSelected;
   const selectedIds = Object.keys(selected).filter(id=>selected[id] && cs.rows.some(r=>r.id===id));
   const allSelected = cs.rows.length>0 && cs.rows.every(r=>selected[r.id]);
-  let lastGroup = null;
-  const rows = cs.rows.map((r,i)=>{
-    const groupHdr = r.grupo!==lastGroup ? `<tr class="section-hdr-row"><td colspan="15">${r.grupo}</td></tr>` : '';
-    lastGroup = r.grupo;
+  // agrupa as linhas por categoria (r.grupo), preservando a ORDEM em que cada grupo apareceu pela
+  // primeira vez em state.custos — sem isso, um item adicionado depois no meio do uso (ex.: "+
+  // Adicionar item" numa categoria já existente, ou uma ativação sincronizada automaticamente via
+  // syncAtivacaoCustos) ficava sempre no FIM do array, e o cabeçalho da categoria era desenhado de
+  // novo ali (comparação com a linha anterior), duplicando a categoria em vez de juntar com o
+  // resto — fazendo itens novos ficarem fáceis de não ver, lá embaixo da tabela.
+  const groupOrder = [];
+  const byGroup = new Map();
+  cs.rows.forEach((r,i)=>{
+    if(!byGroup.has(r.grupo)){ byGroup.set(r.grupo, []); groupOrder.push(r.grupo); }
+    byGroup.get(r.grupo).push({r,i});
+  });
+  const rowHtml = (r,i)=>{
     const comprovantes = r.comprovantes||[];
     const comprovantesList = comprovantes.map((path,ci)=>`<span style="display:flex; align-items:center; gap:3px;">
         <button class="btn small" data-action="viewComprovanteCusto:${r.id}:${ci}" title="Ver comprovante ${ci+1}">📎 Ver ${comprovantes.length>1?ci+1:''}</button>
@@ -3822,7 +3835,7 @@ VIEWS.custos = function(){
         ${comprovantesList}
         <button class="btn small" data-action="attachComprovanteCusto:${r.id}" title="Anexar mais um comprovante de pagamento">+ Anexar</button>
       </div>`;
-    return groupHdr + `<tr>
+    return `<tr>
       <td><input type="checkbox" data-action="toggleCustoSelect:${r.id}" ${selected[r.id]?'checked':''} title="Selecionar pra replicar data em lote"></td>
       <td>${r.subcategoria}</td>
       <td>${tblInput(`custos.${i}.fornecedor`, r.fornecedor)}</td>
@@ -3839,7 +3852,10 @@ VIEWS.custos = function(){
       <td>${pagamentoStatusBadge(r.dataPagamento, r.dataPrevista)}</td>
       <td>${comprovanteCell}</td>
     </tr>`;
-  }).join('');
+  };
+  const rows = groupOrder.map(grupo=>
+    `<tr class="section-hdr-row"><td colspan="15">${grupo}</td></tr>` + byGroup.get(grupo).map(({r,i})=>rowHtml(r,i)).join('')
+  ).join('');
 
   const atrasados = custosAtrasados(cs.rows);
   const alertaAtrasados = !atrasados.length ? '' : `<div class="callout" style="margin-bottom:18px; border-color:var(--bad); background:var(--bad-soft); color:var(--bad);">
