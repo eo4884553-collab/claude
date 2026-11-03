@@ -80,6 +80,17 @@ export async function fetchSharedCashHistory() {
         });
       });
     });
+    // ativações (pipeline "Bar / Ativações", aba Vendas) seguem o mesmo padrão de patrocínio:
+    // pipeline por cenário, mas uma parcela já paga é dinheiro de verdade — lida sempre do
+    // cenário "base". Marcada como tipo "patrocinio" de propósito (mesmo balde do card do
+    // Dashboard/Fluxo de Caixa: é receita de empresa/marca, não ingresso avulso)
+    (d.ativacoes?.base || []).forEach((a) => {
+      (a.parcelas || []).forEach((p) => {
+        const valor = Number(p.valor) || 0;
+        if (!valor || !p.dataPagamento) return;
+        dom.receitas.push({ descricao: `${a.nome || '(sem nome)'} — ativação`, valor, data: p.dataPagamento, tipo: 'patrocinio' });
+      });
+    });
     if (row.id === 'bateria-piquinzada') {
       (d.contribuintesBateria || []).forEach((p) => {
         (p.parcelas || []).forEach((pc) => {
@@ -159,6 +170,14 @@ export async function fetchSharedCashForecast() {
           if (!valor) return;
           dom.receitasPrevistas.push({ descricao: `${f.empresa || '(sem empresa)'} — ${t.cota || 'patrocínio'}`, valor, dataPrevista: p.dataPrevista, tipo: 'patrocinio' });
         });
+      });
+    });
+    (d.ativacoes?.base || []).forEach((a) => {
+      (a.parcelas || []).forEach((p) => {
+        if (p.dataPagamento || !p.dataPrevista) return;
+        const valor = Number(p.valor) || 0;
+        if (!valor) return;
+        dom.receitasPrevistas.push({ descricao: `${a.nome || '(sem nome)'} — ativação`, valor, dataPrevista: p.dataPrevista, tipo: 'patrocinio' });
       });
     });
     if (row.id === 'bateria-piquinzada') {
