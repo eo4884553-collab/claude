@@ -653,10 +653,10 @@ function freshMesasFeijoada(){
   return Array.from({length:100}, (_,i)=> freshMesa(i+1));
 }
 function freshState(){
-  const entradas = {}; const vendas = {}; const patrocinios = {}; const ativacoes = {};
-  SCEN.forEach((s,i)=>{ entradas[s]=entradaDefaults(i,s); vendas[s]=vendaDefaults(s); patrocinios[s]=patrocinioDefaults(s); ativacoes[s]=[]; });
+  const entradas = {}; const vendas = {}; const patrocinios = {};
+  SCEN.forEach((s,i)=>{ entradas[s]=entradaDefaults(i,s); vendas[s]=vendaDefaults(s); patrocinios[s]=patrocinioDefaults(s); });
   return {
-    entradas, vendas, patrocinios, ativacoes,
+    entradas, vendas, patrocinios,
     itemCatalog: defaultItemCatalog(),
     costGroups: defaultCostGroups(),
     stageProb: Object.assign({}, DEFAULT_STAGE_PROB),
@@ -1260,9 +1260,30 @@ function migrateState(){
   if(state.venda && state.venda.valorRecebido===undefined) state.venda.valorRecebido = 0;
   // rastreio de pagamentos por pessoa (Bateria) — estados salvos antes disso nao tem essa lista
   if(!state.contribuintesBateria) state.contribuintesBateria = [];
-  // pipeline de ativações (aba Vendas) — estados salvos antes disso nao tem essa lista por cenario
-  if(!state.ativacoes) state.ativacoes = {};
-  SCEN.forEach(s=>{ if(!state.ativacoes[s]) state.ativacoes[s] = []; });
+  // pipeline de ativações (aba Vendas) foi unificado com o catálogo de bebidas/ativações (Entradas
+  // PMO) — cada ativação agora é só um item do catálogo com tipo:'ativacao', em vez de uma lista
+  // própria separada. Estados salvos na janela em que existiu essa lista própria (state.ativacoes)
+  // migram os itens pra dentro de entradas[scen].bebidas, sem perder nada que já tinha sido lançado.
+  if(state.ativacoes){
+    SCEN.forEach(s=>{
+      const legacy = state.ativacoes[s]||[];
+      if(!legacy.length || !state.entradas[s]) return;
+      if(!state.entradas[s].bebidas) state.entradas[s].bebidas = [];
+      legacy.forEach(a=>{
+        state.entradas[s].bebidas.push({
+          id:a.id||uid(), nome:a.nome||'Ativação', tipo:'ativacao',
+          custoUnit:0, precoVenda:Number(a.valorEstimado)||0, custoOperacionalUnit:0, taxaCartaoPct:0,
+          qtdPorPessoa:1, numPessoas:1,
+          estagio:a.estagio||'Prospecção', prob:Number(a.prob)||0, obs:a.obs||'', parcelas:a.parcelas||[],
+        });
+      });
+    });
+    delete state.ativacoes;
+  }
+  // marca "bebida" nos itens de catálogo salvos antes do campo Tipo existir
+  SCEN.forEach(s=>{
+    ((state.entradas[s]&&state.entradas[s].bebidas)||[]).forEach(b=>{ if(!b.tipo) b.tipo='bebida'; });
+  });
   // mapa de mesas (Feijoada do Bloco) — estados salvos antes disso nao tem essa lista; se ja
   // existir mas com menos de 100 (ex.: versao antiga com outro numero), completa o que falta
   if(!state.mesasFeijoada) state.mesasFeijoada = freshMesasFeijoada();
@@ -1407,6 +1428,9 @@ function saveState(){
   // mesmo ponto unico de gravacao, pra Feijoada: mantem o total persistido (usado no saldo de
   // caixa compartilhado entre domínios) = 1º lote + mesas pagas (ver syncVendaFeijoada acima)
   syncVendaFeijoada();
+  // mesmo ponto único, pra Vendas: garante a linha de Custo de cada ativação do catálogo (ver
+  // syncAtivacaoCustos acima) — cobre qualquer forma de criar/editar uma ativação
+  syncAtivacaoCustos();
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
   if(HOSTED){
     markSaveStatus('saving');
@@ -1457,28 +1481,27 @@ function computePatrocinio(scen){
   });
   return {nCotas, contratado, pipeline, esperado, nominal};
 }
-// catálogo de ESTÁGIOS do pipeline de ativações (aba Vendas) — mesma ideia de Patrocínios: é só
-// uma etiqueta de acompanhamento, não entra na conta. "Não convertida" é o estágio terminal de
-// quem foi proposto mas não virou negócio — fica registrado sem entrar no caixa.
+// catálogo de ESTÁGIOS do pipeline de ativações — mesma ideia de Patrocínios: é só uma etiqueta de
+// acompanhamento, não entra na conta (quem pondera o cálculo é a Probabilidade, ver bebidaCalc).
+// "Não convertida" é o estágio terminal de quem foi proposto mas não virou negócio — fica
+// registrado sem entrar no caixa. "Confirmada" = a ativação de fato vai acontecer/aconteceu.
 const ATIVACAO_ESTAGIOS = ['Prospecção','Negociação','Proposta Enviada','Confirmada','Não convertida'];
-function ativacaoDefaults(){
-  return {id:uid(), nome:'', valorEstimado:0, prob:0.3, estagio:'Prospecção', obs:'', parcelas:[]};
-}
-// pipeline de ativações que podem gerar receita (aba Vendas) — mesma lógica de Patrocínio:
-// Receita ponderada = Valor estimado × Probabilidade; o Estágio é só uma etiqueta (não altera o
-// cálculo — quem decide se virou receita de verdade é ter parcela com valor e data, ver
-// ativacoesDatedAmounts). O "esperado" soma na linha "Bar / Ativações" do cenário (ver
-// receitaConsumo em computeScenario), igual ao patrocínio soma na própria linha.
+// ativações são itens do catálogo de bebidas/ativações (Entradas PMO) com tipo:'ativacao' — não
+// existe mais uma lista própria separada (ver migrateState): um negócio pontual (ex.: ativação de
+// marca) usa os MESMOS campos de preço/custo por unidade já existentes pro catálogo, só que com
+// Nº de pessoas=1 representando "1 negócio". A Vendas edita Estágio/Probabilidade/Parcelas desses
+// mesmos itens — nunca duplica o lançamento. "esperado" (ponderado por probabilidade, ver
+// bebidaCalc) já está embutido em margemCatalogoTotal/receitaConsumo automaticamente, então essa
+// função é só pra expor os KPIs da tela de Vendas (não soma de novo no cenário).
 function computeAtivacoes(scen){
-  const items = state.ativacoes[scen]||[];
+  const items = ((state.entradas[scen]||{}).bebidas||[]).filter(b=> b.tipo==='ativacao');
   let confirmado=0, pipeline=0, esperado=0, nominal=0;
-  items.forEach(a=>{
-    const valor = Number(a.valorEstimado)||0;
-    const prob = Number(a.prob)||0;
-    const ponderada = valor*prob;
-    nominal += valor;
-    esperado += ponderada;
-    if(a.estagio==='Confirmada') confirmado += ponderada; else pipeline += ponderada;
+  items.forEach(b=>{
+    const calc = bebidaCalc(b);
+    const nominalItem = calc.precoVenda*calc.qtdTotal;
+    nominal += nominalItem;
+    esperado += calc.receitaItemTotal;
+    if(b.estagio==='Confirmada') confirmado += calc.receitaItemTotal; else pipeline += calc.receitaItemTotal;
   });
   return {confirmado, pipeline, esperado, nominal, nItens: items.length};
 }
@@ -1498,10 +1521,19 @@ function bebidaCalc(b){
   const margemUnit = precoVenda - custoUnit - custoOperacionalUnit - taxaCartaoValor;
   const margemPct = precoVenda ? margemUnit/precoVenda : 0;
   const qtdTotal = qtdPorPessoa*numPessoas;
+  // item tipo "ativação" (negócio pontual, pode não acontecer) pondera receita/custo pela
+  // probabilidade de conversão — igual ao pipeline de Patrocínio (valor × qtd × prob). Item tipo
+  // "bebida" (consumo comum, sempre assumido) nunca pondera — prob efetivo = 1, igual ao
+  // comportamento de sempre.
+  const prob = b.tipo==='ativacao' ? (Number(b.prob)||0) : 1;
   return {
     custoUnit, precoVenda, custoOperacionalUnit, taxaCartaoPct, qtdPorPessoa, numPessoas,
-    taxaCartaoValor, margemUnit, margemPct, qtdTotal,
-    receitaItemTotal: precoVenda*qtdTotal, margemItemTotal: margemUnit*qtdTotal,
+    taxaCartaoValor, margemUnit, margemPct, qtdTotal, prob,
+    receitaItemTotal: precoVenda*qtdTotal*prob, margemItemTotal: margemUnit*qtdTotal*prob,
+    // custo "cheio" (SEM ponderar por probabilidade) — é o que de fato se paga se a ativação
+    // acontecer de verdade; usado só pra sugerir o valor inicial do Custo vinculado (ver
+    // syncAtivacaoCustos), nunca no cálculo do cenário (que usa margemItemTotal, ponderado)
+    custoItemCheio: (custoUnit+custoOperacionalUnit+taxaCartaoValor)*qtdTotal,
   };
 }
 // resumo do catalogo de bebidas de um cenario — usado tanto pela tela quanto pelo motor de calculo.
@@ -1562,11 +1594,10 @@ function computeScenario(scen, overrides){
   // escalando pelo total de pagantes, por ser uma média geral por pessoa
   const beb = computeBebidas(scen);
   const margemConsumoTotal = beb.ativo ? beb.margemCatalogoTotal : e.consumoBruto*(1-e.custoOpConsumoPct)*pagantes;
-  // receita de ativações (pipeline ponderado, ver computeAtivacoes) soma na mesma linha do cenário
-  // que o consumo por pessoa ("Bar / Ativações" no Fluxo de Caixa) — fica fora do consumoFactor
-  // porque ativações já têm sua própria probabilidade por item, independente da sensibilidade de
-  // consumo per capita
-  const receitaConsumo = margemConsumoTotal * consumoFactor + at.esperado;
+  // itens tipo "ativação" do catálogo já entram aqui dentro de margemConsumoTotal (ver bebidaCalc,
+  // que pondera cada um pela Probabilidade) — "at" (computeAtivacoes) abaixo é só pra expor os
+  // KPIs de Vendas, NUNCA soma de novo aqui, senão duplicaria a receita/margem
+  const receitaConsumo = margemConsumoTotal * consumoFactor;
   const margemConsumoPP = pagantes ? margemConsumoTotal/pagantes : 0;
 
   const patrocinio = p.esperado * patroFactor;
@@ -1838,7 +1869,7 @@ function patrocinioDatedAmounts(scen, kind){
 // aqui, sem precisar editar a linha "Bar / Ativações" na mão também.
 function ativacoesDatedAmounts(scen, kind){
   const out = [];
-  (state.ativacoes[scen]||[]).forEach(a=> (a.parcelas||[]).forEach(p=>{
+  (((state.entradas[scen]||{}).bebidas)||[]).filter(b=> b.tipo==='ativacao').forEach(a=> (a.parcelas||[]).forEach(p=>{
     const valor = Number(p.valor)||0;
     if(!valor) return;
     const isReal = !!p.dataPagamento;
@@ -1924,6 +1955,33 @@ function syncVendaFeijoada(){
   const b = mesasFeijoadaVendaBreakdown();
   state.venda.vendidosHoje = (Number(state.venda.vendidosHojeLote1)||0) + b.ingressos;
   state.venda.valorRecebido = (Number(state.venda.valorRecebidoLote1)||0) + b.valor;
+}
+// mantem 1 linha de Custo (categoria Marketing) sincronizada pra cada ativação do catálogo de
+// bebidas/ativações (Entradas PMO) — só no cenário Base, mesma convenção de patrocínio/Fluxo de
+// Caixa (dinheiro real só é rastreado no cenário Base; os outros são só modelo de viabilidade).
+// Só CRIA a linha se ainda não existir (com o custo "cheio" do catálogo — sem ponderar por
+// probabilidade, ver bebidaCalc — como valor inicial sugerido); nunca sobrescreve o que o usuário
+// já editou depois ali (fornecedor, valor contratado, comprovantes, datas), do mesmo jeito que
+// ACTIONS.addCostItem cria uma linha nova e deixa o usuário gerenciar o resto sozinho. Isso é o
+// que dá pra anexar comprovante (inclusive mais de um — comprovantes já é uma lista) no custo de
+// execução de uma ativação, sem duplicar lançamento.
+function syncAtivacaoCustos(){
+  const bebidas = (state.entradas.base && state.entradas.base.bebidas) || [];
+  bebidas.forEach(b=>{
+    if(b.tipo!=='ativacao') return;
+    const pathKey = 'ativacao_'+b.id;
+    const existing = state.custos.find(c=> c.path[0]==='marketing' && c.path[1]===pathKey);
+    if(existing) return;
+    const calc = bebidaCalc(b);
+    state.custos.push({
+      id:uid(), grupo:'Marketing', path:['marketing', pathKey], subcategoria: b.nome||'Ativação', computed:false,
+      fornecedor:'', descricao:'Custo de execução — ativação cadastrada em Entradas PMO › Consumo/ativações',
+      orcamentoAprovado:null, valorContratado: Math.round(calc.custoItemCheio*100)/100, valorPago:0,
+      dataPrevista:'', dataPagamento:'', status:'Não iniciado', comprovantes:[],
+      responsavel:'Marketing', obs:'',
+      origemPagamento: 'dominio',
+    });
+  });
 }
 // converte a lista [{mes,valor}] (pagamentos/parcelas já datados) num array de 15 posições,
 // um valor por mês — usado tanto pro calculo do fluxo quanto pra sinalizar na tela quais meses
@@ -2347,7 +2405,6 @@ ACTIONS.replicateScenario = (domain, toScen)=>{
   if(domain==='entradas') state.entradas[toScen] = clone(state.entradas[fromScen]);
   else if(domain==='vendas') state.vendas[toScen] = clone(state.vendas[fromScen]);
   else if(domain==='patrocinios') state.patrocinios[toScen] = clone(state.patrocinios[fromScen]);
-  else if(domain==='ativacoes') state.ativacoes[toScen] = clone(state.ativacoes[fromScen]);
   else return;
   saveState(); render();
 };
@@ -3094,6 +3151,10 @@ VIEWS.entradas = function(){
   } else if(sec==='consumo'){
     const bebCalc = computeBebidas(scen);
     const bebRows = bebCalc.rows.map((r,i)=>`<tr>
+      <td><select id="${mkId('entradas.'+scen+'.bebidas.'+i+'.tipo')}" data-bind="entradas.${scen}.bebidas.${i}.tipo">
+        <option value="bebida" ${r.tipo!=='ativacao'?'selected':''}>Bebida</option>
+        <option value="ativacao" ${r.tipo==='ativacao'?'selected':''}>Ativação</option>
+      </select></td>
       <td>${tblInput(`entradas.${scen}.bebidas.${i}.nome`, r.nome)}</td>
       <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.custoUnit`, r.custoUnit, {type:'number', step:'0.1', cls:'num'})}</td>
       <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.precoVenda`, r.precoVenda, {type:'number', step:'0.1', cls:'num'})}</td>
@@ -3101,6 +3162,7 @@ VIEWS.entradas = function(){
       <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.taxaCartaoPct`, Math.round(r.taxaCartaoPct*1000)/10, {type:'number', step:'0.1', cls:'num', kind:'pct'})}</td>
       <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.qtdPorPessoa`, r.qtdPorPessoa, {type:'number', step:'0.1', cls:'num'})}</td>
       <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.numPessoas`, r.numPessoas, {type:'number', step:'1', cls:'num'})}</td>
+      <td class="num">${r.tipo==='ativacao' ? tblInput(`entradas.${scen}.bebidas.${i}.prob`, Math.round((Number(r.prob)||0)*1000)/10, {type:'number', step:'1', cls:'num', kind:'pct', width:'62px'}) : '<span class="hint">—</span>'}</td>
       <td class="num mono">${fmtCur2(r.margemUnit)}</td>
       <td class="num mono">${fmtPct(r.margemPct)}</td>
       <td class="num mono">${fmtCur2(r.margemItemTotal)}</td>
@@ -3108,12 +3170,12 @@ VIEWS.entradas = function(){
     </tr>`).join('');
     body = `<div class="section" style="margin:0 0 16px;">
       <h3 style="margin:0 0 6px; font-size:14.5px;">Catálogo detalhado de bebidas/ativações</h3>
-      <div class="hint">Cadastre cada tipo de bebida (ou ativação de consumo) com custo do produto, preço de venda, mão de obra operacional para servir e taxa de cartão. Em "Nº de pessoas", informe quantas pessoas esse item realmente atinge — nem todo item vale pra todo mundo que paga ingresso (ex.: um passaporte de brinquedoteca é só pras crianças, não para o total de pagantes do evento). A margem total do item é calculada automaticamente. Ao cadastrar pelo menos 1 item aqui, o catálogo substitui a estimativa simplificada abaixo.</div>
+      <div class="hint">Cadastre cada tipo de bebida (ou ativação) com custo do produto, preço de venda, mão de obra operacional para servir e taxa de cartão. Em "Nº de pessoas", informe quantas pessoas (ou "unidades") esse item realmente atinge — nem todo item vale pra todo mundo que paga ingresso. A margem total do item é calculada automaticamente. Itens marcados <strong>Tipo: Ativação</strong> ganham Probabilidade (pondera receita e margem, igual Patrocínio) e aparecem automaticamente na aba <strong>Vendas › Ativações</strong>, onde dá pra marcar Estágio (se ocorreu ou não) e lançar parcelas reais — sem duplicar o lançamento. O custo de execução de uma ativação também vira uma linha rastreável em Custos › Marketing, com comprovante. Ao cadastrar pelo menos 1 item aqui, o catálogo substitui a estimativa simplificada abaixo.</div>
       <div class="tablewrap" style="margin-top:10px;">
         <table>
-          <thead><tr><th>Bebida/ativação</th><th class="num">Custo unit. (R$)</th><th class="num">Preço venda (R$)</th><th class="num">Mão de obra/unid. (R$)</th><th class="num">Taxa cartão (%)</th><th class="num">Qtd./pessoa</th><th class="num">Nº de pessoas</th><th class="num">Margem unit.</th><th class="num">Margem %</th><th class="num">Margem total</th><th></th></tr></thead>
-          <tbody>${bebRows || `<tr><td colspan="11" class="hint">Nenhuma bebida cadastrada — usando a estimativa simplificada abaixo.</td></tr>`}</tbody>
-          ${bebCalc.rows.length ? `<tfoot><tr><td colspan="9">Total</td><td class="num mono">${fmtCur2(bebCalc.margemCatalogoTotal)}</td><td></td></tr></tfoot>` : ''}
+          <thead><tr><th>Tipo</th><th>Bebida/ativação</th><th class="num">Custo unit. (R$)</th><th class="num">Preço venda (R$)</th><th class="num">Mão de obra/unid. (R$)</th><th class="num">Taxa cartão (%)</th><th class="num">Qtd./pessoa</th><th class="num">Nº de pessoas</th><th class="num">Prob. %</th><th class="num">Margem unit.</th><th class="num">Margem %</th><th class="num">Margem total</th><th></th></tr></thead>
+          <tbody>${bebRows || `<tr><td colspan="13" class="hint">Nenhuma bebida cadastrada — usando a estimativa simplificada abaixo.</td></tr>`}</tbody>
+          ${bebCalc.rows.length ? `<tfoot><tr><td colspan="11">Total</td><td class="num mono">${fmtCur2(bebCalc.margemCatalogoTotal)}</td><td></td></tr></tfoot>` : ''}
         </table>
       </div>
       <button class="btn small" style="margin-top:10px;" data-action="addBebida:${scen}">+ Adicionar bebida/ativação</button>
@@ -3179,7 +3241,7 @@ ACTIONS.addBebida = (scen)=>{
   // Nº de pessoas começa igual ao total de pagantes do cenário (a maioria dos itens, tipo bebida,
   // vale pra todo mundo) — o usuário reduz esse número pra itens que valem só pra um grupo
   // específico (ex.: passaporte de brinquedoteca, só pras crianças)
-  state.entradas[scen].bebidas.push({id:uid(), nome:'Nova bebida', custoUnit:0, precoVenda:0, custoOperacionalUnit:0, taxaCartaoPct:0, qtdPorPessoa:0, numPessoas: Math.round(pagantesBase(scen))});
+  state.entradas[scen].bebidas.push({id:uid(), nome:'Nova bebida', tipo:'bebida', custoUnit:0, precoVenda:0, custoOperacionalUnit:0, taxaCartaoPct:0, qtdPorPessoa:0, numPessoas: Math.round(pagantesBase(scen)), prob:1, estagio:'Prospecção', parcelas:[]});
   saveState(); render();
 };
 ACTIONS.rmBebida = (scen, idx)=>{
@@ -3232,34 +3294,48 @@ function ativacaoParcelaSummary(a){
   const pago = sum(parcelas.filter(p=>p.dataPagamento).map(p=> Number(p.valor)||0));
   return {total, pago, pendente: total-pago, n: parcelas.length};
 }
-// linhas da tabela de ativações (aba Vendas) — cada ativação pode expandir pra mostrar/editar suas
-// parcelas, igual Patrocínios faz com os fechamentos de cada cota.
+// Custo vinculado de uma ativação (ver syncAtivacaoCustos) — só existe no cenário Base, mesma
+// convenção de patrocínio/lib/cash.js (dinheiro real só é rastreado no cenário Base).
+function ativacaoCustoLink(ativacaoId){
+  return (state.custos||[]).find(c=> c.path[0]==='marketing' && c.path[1]==='ativacao_'+ativacaoId);
+}
+// linhas da tabela de ativações (aba Vendas) — são os itens do catálogo de bebidas/ativações
+// (Entradas PMO) com tipo:'ativacao'; não existe uma lista separada (ver computeAtivacoes), então
+// o índice usado nos data-bind é o índice REAL dentro de entradas[scen].bebidas, pra editar
+// sempre o mesmo item, nunca um lançamento duplicado. Cada ativação pode expandir pra
+// mostrar/editar suas parcelas, igual Patrocínios faz com os fechamentos de cada cota.
 function ativacaoTableRows(scen){
   const openParc = state.ui.ativacaoParcelasOpen || {};
-  return (state.ativacoes[scen]||[]).map((a,i)=>{
-    const valor = Number(a.valorEstimado)||0;
-    const prob = Number(a.prob)||0;
-    const ponderada = valor*prob;
+  const bebidas = (state.entradas[scen]||{}).bebidas||[];
+  return bebidas.map((a,i)=> ({a,i})).filter(x=> x.a.tipo==='ativacao').map(({a,i})=>{
+    const calc = bebidaCalc(a);
     const asum = ativacaoParcelaSummary(a);
     const isParcOpen = !!openParc[a.id];
+    const custo = scen==='base' ? ativacaoCustoLink(a.id) : null;
+    const custoCell = scen!=='base'
+      ? `<span class="hint">só no cenário Base</span>`
+      : custo
+        ? `${fmtCur(custo.valorPago)} de ${fmtCur(custo.valorContratado)} ${pagamentoStatusBadge(custo.dataPagamento, custo.dataPrevista)}`
+        : `<span class="hint">—</span>`;
     const mainRow = `<tr>
-      <td>${tblInput(`ativacoes.${scen}.${i}.nome`, a.nome, {width:'220px'})}</td>
-      <td class="num">${tblInput(`ativacoes.${scen}.${i}.valorEstimado`, valor, {type:'number', step:'100', cls:'num'})}</td>
-      <td><select id="${mkId('ativacoes.'+scen+'.'+i+'.estagio')}" data-bind="ativacoes.${scen}.${i}.estagio">${ATIVACAO_ESTAGIOS.map(s=>`<option value="${s}" ${s===a.estagio?'selected':''}>${s}</option>`).join('')}</select></td>
-      <td class="num">${tblInput(`ativacoes.${scen}.${i}.prob`, Math.round(prob*1000)/10, {type:'number', step:'1', cls:'num', kind:'pct', width:'62px'})}</td>
-      <td class="num mono">${fmtCur(ponderada)}</td>
+      <td>${tblInput(`entradas.${scen}.bebidas.${i}.nome`, a.nome, {width:'200px'})}</td>
+      <td class="num mono">${fmtCur(calc.precoVenda*calc.qtdTotal)}</td>
+      <td><select id="${mkId('entradas.'+scen+'.bebidas.'+i+'.estagio')}" data-bind="entradas.${scen}.bebidas.${i}.estagio">${ATIVACAO_ESTAGIOS.map(s=>`<option value="${s}" ${s===a.estagio?'selected':''}>${s}</option>`).join('')}</select></td>
+      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.prob`, Math.round((Number(a.prob)||0)*1000)/10, {type:'number', step:'1', cls:'num', kind:'pct', width:'62px'})}</td>
+      <td class="num mono">${fmtCur(calc.receitaItemTotal)}</td>
+      <td style="font-size:12px; white-space:nowrap;">${custoCell}</td>
       <td><button class="btn small" data-action="toggleAtivacaoParcelas:${a.id}">${asum.n ? `📅 ${asum.n} parcela${asum.n>1?'s':''}` : '📅 Parcelas'}</button></td>
-      <td><button class="rm" data-action="rmAtivacao:${scen}:${i}">✕</button></td>
+      <td><button class="rm" data-action="rmBebida:${scen}:${i}" title="Remover ativação">✕</button></td>
     </tr>`;
     if(!isParcOpen) return mainRow;
     const parcelaRows = (a.parcelas||[]).map((pc,pi)=>`<tr>
-      <td class="num">${tblInput(`ativacoes.${scen}.${i}.parcelas.${pi}.valor`, pc.valor, {type:'number', step:'100', cls:'num'})}</td>
-      <td>${tblInput(`ativacoes.${scen}.${i}.parcelas.${pi}.dataPrevista`, pc.dataPrevista, {type:'date'})}</td>
-      <td>${tblInput(`ativacoes.${scen}.${i}.parcelas.${pi}.dataPagamento`, pc.dataPagamento, {type:'date'})}</td>
+      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.parcelas.${pi}.valor`, pc.valor, {type:'number', step:'100', cls:'num'})}</td>
+      <td>${tblInput(`entradas.${scen}.bebidas.${i}.parcelas.${pi}.dataPrevista`, pc.dataPrevista, {type:'date'})}</td>
+      <td>${tblInput(`entradas.${scen}.bebidas.${i}.parcelas.${pi}.dataPagamento`, pc.dataPagamento, {type:'date'})}</td>
       <td>${parcelaStatusBadge(pc)}</td>
       <td><button class="rm" data-action="rmParcelaAtivacao:${scen}:${i}:${pi}">✕</button></td>
     </tr>`).join('');
-    return mainRow + `<tr><td colspan="7" style="background:var(--surface-2); padding:10px 14px;">
+    return mainRow + `<tr><td colspan="8" style="background:var(--surface-2); padding:10px 14px;">
       <div style="font-size:12.5px; font-weight:700; margin-bottom:6px;">Parcelas de "${esc(a.nome||'(sem nome)')}" ${asum.n?`<span class="hint" style="font-weight:400;">— pago ${fmtCur(asum.pago)} de ${fmtCur(asum.total)}</span>`:''}</div>
       <table style="width:auto; min-width:560px;"><thead><tr><th class="num">Valor</th><th>Data prevista</th><th>Data de pagamento</th><th>Status</th><th></th></tr></thead>
       <tbody>${parcelaRows || `<tr><td colspan="5" class="hint">Nenhuma parcela ainda.</td></tr>`}</tbody></table>
@@ -3315,16 +3391,15 @@ VIEWS.vendas = function(){
   </div>
 
   <div class="section">
-    <h2>Ativações ${infoIcon('Pipeline de ativações que podem gerar receita (ex.: experiência de marca, patrocínio pontual de um espaço), cadastradas aqui mesmo sem saber ainda se vão virar venda. Receita ponderada = Valor estimado × Probabilidade — o Estágio é só uma etiqueta de acompanhamento (não altera o cálculo). Quando a ativação é confirmada, clique em "Parcelas" e cadastre valor + data de cada parcela: elas alimentam o Fluxo de Caixa automaticamente, no mês certo, sem precisar lançar de novo lá — com data de pagamento é "Realizado", só com data prevista é "Previsto".')}</h2>
-    <div class="hint">Cenário ${SCEN_LABEL[scen]} — a receita ponderada soma na linha "Bar / Ativações" do Fluxo de Caixa.</div>
+    <h2>Ativações ${infoIcon('Ativações cadastradas no catálogo de Entradas PMO (Consumo/ativações, tipo "Ativação") aparecem aqui automaticamente — não é um lançamento separado. Preço/custo/quantidade ficam em Entradas PMO; aqui você só acompanha e atualiza o Estágio (escolhe se ocorreu ou não) e a Probabilidade. Receita ponderada = Valor × Probabilidade, já embutida na linha "Bar / Ativações" do cenário — uma vez só, sem duplicar. Quando a ativação é confirmada, clique em "Parcelas" e cadastre valor + data de cada parcela: elas alimentam o Fluxo de Caixa automaticamente no mês certo, e o custo de execução fica rastreável na aba Custos (categoria Marketing), com comprovante.')}</h2>
+    <div class="hint">Cenário ${SCEN_LABEL[scen]} — pra adicionar uma nova ativação, vá em Entradas PMO › Consumo/ativações › "+ Adicionar bebida/ativação" e marque o Tipo como "Ativação".</div>
     <div class="tablewrap" style="margin-top:8px;">
       <table>
-        <thead><tr><th>Ativação</th><th class="num">Valor estimado</th><th>Estágio</th><th class="num">Prob. %</th><th class="num">Receita ponderada</th><th>Parcelas</th><th></th></tr></thead>
-        <tbody>${ativacaoRows || `<tr><td colspan="7" class="hint">Nenhuma ativação cadastrada ainda.</td></tr>`}</tbody>
-        <tfoot><tr><td>Total</td><td class="num mono">${fmtCur(at.nominal)}</td><td></td><td></td><td class="num mono">${fmtCur(at.esperado)}</td><td></td><td></td></tr></tfoot>
+        <thead><tr><th>Ativação</th><th class="num">Valor (catálogo)</th><th>Estágio</th><th class="num">Prob. %</th><th class="num">Receita ponderada</th><th>Custo (Base)</th><th>Parcelas</th><th></th></tr></thead>
+        <tbody>${ativacaoRows || `<tr><td colspan="8" class="hint">Nenhuma ativação cadastrada ainda — adicione em Entradas PMO › Consumo/ativações.</td></tr>`}</tbody>
+        <tfoot><tr><td>Total</td><td class="num mono">${fmtCur(at.nominal)}</td><td></td><td></td><td class="num mono">${fmtCur(at.esperado)}</td><td></td><td></td><td></td></tr></tfoot>
       </table>
     </div>
-    <button class="btn small" style="margin-top:10px;" data-action="addAtivacao:${scen}">+ Adicionar ativação</button>
     <div class="gridN" style="margin-top:16px;">
       <div class="kpi"><div class="lbl">Ativações confirmadas</div><div class="kpi-value">${fmtCur(at.confirmado)}</div></div>
       <div class="kpi"><div class="lbl">Ativações em pipeline</div><div class="kpi-value">${fmtCur(at.pipeline)}</div></div>
@@ -3451,21 +3526,19 @@ ACTIONS.openRitmistasLista = ()=>{ state.ui.ritmistasListaOpen = true; render();
 ACTIONS.closeRitmistasLista = ()=>{ state.ui.ritmistasListaOpen = false; render(); };
 ACTIONS.addLot = (scen)=>{ state.vendas[scen].push({id:uid(), lote:'Novo lote', preco:100, pctMix:0}); saveState(); render(); };
 ACTIONS.rmLot = (scen,i)=>{ state.vendas[scen].splice(Number(i),1); saveState(); render(); };
-ACTIONS.addAtivacao = (scen)=>{ state.ativacoes[scen].push(ativacaoDefaults()); saveState(); render(); };
-ACTIONS.rmAtivacao = (scen,i)=>{ state.ativacoes[scen].splice(Number(i),1); saveState(); render(); };
 ACTIONS.toggleAtivacaoParcelas = (ativacaoId)=>{
   if(!state.ui.ativacaoParcelasOpen) state.ui.ativacaoParcelasOpen = {};
   state.ui.ativacaoParcelasOpen[ativacaoId] = !state.ui.ativacaoParcelasOpen[ativacaoId];
   render(); // so muda a tela (o que esta aberto/fechado nao e um dado do projeto) — nao chama saveState
 };
 ACTIONS.addParcelaAtivacao = (scen,i)=>{
-  const a = state.ativacoes[scen][Number(i)]; if(!a) return;
+  const a = state.entradas[scen].bebidas[Number(i)]; if(!a) return;
   if(!a.parcelas) a.parcelas=[];
   a.parcelas.push({id:uid(), valor:0, dataPrevista:'', dataPagamento:''});
   saveState(); render();
 };
 ACTIONS.rmParcelaAtivacao = (scen,i,pi)=>{
-  const a = state.ativacoes[scen][Number(i)]; if(!a || !a.parcelas) return;
+  const a = state.entradas[scen].bebidas[Number(i)]; if(!a || !a.parcelas) return;
   a.parcelas.splice(Number(pi),1);
   saveState(); render();
 };

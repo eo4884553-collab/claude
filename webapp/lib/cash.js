@@ -80,11 +80,11 @@ export async function fetchSharedCashHistory() {
         });
       });
     });
-    // ativações (pipeline "Bar / Ativações", aba Vendas) seguem o mesmo padrão de patrocínio:
-    // pipeline por cenário, mas uma parcela já paga é dinheiro de verdade — lida sempre do
-    // cenário "base". Marcada como tipo "patrocinio" de propósito (mesmo balde do card do
-    // Dashboard/Fluxo de Caixa: é receita de empresa/marca, não ingresso avulso)
-    (d.ativacoes?.base || []).forEach((a) => {
+    // ativações (linha "Bar / Ativações", catálogo de bebidas/ativações em Entradas PMO) seguem o
+    // mesmo padrão de patrocínio: pipeline por cenário, mas uma parcela já paga é dinheiro de
+    // verdade — lida sempre do cenário "base". Marcada como tipo "patrocinio" de propósito (mesmo
+    // balde do card do Dashboard/Fluxo de Caixa: é receita de empresa/marca, não ingresso avulso)
+    ((d.entradas?.base?.bebidas) || []).filter((b) => b.tipo === 'ativacao').forEach((a) => {
       (a.parcelas || []).forEach((p) => {
         const valor = Number(p.valor) || 0;
         if (!valor || !p.dataPagamento) return;
@@ -172,7 +172,7 @@ export async function fetchSharedCashForecast() {
         });
       });
     });
-    (d.ativacoes?.base || []).forEach((a) => {
+    ((d.entradas?.base?.bebidas) || []).filter((b) => b.tipo === 'ativacao').forEach((a) => {
       (a.parcelas || []).forEach((p) => {
         if (p.dataPagamento || !p.dataPrevista) return;
         const valor = Number(p.valor) || 0;
