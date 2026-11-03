@@ -1654,9 +1654,10 @@ function allScenarios(){ const r={}; SCEN.forEach(s=> r[s]=computeScenario(s)); 
 
 function computeCustosSummary(){
   const rows = state.custos.map(c=>{
-    // linha de custo vinculada a uma ativação (ver syncAtivacaoCustos) não tem um "orçamento
-    // inicial" em Entradas PMO pra puxar — o path aponta pro ID da ativação, não pra uma chave
-    // real de state.entradas.base.marketing — fica 0, igual a um item novo de custo sem orçamento
+    // linha de custo vinculada a um item do catálogo de bebidas/ativações (ver syncAtivacaoCustos,
+    // vale pros dois tipos) não tem um "orçamento inicial" em Entradas PMO pra puxar — o path
+    // aponta pro ID do item, não pra uma chave real de state.entradas.base.marketing — fica 0,
+    // igual a um item novo de custo sem orçamento
     const orcInicial = c.computed ? computedCostValue(c)
       : (c.path[1]||'').startsWith('ativacao_') ? 0
       : c.path[0]==='operacao' ? opItemTotal(getPath(state.entradas.base, c.path))
@@ -1960,27 +1961,49 @@ function syncVendaFeijoada(){
   state.venda.vendidosHoje = (Number(state.venda.vendidosHojeLote1)||0) + b.ingressos;
   state.venda.valorRecebido = (Number(state.venda.valorRecebidoLote1)||0) + b.valor;
 }
-// mantem 1 linha de Custo (categoria Marketing) sincronizada pra cada ativação do catálogo de
-// bebidas/ativações (Entradas PMO) — só no cenário Base, mesma convenção de patrocínio/Fluxo de
-// Caixa (dinheiro real só é rastreado no cenário Base; os outros são só modelo de viabilidade).
-// Só CRIA a linha se ainda não existir (com o custo "cheio" do catálogo — sem ponderar por
-// probabilidade, ver bebidaCalc — como valor inicial sugerido); nunca sobrescreve o que o usuário
-// já editou depois ali (fornecedor, valor contratado, comprovantes, datas), do mesmo jeito que
-// ACTIONS.addCostItem cria uma linha nova e deixa o usuário gerenciar o resto sozinho. Isso é o
-// que dá pra anexar comprovante (inclusive mais de um — comprovantes já é uma lista) no custo de
-// execução de uma ativação, sem duplicar lançamento.
+// mantem 1 linha de Custo (categoria Marketing) sincronizada pra CADA item do catálogo de
+// bebidas/ativações (Entradas PMO) — bebida OU ativação, não importa o tipo — só no cenário Base,
+// mesma convenção de patrocínio/Fluxo de Caixa (dinheiro real só é rastreado no cenário Base; os
+// outros são só modelo de viabilidade). Isso cobre tanto "estou gastando X numa ativação" quanto
+// "estou gastando X comprando copos/bebidas que vou revender" — mesmo mecanismo pros dois, porque
+// os dois são, na prática, uma compra real com comprovante.
+// Cria a linha na primeira vez (com o custo "cheio" do catálogo — sem ponderar por probabilidade,
+// ver bebidaCalc — como valor inicial sugerido) e nunca sobrescreve o que o usuário já editou
+// depois ali (fornecedor, comprovantes, datas), do mesmo jeito que ACTIONS.addCostItem cria uma
+// linha nova e deixa o usuário gerenciar o resto sozinho. subcategoria é a exceção — sempre
+// espelha o nome atual do item do catálogo (renomear lá renomeia aqui, sem precisar editar os
+// dois lugares). Isso é o que dá pra anexar comprovante (inclusive mais de um — comprovantes já é
+// uma lista) no custo de execução de uma bebida ou ativação, sem duplicar lançamento.
+// (o nome da função e o prefixo de path "ativacao_" ficaram do desenho original, que só cobria
+// ativações — mantidos de propósito pra não duplicar/orfanar custos já sincronizados em produção
+// com esse prefixo; hoje o prefixo vale pra qualquer item do catálogo, bebida ou ativação)
+// valorContratado é o ÚNICO campo que continua "ao vivo", acompanhando o custo cheio do catálogo
+// (calc.custoItemCheio) enquanto o usuário não editar esse campo manualmente na aba Custos — do
+// contrário, a linha ficaria travada em R$0 pra sempre quando o item é criado (custoUnit/qtd ainda
+// zerados) e só preenchido depois, um campo por vez. valorContratadoAuto guarda o último valor
+// "automático" aplicado: se valorContratado ainda é igual a ele, é seguro atualizar os dois juntos;
+// se o usuário editou valorContratado direto (ficou diferente de valorContratadoAuto), a linha para
+// de acompanhar o catálogo e vale o que o usuário colocou, pra sempre.
 function syncAtivacaoCustos(){
   const bebidas = (state.entradas.base && state.entradas.base.bebidas) || [];
   bebidas.forEach(b=>{
-    if(b.tipo!=='ativacao') return;
     const pathKey = 'ativacao_'+b.id;
-    const existing = state.custos.find(c=> c.path[0]==='marketing' && c.path[1]===pathKey);
-    if(existing) return;
     const calc = bebidaCalc(b);
+    const valorAuto = Math.round(calc.custoItemCheio*100)/100;
+    const existing = state.custos.find(c=> c.path[0]==='marketing' && c.path[1]===pathKey);
+    if(existing){
+      existing.subcategoria = b.nome||'Item do catálogo';
+      if(Number(existing.valorContratado)===Number(existing.valorContratadoAuto)){
+        existing.valorContratado = valorAuto;
+        existing.valorContratadoAuto = valorAuto;
+      }
+      return;
+    }
+    const rotulo = b.tipo==='ativacao' ? 'ativação' : 'bebida';
     state.custos.push({
-      id:uid(), grupo:'Marketing', path:['marketing', pathKey], subcategoria: b.nome||'Ativação', computed:false,
-      fornecedor:'', descricao:'Custo de execução — ativação cadastrada em Entradas PMO › Consumo/ativações',
-      orcamentoAprovado:null, valorContratado: Math.round(calc.custoItemCheio*100)/100, valorPago:0,
+      id:uid(), grupo:'Marketing', path:['marketing', pathKey], subcategoria: b.nome||'Item do catálogo', computed:false,
+      fornecedor:'', descricao:`Custo de compra/execução — ${rotulo} cadastrada em Entradas PMO › Consumo/ativações`,
+      orcamentoAprovado:null, valorContratado: valorAuto, valorContratadoAuto: valorAuto, valorPago:0,
       dataPrevista:'', dataPagamento:'', status:'Não iniciado', comprovantes:[],
       responsavel:'Marketing', obs:'',
       origemPagamento: 'dominio',
@@ -3154,7 +3177,14 @@ VIEWS.entradas = function(){
     </div>`;
   } else if(sec==='consumo'){
     const bebCalc = computeBebidas(scen);
-    const bebRows = bebCalc.rows.map((r,i)=>`<tr>
+    const bebRows = bebCalc.rows.map((r,i)=>{
+      const custo = scen==='base' ? ativacaoCustoLink(r.id) : null;
+      const custoCell = scen!=='base'
+        ? `<span class="hint">só no cenário Base</span>`
+        : custo
+          ? `${fmtCur(custo.valorPago)} de ${fmtCur(custo.valorContratado)} ${pagamentoStatusBadge(custo.dataPagamento, custo.dataPrevista)}`
+          : `<span class="hint">—</span>`;
+      return `<tr>
       <td><select id="${mkId('entradas.'+scen+'.bebidas.'+i+'.tipo')}" data-bind="entradas.${scen}.bebidas.${i}.tipo">
         <option value="bebida" ${r.tipo!=='ativacao'?'selected':''}>Bebida</option>
         <option value="ativacao" ${r.tipo==='ativacao'?'selected':''}>Ativação</option>
@@ -3170,16 +3200,18 @@ VIEWS.entradas = function(){
       <td class="num mono">${fmtCur2(r.margemUnit)}</td>
       <td class="num mono">${fmtPct(r.margemPct)}</td>
       <td class="num mono">${fmtCur2(r.margemItemTotal)}</td>
+      <td style="font-size:12px; white-space:nowrap;">${custoCell}</td>
       <td><button class="rm" data-action="rmBebida:${scen}:${i}" title="Remover bebida/ativação">✕</button></td>
-    </tr>`).join('');
+    </tr>`;
+    }).join('');
     body = `<div class="section" style="margin:0 0 16px;">
       <h3 style="margin:0 0 6px; font-size:14.5px;">Catálogo detalhado de bebidas/ativações</h3>
-      <div class="hint">Cadastre cada tipo de bebida (ou ativação) com custo do produto, preço de venda, mão de obra operacional para servir e taxa de cartão. Em "Nº de pessoas", informe quantas pessoas (ou "unidades") esse item realmente atinge — nem todo item vale pra todo mundo que paga ingresso. A margem total do item é calculada automaticamente. Itens marcados <strong>Tipo: Ativação</strong> ganham Probabilidade (pondera receita e margem, igual Patrocínio) e aparecem automaticamente na aba <strong>Vendas › Ativações</strong>, onde dá pra marcar Estágio (se ocorreu ou não) e lançar parcelas reais — sem duplicar o lançamento. O custo de execução de uma ativação também vira uma linha rastreável em Custos › Marketing, com comprovante. Ao cadastrar pelo menos 1 item aqui, o catálogo substitui a estimativa simplificada abaixo.</div>
+      <div class="hint">Cadastre cada tipo de bebida (ou ativação) com custo do produto, preço de venda, mão de obra operacional para servir e taxa de cartão. Em "Nº de pessoas" × "Qtd./pessoa", informe o TOTAL de unidades que você vai comprar/vender — por exemplo, pra uma compra de 300 copos no total, use Nº de pessoas = 300 e Qtd./pessoa = 1 (não o total de pagantes do evento, a menos que o item valha mesmo pra cada um deles). A margem total do item é calculada automaticamente. Itens marcados <strong>Tipo: Ativação</strong> ganham Probabilidade (pondera receita e margem, igual Patrocínio) e aparecem automaticamente na aba <strong>Vendas › Ativações</strong>, onde dá pra marcar Estágio (se ocorreu ou não) e lançar parcelas reais — sem duplicar o lançamento. Para <strong>qualquer item</strong> (bebida ou ativação), o custo real de compra/execução também vira automaticamente uma linha rastreável em <strong>Custos › Marketing</strong>, onde você lança fornecedor, valor pago, datas e anexa o(s) comprovante(s) — a coluna "Custo (Base)" abaixo mostra o status dessa linha sem precisar trocar de aba. Ao cadastrar pelo menos 1 item aqui, o catálogo substitui a estimativa simplificada abaixo.</div>
       <div class="tablewrap" style="margin-top:10px;">
         <table>
-          <thead><tr><th>Tipo</th><th>Bebida/ativação</th><th class="num">Custo unit. (R$)</th><th class="num">Preço venda (R$)</th><th class="num">Mão de obra/unid. (R$)</th><th class="num">Taxa cartão (%)</th><th class="num">Qtd./pessoa</th><th class="num">Nº de pessoas</th><th class="num">Prob. %</th><th class="num">Margem unit.</th><th class="num">Margem %</th><th class="num">Margem total</th><th></th></tr></thead>
-          <tbody>${bebRows || `<tr><td colspan="13" class="hint">Nenhuma bebida cadastrada — usando a estimativa simplificada abaixo.</td></tr>`}</tbody>
-          ${bebCalc.rows.length ? `<tfoot><tr><td colspan="11">Total</td><td class="num mono">${fmtCur2(bebCalc.margemCatalogoTotal)}</td><td></td></tr></tfoot>` : ''}
+          <thead><tr><th>Tipo</th><th>Bebida/ativação</th><th class="num">Custo unit. (R$)</th><th class="num">Preço venda (R$)</th><th class="num">Mão de obra/unid. (R$)</th><th class="num">Taxa cartão (%)</th><th class="num">Qtd./pessoa</th><th class="num">Nº de pessoas</th><th class="num">Prob. %</th><th class="num">Margem unit.</th><th class="num">Margem %</th><th class="num">Margem total</th><th>Custo (Base)</th><th></th></tr></thead>
+          <tbody>${bebRows || `<tr><td colspan="14" class="hint">Nenhuma bebida cadastrada — usando a estimativa simplificada abaixo.</td></tr>`}</tbody>
+          ${bebCalc.rows.length ? `<tfoot><tr><td colspan="11">Total</td><td class="num mono">${fmtCur2(bebCalc.margemCatalogoTotal)}</td><td></td><td></td></tr></tfoot>` : ''}
         </table>
       </div>
       <button class="btn small" style="margin-top:10px;" data-action="addBebida:${scen}">+ Adicionar bebida/ativação</button>
@@ -3298,10 +3330,12 @@ function ativacaoParcelaSummary(a){
   const pago = sum(parcelas.filter(p=>p.dataPagamento).map(p=> Number(p.valor)||0));
   return {total, pago, pendente: total-pago, n: parcelas.length};
 }
-// Custo vinculado de uma ativação (ver syncAtivacaoCustos) — só existe no cenário Base, mesma
-// convenção de patrocínio/lib/cash.js (dinheiro real só é rastreado no cenário Base).
-function ativacaoCustoLink(ativacaoId){
-  return (state.custos||[]).find(c=> c.path[0]==='marketing' && c.path[1]==='ativacao_'+ativacaoId);
+// Custo vinculado de um item do catálogo de bebidas/ativações, bebida ou ativação (ver
+// syncAtivacaoCustos) — só existe no cenário Base, mesma convenção de patrocínio/lib/cash.js
+// (dinheiro real só é rastreado no cenário Base). Usado tanto na tabela de Ativações (Vendas)
+// quanto no catálogo completo (Entradas PMO › Consumo/ativações).
+function ativacaoCustoLink(itemId){
+  return (state.custos||[]).find(c=> c.path[0]==='marketing' && c.path[1]==='ativacao_'+itemId);
 }
 // linhas da tabela de ativações (aba Vendas) — são os itens do catálogo de bebidas/ativações
 // (Entradas PMO) com tipo:'ativacao'; não existe uma lista separada (ver computeAtivacoes), então
