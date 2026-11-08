@@ -1744,7 +1744,21 @@ function computeScenario(scen, overrides){
 }
 function allScenarios(){ const r={}; SCEN.forEach(s=> r[s]=computeScenario(s)); return r; }
 
+// soma de "Qtd. vendida" de TODAS as linhas de Custos que vinculam o MESMO custo compartilhado
+// (ver custoLinks) — ex.: se Caipirinha e Mojito vendidos usam o mesmo item "Gelo" (comprado uma
+// vez só), o valor total do Gelo é rateado pelas unidades VENDIDAS somadas das duas bebidas, não
+// cobrado inteiro de cada uma (decisão confirmada com o usuário: rateio pela quantidade vendida).
+function qtdVendidaPorCustoLink(){
+  const out = {};
+  state.custos.forEach(c=>{
+    const qv = Number(c.qtdVendida)||0;
+    (c.custoLinks||[]).forEach(linkId=>{ out[linkId] = (out[linkId]||0) + qv; });
+  });
+  return out;
+}
 function computeCustosSummary(){
+  const qtdVendidaPorLink = qtdVendidaPorCustoLink();
+  const byId = new Map(state.custos.map(c=>[c.id, c]));
   const rows = state.custos.map(c=>{
     // linha de custo vinculada a uma ativação (ver syncAtivacaoCustos) ou já "aposentada" de um
     // item de bebida (ver migrateState) não tem um "orçamento inicial" real em Entradas PMO pra
@@ -1767,12 +1781,29 @@ function computeCustosSummary(){
     const custoUnitario = qtdComprada>0 ? contratado/qtdComprada : 0;
     const saldoUnidades = qtdComprada - qtdVendida;
     const faturamento = qtdVendida*precoVendaUnit;
-    const custoAlocado = qtdVendida*custoUnitario;
+    const custoAlocadoProprio = qtdVendida*custoUnitario;
+    // custos agregados (ver custoLinks): um item vendido pode "puxar" o custo de um ou mais outros
+    // itens de Custos (ex.: Caipirinha agrega Cachaça + Limão + Açúcar + Copo) — cada item agregado
+    // contribui com valorContratado/quantidade-VENDIDA-somada-de-todo-mundo-que-usa-ele × quanto
+    // ESTA linha vendeu, igual ao rateio de mão de obra das ativações (bebidaCalc), só que rateado
+    // pela quantidade vendida em vez da comprada
+    const custoLinks = (c.custoLinks||[]).filter(Boolean);
+    const custoLinkInfos = custoLinks.map(linkId=>{
+      const target = byId.get(linkId);
+      if(!target) return null;
+      const total = Number(target.valorContratado)||0;
+      const qtdCompartilhada = qtdVendidaPorLink[linkId]||0;
+      const valorUnit = qtdCompartilhada>0 ? total/qtdCompartilhada : 0;
+      return {linkId, label: target.subcategoria, grupo: target.grupo, total, qtdCompartilhada, valorUnit};
+    }).filter(Boolean);
+    const custoAlocadoLinks = sum(custoLinkInfos.map(info=> info.valorUnit*qtdVendida));
+    const custoAlocado = custoAlocadoProprio + custoAlocadoLinks;
     const margemReal = faturamento - custoAlocado;
     const margemPct = faturamento ? margemReal/faturamento : 0;
     return Object.assign({}, c, {
       orcInicial, orcAprovado, contratado, pago, saldo: contratado-pago, eac,
-      qtdComprada, qtdVendida, precoVendaUnit, custoUnitario, saldoUnidades, faturamento, custoAlocado, margemReal, margemPct,
+      qtdComprada, qtdVendida, precoVendaUnit, custoUnitario, saldoUnidades, faturamento,
+      custoLinks, custoLinkInfos, custoAlocadoProprio, custoAlocadoLinks, custoAlocado, margemReal, margemPct,
     });
   });
   const bac = sum(rows.map(r=>r.orcAprovado));
@@ -1792,6 +1823,15 @@ function itensVendidosSummary(){
   const margemTotal = sum(rows.map(({r})=>r.margemReal));
   const semVenda = rows.filter(({r})=> !r.qtdVendida);
   return {rows, faturamentoTotal, margemTotal, semVenda};
+}
+// ranking de margem por item (área de análise pedida: qual item teve a melhor e a pior margem) —
+// só considera item com pelo menos alguma venda lançada (margemPct de item sem venda é sempre 0,
+// o que não diz nada sobre a qualidade do item, só que ainda não foi vendido)
+function itensVendidosRanking(){
+  const iv = itensVendidosSummary();
+  const comVenda = iv.rows.filter(({r})=> r.qtdVendida>0);
+  const ranked = comVenda.slice().sort((a,b)=> b.r.margemPct - a.r.margemPct);
+  return {ranked, melhor: ranked[0]||null, pior: ranked.length>1 ? ranked[ranked.length-1] : null};
 }
 function computedCostValue(c){
   const base = computeScenario('base');
@@ -3266,6 +3306,42 @@ function maoDeObraCell(scen, i, r){
     : tblInput(`entradas.${scen}.bebidas.${i}.custoOperacionalUnit`, r.custoOperacionalUnit, {type:'number', step:'0.1', cls:'num'});
   return `<div style="display:flex; flex-direction:column; gap:3px; align-items:flex-end; min-width:150px;">${valorTotalHtml}${chips}${addSelectHtml}</div>`;
 }
+// coluna "Custos vinculados" da aba Custos — mesmo padrão de chips do maoDeObraCell acima, só que
+// liga uma linha de Custos a OUTRAS linhas de Custos (em vez de Custos por categoria/Entradas PMO):
+// pra agregar o custo de mais de um item (ex.: Caipirinha agrega Cachaça + Limão + Açúcar), com o
+// valor de cada item vinculado rateado pela quantidade VENDIDA somada de tudo que usa ele (ver
+// computeCustosSummary). Não troca o campo manual de nada — fica junto do custo próprio do item.
+function custoLinksCell(cs, r){
+  const opts = cs.rows.filter(o=> o.id!==r.id).map(o=>({id:o.id, label:o.subcategoria, grupo:o.grupo}));
+  const linkedSet = new Set((r.custoLinks||[]).filter(Boolean));
+  const available = opts.filter(o=> !linkedSet.has(o.id));
+  const addSelectHtml = available.length ? `<select style="font-size:11px; width:100%; max-width:170px;" onchange="if(this.value){ undoSnapshotStart(); ACTIONS.addCustoLink('${r.id}', this.value); }">
+    <option value="">+ vincular custo…</option>
+    ${available.map(o=>`<option value="${o.id}">${esc(o.grupo)}: ${esc(o.label)}</option>`).join('')}
+  </select>` : '';
+  const infos = r.custoLinkInfos||[];
+  const chips = infos.map(info=>{
+    const compartilhado = info.qtdCompartilhada > r.qtdVendida;
+    return `<div class="hint" style="font-size:10px; display:flex; align-items:center; gap:4px; justify-content:flex-end; white-space:nowrap;" title="${esc(fmtCur2(info.total))} (${esc(info.grupo)}: ${esc(info.label)}) ÷ ${fmtInt(info.qtdCompartilhada)} un. vendidas${compartilhado ? ' no total, somando outras linhas vinculadas ao mesmo custo' : ''} = ${esc(fmtCur2(info.valorUnit))}/un.">
+      <span>${esc(info.label)} ${esc(fmtCur2(info.valorUnit))}${compartilhado ? ` (÷${fmtInt(info.qtdCompartilhada)})` : ''}</span>
+      <button class="rm" style="padding:0 3px;" data-action="rmCustoLink:${r.id}:${info.linkId}" title="Remover vínculo">✕</button>
+    </div>`;
+  }).join('');
+  return `<div style="display:flex; flex-direction:column; gap:3px; align-items:flex-end; min-width:150px;">${chips}${addSelectHtml}</div>`;
+}
+ACTIONS.addCustoLink = (rowId, linkedId)=>{
+  const c = state.custos.find(x=>x.id===rowId);
+  if(!c) return;
+  if(!Array.isArray(c.custoLinks)) c.custoLinks = [];
+  if(linkedId && linkedId!==rowId && !c.custoLinks.includes(linkedId)) c.custoLinks.push(linkedId);
+  saveState(); render();
+};
+ACTIONS.rmCustoLink = (rowId, linkedId)=>{
+  const c = state.custos.find(x=>x.id===rowId);
+  if(!c) return;
+  c.custoLinks = (c.custoLinks||[]).filter(l=> l!==linkedId);
+  saveState(); render();
+};
 VIEWS.entradas = function(){
   const scen = state.ui.scenTab.entradas;
   const e = state.entradas[scen];
@@ -3521,6 +3597,7 @@ VIEWS.vendas = function(){
   const ativacaoRows = ativacaoTableRows(scen);
   const at = computeAtivacoes(scen);
   const iv = itensVendidosSummary();
+  const ranking = itensVendidosRanking();
   const ivRows = iv.rows.map(({r,i})=>{
     const semVenda = !r.qtdVendida;
     return `<tr${semVenda ? ' style="background:var(--warn-soft);"' : ''}>
@@ -3590,6 +3667,33 @@ VIEWS.vendas = function(){
       </table>
     </div>
     ${iv.semVenda.length ? `<div class="hint" style="margin-top:8px; color:var(--warn);">⚠ ${iv.semVenda.length} item${iv.semVenda.length>1?'s':''} comprado${iv.semVenda.length>1?'s':''} sem nenhuma venda lançada ainda — confira se entra mesmo como custo sem faturamento.</div>` : ''}
+  </div>
+
+  <div class="section">
+    <h2>Análise de margem por item ${infoIcon('Ranking de todo item vendido (pelo menos 1 unidade lançada em "Itens vendidos" acima), da melhor pra pior margem percentual. Use pra decidir o que vale continuar comprando/vendendo e o que está no vermelho. Um item pode agregar o custo de um ou mais OUTROS itens de Custos (coluna "Custos vinculados", na aba Custos) — útil pra insumo compartilhado entre vários itens (ex.: Gelo usado por Caipirinha e Mojito): o valor total desse insumo é rateado entre os itens que o usam pela quantidade VENDIDA de cada um.')}</h2>
+    ${ranking.ranked.length ? `
+      <div class="gridN" style="margin-bottom:12px;">
+        <div class="kpi" style="border-color:var(--good);"><div class="lbl">🏆 Melhor margem</div><div class="kpi-value" style="font-size:16px;">${esc(ranking.melhor.r.subcategoria)}</div><div class="hint">${fmtPct(ranking.melhor.r.margemPct)} · ${fmtCur(ranking.melhor.r.margemReal)}</div></div>
+        ${ranking.pior ? `<div class="kpi" style="border-color:var(--bad);"><div class="lbl">⚠ Pior margem</div><div class="kpi-value" style="font-size:16px;">${esc(ranking.pior.r.subcategoria)}</div><div class="hint">${fmtPct(ranking.pior.r.margemPct)} · ${fmtCur(ranking.pior.r.margemReal)}</div></div>` : ''}
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>#</th><th>Item</th><th class="num">Qtd. vendida</th><th class="num">Faturamento</th><th class="num">Custo alocado</th><th class="num">Margem</th><th class="num">Margem %</th></tr></thead>
+          <tbody>${ranking.ranked.map(({r},pos)=>{
+            const destaque = pos===0 ? 'var(--good-soft)' : (ranking.ranked.length>1 && pos===ranking.ranked.length-1) ? 'var(--bad-soft)' : 'transparent';
+            return `<tr style="background:${destaque};">
+              <td class="mono">${pos+1}</td>
+              <td>${esc(r.subcategoria)} <span class="hint">(${esc(r.grupo)})</span></td>
+              <td class="num mono">${fmtInt(r.qtdVendida)}</td>
+              <td class="num mono">${fmtCur(r.faturamento)}</td>
+              <td class="num mono">${fmtCur(r.custoAlocado)}</td>
+              <td class="num mono" style="color:${r.margemReal>=0?'var(--good)':'var(--bad)'};">${fmtCur(r.margemReal)}</td>
+              <td class="num mono">${fmtPct(r.margemPct)}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>
+    ` : `<div class="hint">Lance "Qtd. comprada" em Custos e registre alguma venda em "Itens vendidos" acima pra começar a ver o ranking de margem.</div>`}
   </div>
 
   <div class="section">
@@ -4020,6 +4124,7 @@ VIEWS.custos = function(){
       <td><input type="checkbox" data-action="toggleCustoSelect:${r.id}" ${selected[r.id]?'checked':''} title="Selecionar pra replicar data em lote"></td>
       <td>${r.subcategoria}</td>
       <td class="num">${tblInput(`custos.${i}.qtdComprada`, r.qtdComprada, {type:'number', step:'1', cls:'num'})}</td>
+      <td>${custoLinksCell(cs, r)}</td>
       <td>${tblInput(`custos.${i}.fornecedor`, r.fornecedor)}</td>
       <td class="num mono">${fmtCur(r.orcInicial)}</td>
       <td class="num">${tblInput(`custos.${i}.orcamentoAprovado`, Math.round(r.orcAprovado), {type:'number', cls:'num'})}</td>
@@ -4036,7 +4141,7 @@ VIEWS.custos = function(){
     </tr>`;
   };
   const rows = groupOrder.map(grupo=>
-    `<tr class="section-hdr-row"><td colspan="16">${grupo}</td></tr>` + byGroup.get(grupo).map(({r,i})=>rowHtml(r,i)).join('')
+    `<tr class="section-hdr-row"><td colspan="17">${grupo}</td></tr>` + byGroup.get(grupo).map(({r,i})=>rowHtml(r,i)).join('')
   ).join('');
 
   const atrasados = custosAtrasados(cs.rows);
@@ -4074,11 +4179,11 @@ VIEWS.custos = function(){
 
   <div class="tablewrap">
     <table>
-      <thead><tr><th><input type="checkbox" data-action="toggleCustoSelectAll" ${allSelected?'checked':''} title="Selecionar/limpar todos"></th><th>Subcategoria</th><th class="num">Qtd. comprada</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th>Origem do pagamento</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th><th>Data de pagamento</th><th>Vencimento</th><th>Comprovante</th></tr></thead>
+      <thead><tr><th><input type="checkbox" data-action="toggleCustoSelectAll" ${allSelected?'checked':''} title="Selecionar/limpar todos"></th><th>Subcategoria</th><th class="num">Qtd. comprada</th><th>Custos vinculados</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th>Origem do pagamento</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th><th>Data de pagamento</th><th>Vencimento</th><th>Comprovante</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>
-  <div class="hint" style="margin-top:8px;">Em "Qtd. comprada", informe a quantidade de unidades desse item (ex.: 15 Coca Zero) só se ele for revendido/controlado por unidade — deixe em branco/0 pra custos sem controle de quantidade (ex.: DJ, estrutura). Item com Qtd. comprada preenchida aparece automaticamente na aba <strong>Vendas › Itens vendidos</strong>, onde você lança quanto foi vendido de fato e o preço, pra ver o saldo (estoque) e a margem real. Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
+  <div class="hint" style="margin-top:8px;">Em "Qtd. comprada", informe a quantidade de unidades desse item (ex.: 15 Coca Zero) só se ele for revendido/controlado por unidade — deixe em branco/0 pra custos sem controle de quantidade (ex.: DJ, estrutura). Item com Qtd. comprada preenchida aparece automaticamente na aba <strong>Vendas › Itens vendidos</strong>, onde você lança quanto foi vendido de fato e o preço, pra ver o saldo (estoque) e a margem real. Em "Custos vinculados", agregue um ou mais OUTROS itens de Custos cujo valor compõe o custo real deste (ex.: Caipirinha vinculada a Cachaça + Limão + Açúcar + Copo) — se o mesmo item vinculado (ex.: Gelo) for usado por mais de uma linha, seu valor total é rateado entre elas pela quantidade VENDIDA de cada uma, aparecendo também na análise de margem em Vendas. Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
   <input type="file" id="custoComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
 };
 ACTIONS.toggleCustoSelect = (id)=>{
