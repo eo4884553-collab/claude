@@ -198,6 +198,12 @@ tfoot td{font-weight:700; border-top:1px solid var(--border); border-bottom:none
 .costitem-head{font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); padding:0 0 2px;}
 .costitem-head span:nth-child(2), .costitem-head span:nth-child(3), .costitem-head span:nth-child(4){text-align:right;}
 @media (max-width:640px){.costitem-row-op{grid-template-columns:1fr; }}
+.costitem-row[draggable="true"]{cursor:grab;}
+.costitem-row[draggable="true"]:active{cursor:grabbing;}
+.costitem-drag-handle{flex:0 0 auto; color:var(--text-faint); font-size:13px; cursor:grab; user-select:none; padding:0 2px;}
+.costitem-row.dragging{opacity:.35;}
+.costgroup-card{transition:outline-color .12s, background-color .12s;}
+.costgroup-card.drag-over{outline:2px dashed var(--accent-strong); outline-offset:-4px; background:var(--accent-soft, var(--surface-2));}
 
 .kpi{padding:14px 16px; border-radius:var(--radius); border:1px solid var(--border); background:var(--surface);}
 .kpi .lbl{font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.05em;}
@@ -3233,11 +3239,16 @@ function costItemRow(scen, groupKey, idx, item){
   const nameId = mkId(`itemCatalog.${groupKey}.${idx}.label`);
   const valPath = `entradas.${scen}.${groupKey}.${item.key}`;
   const val = state.entradas[scen][groupKey][item.key] ?? 0;
-  return `<div class="costitem-row">
+  // draggable="true" + data-drag-item habilita "arrastar e soltar" pra mover o item pra outra
+  // categoria (ver costGroupBlock/wireCostDragDrop) — item travado por fórmula não pode ser movido
+  const dragAttrs = locked ? '' : ` draggable="true" data-drag-item="${groupKey}:${item.key}"`;
+  const handle = locked ? '' : `<span class="costitem-drag-handle" title="Arraste pra mover pra outra categoria">⠿</span>`;
+  return `<div class="costitem-row"${dragAttrs}>
+    ${handle}
     <input id="${nameId}" type="text" class="costitem-name" data-bind="itemCatalog.${groupKey}.${idx}.label" value="${esc(item.label)}">
     ${tblInput(valPath, val, {type:'number', cls:'costitem-val'})}
     ${locked
-      ? `<span class="costitem-lock" title="Item usado pelas fórmulas do modelo — não pode ser removido">🔒</span>`
+      ? `<span class="costitem-lock" title="Item usado pelas fórmulas do modelo — não pode ser removido nem movido">🔒</span>`
       : `<button class="rm" data-action="rmCostItem:${groupKey}:${idx}" data-confirm="Confirmar ✕" title="Remover item (clique 2x para confirmar)">✕</button>`}
   </div>`;
 }
@@ -3248,7 +3259,7 @@ function costItemRowOperacao(scen, idx, item){
   const obj = (raw && typeof raw==='object') ? raw : {qty:1, unitCost:Number(raw)||0};
   const total = opItemTotal(obj);
   const nameId = mkId(`itemCatalog.operacao.${idx}.label`);
-  return `<div class="costitem-row costitem-row-op">
+  return `<div class="costitem-row costitem-row-op" draggable="true" data-drag-item="operacao:${key}">
     <input id="${nameId}" type="text" class="costitem-name" data-bind="itemCatalog.operacao.${idx}.label" value="${esc(item.label)}">
     ${tblInput(`entradas.${scen}.operacao.${key}.qty`, obj.qty, {type:'number', cls:'costitem-val', step:'1'})}
     ${tblInput(`entradas.${scen}.operacao.${key}.unitCost`, obj.unitCost, {type:'number', cls:'costitem-val'})}
@@ -3266,7 +3277,10 @@ function costGroupBlock(scen, group){
   const rows = catalog.map((item,idx)=> isOp ? costItemRowOperacao(scen,idx,item) : costItemRow(scen, group.key, idx, item)).join('');
   const gIdx = state.costGroups.findIndex(g=>g.key===group.key);
   const nameId = mkId(`costGroups.${gIdx}.label`);
-  return `<div class="card" style="padding:16px 18px; margin-bottom:14px;">
+  // data-drop-group marca esse card como alvo de "soltar" um item arrastado de outra categoria
+  // (ver wireCostDragDrop) — o valor lançado em cada cenário migra junto (convertendo o formato de
+  // Operação, que guarda {qty,unitCost}, pra/de número simples das demais categorias)
+  return `<div class="card costgroup-card" data-drop-group="${group.key}" style="padding:16px 18px; margin-bottom:14px;">
     <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; gap:10px;">
       <input id="${nameId}" type="text" class="costgroup-name" data-bind="costGroups.${gIdx}.label" value="${esc(group.label)}" style="font-weight:700; font-size:14.5px; border:none; background:transparent; padding:2px 4px; flex:1 1 auto; min-width:0;">
       <span class="mono" style="font-weight:700; color:var(--accent-strong); white-space:nowrap;">${fmtCur(total)}</span>
@@ -3400,7 +3414,7 @@ VIEWS.entradas = function(){
       </div>
     </div>`;
   } else if(sec==='custos'){
-    body = `<div class="hint" style="margin-bottom:12px;">Clique no nome de uma categoria ou de um item para renomeá-lo, use "+ Adicionar item" para criar uma nova linha, ou ✕ para excluir — vale para os 3 cenários e não altera nenhum valor já lançado nos demais itens.</div>
+    body = `<div class="hint" style="margin-bottom:12px;">Clique no nome de uma categoria ou de um item para renomeá-lo, use "+ Adicionar item" para criar uma nova linha, ou ✕ para excluir — vale para os 3 cenários e não altera nenhum valor já lançado nos demais itens. Pra mover um item pra outra categoria, arraste pelo ⠿ e solte no card da categoria de destino — o valor lançado nos 3 cenários e o lançamento em Custos migram junto, nada se perde.</div>
       ${state.costGroups.map(g=>costGroupBlock(scen,g)).join('')}
       <button class="btn small" data-action="addCostGroup" style="margin-bottom:14px;">+ Nova categoria de custo</button>`;
   } else if(sec==='outros'){
@@ -3441,6 +3455,49 @@ VIEWS.entradas = function(){
   ${body}`;
 };
 ACTIONS.setEntradasSection = (id)=>{ state.ui.entradasSection = id; saveState(); render(); };
+// liga o arrastar-e-soltar da seção "Custo por categoria" (ver costItemRow/costGroupBlock) — chamada
+// automaticamente a cada render (ver render(), que procura VIEWS.<view>_wire). Guarda o item sendo
+// arrastado em variáveis locais (fechamento desta chamada) em vez de ler dataTransfer no "drop",
+// porque alguns navegadores restringem a leitura de dataTransfer fora do dragstart.
+function wireCostDragDrop(){
+  const view = $('#view');
+  if(!view) return;
+  let dragGroupKey = null, dragItemKey = null;
+  view.querySelectorAll('[data-drag-item]').forEach(el=>{
+    el.addEventListener('dragstart', e=>{
+      const [gk, ik] = el.dataset.dragItem.split(':');
+      dragGroupKey = gk; dragItemKey = ik;
+      el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try{ e.dataTransfer.setData('text/plain', el.dataset.dragItem); }catch(_){}
+    });
+    el.addEventListener('dragend', ()=>{ el.classList.remove('dragging'); });
+  });
+  view.querySelectorAll('[data-drop-group]').forEach(card=>{
+    card.addEventListener('dragover', e=>{
+      if(!dragGroupKey || card.dataset.dropGroup===dragGroupKey) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      card.classList.add('drag-over');
+    });
+    card.addEventListener('dragleave', e=>{ if(e.target===card) card.classList.remove('drag-over'); });
+    card.addEventListener('drop', e=>{
+      e.preventDefault();
+      card.classList.remove('drag-over');
+      const toGroupKey = card.dataset.dropGroup;
+      if(dragGroupKey && dragItemKey && toGroupKey && toGroupKey!==dragGroupKey){
+        undoSnapshotStart();
+        ACTIONS.moveCostItem(dragGroupKey, dragItemKey, toGroupKey);
+      }
+      dragGroupKey = null; dragItemKey = null;
+    });
+  });
+}
+VIEWS.entradas_wire = function(){
+  if(READONLY) return;
+  if((state.ui.entradasSection||'evento')!=='custos') return;
+  wireCostDragDrop();
+};
 // bebidas (consumo) saíram do modelo — "bebidas" (o nome do array em state, mantido pra não exigir
 // mais uma migração) só guarda ativações a partir de agora. qtdComprada começa em 0 — o usuário
 // preenche com a quantidade real investida nessa ativação, quando fizer sentido ter uma (ex.: 300
@@ -3507,6 +3564,48 @@ ACTIONS.rmCostItem = (groupKey, idx)=>{
   state.itemCatalog[groupKey].splice(Number(idx),1);
   SCEN.forEach(s=>{ delete state.entradas[s][groupKey][item.key]; });
   state.custos = state.custos.filter(c=> !(c.path[0]===groupKey && c.path[1]===item.key));
+  saveState(); render();
+};
+// move um item de custo de uma categoria pra outra (arrastar e soltar em Entradas PMO › Custo por
+// categoria, ver wireCostDragDrop) — leva junto o valor lançado nos 3 cenários e o lançamento
+// espelhado em Custos (path/grupo), sem perder nada do que já foi preenchido. Operação guarda o
+// valor como {qty,unitCost} (as demais categorias guardam um número simples), então a conversão
+// acontece nos dois sentidos: saindo de Operação vira o TOTAL (qty×unitCost) virando número; entrando
+// em Operação vira {qty:1, unitCost:<valor>}.
+ACTIONS.moveCostItem = (fromGroupKey, itemKey, toGroupKey)=>{
+  if(!fromGroupKey || !toGroupKey || fromGroupKey===toGroupKey) return;
+  if((PROTECTED_COST_KEYS[fromGroupKey]||[]).includes(itemKey)) return; // defesa extra — UI já não deixa arrastar
+  const fromCatalog = state.itemCatalog[fromGroupKey];
+  const toCatalog = state.itemCatalog[toGroupKey];
+  if(!fromCatalog || !toCatalog) return;
+  const idx = fromCatalog.findIndex(it=> it.key===itemKey);
+  if(idx<0) return;
+  if(toCatalog.some(it=> it.key===itemKey)) return; // colisão de chave (não deveria acontecer)
+  const item = fromCatalog[idx];
+  fromCatalog.splice(idx,1);
+  toCatalog.push(item);
+  SCEN.forEach(s=>{
+    const e = state.entradas[s];
+    if(!e[toGroupKey]) e[toGroupKey] = {};
+    let val = e[fromGroupKey] ? e[fromGroupKey][itemKey] : undefined;
+    if(fromGroupKey==='operacao'){
+      const obj = (val && typeof val==='object') ? val : {qty:1, unitCost:Number(val)||0};
+      val = toGroupKey==='operacao' ? obj : opItemTotal(obj);
+    } else if(toGroupKey==='operacao'){
+      val = {qty:1, unitCost:Number(val)||0};
+    } else if(val==null){
+      val = 0;
+    }
+    if(e[fromGroupKey]) delete e[fromGroupKey][itemKey];
+    e[toGroupKey][itemKey] = val;
+  });
+  const toGroup = state.costGroups.find(g=>g.key===toGroupKey);
+  state.custos.forEach(c=>{
+    if(c.path[0]===fromGroupKey && c.path[1]===itemKey){
+      c.path = [toGroupKey, itemKey];
+      if(toGroup) c.grupo = toGroup.label;
+    }
+  });
   saveState(); render();
 };
 
