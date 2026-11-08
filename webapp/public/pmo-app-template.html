@@ -198,6 +198,12 @@ tfoot td{font-weight:700; border-top:1px solid var(--border); border-bottom:none
 .costitem-head{font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); padding:0 0 2px;}
 .costitem-head span:nth-child(2), .costitem-head span:nth-child(3), .costitem-head span:nth-child(4){text-align:right;}
 @media (max-width:640px){.costitem-row-op{grid-template-columns:1fr; }}
+.costitem-row[draggable="true"]{cursor:grab;}
+.costitem-row[draggable="true"]:active{cursor:grabbing;}
+.costitem-drag-handle{flex:0 0 auto; color:var(--text-faint); font-size:13px; cursor:grab; user-select:none; padding:0 2px;}
+.costitem-row.dragging{opacity:.35;}
+.costgroup-card{transition:outline-color .12s, background-color .12s;}
+.costgroup-card.drag-over{outline:2px dashed var(--accent-strong); outline-offset:-4px; background:var(--accent-soft, var(--surface-2));}
 
 .kpi{padding:14px 16px; border-radius:var(--radius); border:1px solid var(--border); background:var(--surface);}
 .kpi .lbl{font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.05em;}
@@ -1744,7 +1750,21 @@ function computeScenario(scen, overrides){
 }
 function allScenarios(){ const r={}; SCEN.forEach(s=> r[s]=computeScenario(s)); return r; }
 
+// soma de "Qtd. vendida" de TODAS as linhas de Custos que vinculam o MESMO custo compartilhado
+// (ver custoLinks) — ex.: se Caipirinha e Mojito vendidos usam o mesmo item "Gelo" (comprado uma
+// vez só), o valor total do Gelo é rateado pelas unidades VENDIDAS somadas das duas bebidas, não
+// cobrado inteiro de cada uma (decisão confirmada com o usuário: rateio pela quantidade vendida).
+function qtdVendidaPorCustoLink(){
+  const out = {};
+  state.custos.forEach(c=>{
+    const qv = Number(c.qtdVendida)||0;
+    (c.custoLinks||[]).forEach(linkId=>{ out[linkId] = (out[linkId]||0) + qv; });
+  });
+  return out;
+}
 function computeCustosSummary(){
+  const qtdVendidaPorLink = qtdVendidaPorCustoLink();
+  const byId = new Map(state.custos.map(c=>[c.id, c]));
   const rows = state.custos.map(c=>{
     // linha de custo vinculada a uma ativação (ver syncAtivacaoCustos) ou já "aposentada" de um
     // item de bebida (ver migrateState) não tem um "orçamento inicial" real em Entradas PMO pra
@@ -1767,12 +1787,29 @@ function computeCustosSummary(){
     const custoUnitario = qtdComprada>0 ? contratado/qtdComprada : 0;
     const saldoUnidades = qtdComprada - qtdVendida;
     const faturamento = qtdVendida*precoVendaUnit;
-    const custoAlocado = qtdVendida*custoUnitario;
+    const custoAlocadoProprio = qtdVendida*custoUnitario;
+    // custos agregados (ver custoLinks): um item vendido pode "puxar" o custo de um ou mais outros
+    // itens de Custos (ex.: Caipirinha agrega Cachaça + Limão + Açúcar + Copo) — cada item agregado
+    // contribui com valorContratado/quantidade-VENDIDA-somada-de-todo-mundo-que-usa-ele × quanto
+    // ESTA linha vendeu, igual ao rateio de mão de obra das ativações (bebidaCalc), só que rateado
+    // pela quantidade vendida em vez da comprada
+    const custoLinks = (c.custoLinks||[]).filter(Boolean);
+    const custoLinkInfos = custoLinks.map(linkId=>{
+      const target = byId.get(linkId);
+      if(!target) return null;
+      const total = Number(target.valorContratado)||0;
+      const qtdCompartilhada = qtdVendidaPorLink[linkId]||0;
+      const valorUnit = qtdCompartilhada>0 ? total/qtdCompartilhada : 0;
+      return {linkId, label: target.subcategoria, grupo: target.grupo, total, qtdCompartilhada, valorUnit};
+    }).filter(Boolean);
+    const custoAlocadoLinks = sum(custoLinkInfos.map(info=> info.valorUnit*qtdVendida));
+    const custoAlocado = custoAlocadoProprio + custoAlocadoLinks;
     const margemReal = faturamento - custoAlocado;
     const margemPct = faturamento ? margemReal/faturamento : 0;
     return Object.assign({}, c, {
       orcInicial, orcAprovado, contratado, pago, saldo: contratado-pago, eac,
-      qtdComprada, qtdVendida, precoVendaUnit, custoUnitario, saldoUnidades, faturamento, custoAlocado, margemReal, margemPct,
+      qtdComprada, qtdVendida, precoVendaUnit, custoUnitario, saldoUnidades, faturamento,
+      custoLinks, custoLinkInfos, custoAlocadoProprio, custoAlocadoLinks, custoAlocado, margemReal, margemPct,
     });
   });
   const bac = sum(rows.map(r=>r.orcAprovado));
@@ -1792,6 +1829,15 @@ function itensVendidosSummary(){
   const margemTotal = sum(rows.map(({r})=>r.margemReal));
   const semVenda = rows.filter(({r})=> !r.qtdVendida);
   return {rows, faturamentoTotal, margemTotal, semVenda};
+}
+// ranking de margem por item (área de análise pedida: qual item teve a melhor e a pior margem) —
+// só considera item com pelo menos alguma venda lançada (margemPct de item sem venda é sempre 0,
+// o que não diz nada sobre a qualidade do item, só que ainda não foi vendido)
+function itensVendidosRanking(){
+  const iv = itensVendidosSummary();
+  const comVenda = iv.rows.filter(({r})=> r.qtdVendida>0);
+  const ranked = comVenda.slice().sort((a,b)=> b.r.margemPct - a.r.margemPct);
+  return {ranked, melhor: ranked[0]||null, pior: ranked.length>1 ? ranked[ranked.length-1] : null};
 }
 function computedCostValue(c){
   const base = computeScenario('base');
@@ -3193,11 +3239,16 @@ function costItemRow(scen, groupKey, idx, item){
   const nameId = mkId(`itemCatalog.${groupKey}.${idx}.label`);
   const valPath = `entradas.${scen}.${groupKey}.${item.key}`;
   const val = state.entradas[scen][groupKey][item.key] ?? 0;
-  return `<div class="costitem-row">
+  // draggable="true" + data-drag-item habilita "arrastar e soltar" pra mover o item pra outra
+  // categoria (ver costGroupBlock/wireCostDragDrop) — item travado por fórmula não pode ser movido
+  const dragAttrs = locked ? '' : ` draggable="true" data-drag-item="${groupKey}:${item.key}"`;
+  const handle = locked ? '' : `<span class="costitem-drag-handle" title="Arraste pra mover pra outra categoria">⠿</span>`;
+  return `<div class="costitem-row"${dragAttrs}>
+    ${handle}
     <input id="${nameId}" type="text" class="costitem-name" data-bind="itemCatalog.${groupKey}.${idx}.label" value="${esc(item.label)}">
     ${tblInput(valPath, val, {type:'number', cls:'costitem-val'})}
     ${locked
-      ? `<span class="costitem-lock" title="Item usado pelas fórmulas do modelo — não pode ser removido">🔒</span>`
+      ? `<span class="costitem-lock" title="Item usado pelas fórmulas do modelo — não pode ser removido nem movido">🔒</span>`
       : `<button class="rm" data-action="rmCostItem:${groupKey}:${idx}" data-confirm="Confirmar ✕" title="Remover item (clique 2x para confirmar)">✕</button>`}
   </div>`;
 }
@@ -3208,7 +3259,7 @@ function costItemRowOperacao(scen, idx, item){
   const obj = (raw && typeof raw==='object') ? raw : {qty:1, unitCost:Number(raw)||0};
   const total = opItemTotal(obj);
   const nameId = mkId(`itemCatalog.operacao.${idx}.label`);
-  return `<div class="costitem-row costitem-row-op">
+  return `<div class="costitem-row costitem-row-op" draggable="true" data-drag-item="operacao:${key}">
     <input id="${nameId}" type="text" class="costitem-name" data-bind="itemCatalog.operacao.${idx}.label" value="${esc(item.label)}">
     ${tblInput(`entradas.${scen}.operacao.${key}.qty`, obj.qty, {type:'number', cls:'costitem-val', step:'1'})}
     ${tblInput(`entradas.${scen}.operacao.${key}.unitCost`, obj.unitCost, {type:'number', cls:'costitem-val'})}
@@ -3226,7 +3277,10 @@ function costGroupBlock(scen, group){
   const rows = catalog.map((item,idx)=> isOp ? costItemRowOperacao(scen,idx,item) : costItemRow(scen, group.key, idx, item)).join('');
   const gIdx = state.costGroups.findIndex(g=>g.key===group.key);
   const nameId = mkId(`costGroups.${gIdx}.label`);
-  return `<div class="card" style="padding:16px 18px; margin-bottom:14px;">
+  // data-drop-group marca esse card como alvo de "soltar" um item arrastado de outra categoria
+  // (ver wireCostDragDrop) — o valor lançado em cada cenário migra junto (convertendo o formato de
+  // Operação, que guarda {qty,unitCost}, pra/de número simples das demais categorias)
+  return `<div class="card costgroup-card" data-drop-group="${group.key}" style="padding:16px 18px; margin-bottom:14px;">
     <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; gap:10px;">
       <input id="${nameId}" type="text" class="costgroup-name" data-bind="costGroups.${gIdx}.label" value="${esc(group.label)}" style="font-weight:700; font-size:14.5px; border:none; background:transparent; padding:2px 4px; flex:1 1 auto; min-width:0;">
       <span class="mono" style="font-weight:700; color:var(--accent-strong); white-space:nowrap;">${fmtCur(total)}</span>
@@ -3266,6 +3320,42 @@ function maoDeObraCell(scen, i, r){
     : tblInput(`entradas.${scen}.bebidas.${i}.custoOperacionalUnit`, r.custoOperacionalUnit, {type:'number', step:'0.1', cls:'num'});
   return `<div style="display:flex; flex-direction:column; gap:3px; align-items:flex-end; min-width:150px;">${valorTotalHtml}${chips}${addSelectHtml}</div>`;
 }
+// coluna "Custos vinculados" da aba Custos — mesmo padrão de chips do maoDeObraCell acima, só que
+// liga uma linha de Custos a OUTRAS linhas de Custos (em vez de Custos por categoria/Entradas PMO):
+// pra agregar o custo de mais de um item (ex.: Caipirinha agrega Cachaça + Limão + Açúcar), com o
+// valor de cada item vinculado rateado pela quantidade VENDIDA somada de tudo que usa ele (ver
+// computeCustosSummary). Não troca o campo manual de nada — fica junto do custo próprio do item.
+function custoLinksCell(cs, r){
+  const opts = cs.rows.filter(o=> o.id!==r.id).map(o=>({id:o.id, label:o.subcategoria, grupo:o.grupo}));
+  const linkedSet = new Set((r.custoLinks||[]).filter(Boolean));
+  const available = opts.filter(o=> !linkedSet.has(o.id));
+  const addSelectHtml = available.length ? `<select style="font-size:11px; width:100%; max-width:170px;" onchange="if(this.value){ undoSnapshotStart(); ACTIONS.addCustoLink('${r.id}', this.value); }">
+    <option value="">+ vincular custo…</option>
+    ${available.map(o=>`<option value="${o.id}">${esc(o.grupo)}: ${esc(o.label)}</option>`).join('')}
+  </select>` : '';
+  const infos = r.custoLinkInfos||[];
+  const chips = infos.map(info=>{
+    const compartilhado = info.qtdCompartilhada > r.qtdVendida;
+    return `<div class="hint" style="font-size:10px; display:flex; align-items:center; gap:4px; justify-content:flex-end; white-space:nowrap;" title="${esc(fmtCur2(info.total))} (${esc(info.grupo)}: ${esc(info.label)}) ÷ ${fmtInt(info.qtdCompartilhada)} un. vendidas${compartilhado ? ' no total, somando outras linhas vinculadas ao mesmo custo' : ''} = ${esc(fmtCur2(info.valorUnit))}/un.">
+      <span>${esc(info.label)} ${esc(fmtCur2(info.valorUnit))}${compartilhado ? ` (÷${fmtInt(info.qtdCompartilhada)})` : ''}</span>
+      <button class="rm" style="padding:0 3px;" data-action="rmCustoLink:${r.id}:${info.linkId}" title="Remover vínculo">✕</button>
+    </div>`;
+  }).join('');
+  return `<div style="display:flex; flex-direction:column; gap:3px; align-items:flex-end; min-width:150px;">${chips}${addSelectHtml}</div>`;
+}
+ACTIONS.addCustoLink = (rowId, linkedId)=>{
+  const c = state.custos.find(x=>x.id===rowId);
+  if(!c) return;
+  if(!Array.isArray(c.custoLinks)) c.custoLinks = [];
+  if(linkedId && linkedId!==rowId && !c.custoLinks.includes(linkedId)) c.custoLinks.push(linkedId);
+  saveState(); render();
+};
+ACTIONS.rmCustoLink = (rowId, linkedId)=>{
+  const c = state.custos.find(x=>x.id===rowId);
+  if(!c) return;
+  c.custoLinks = (c.custoLinks||[]).filter(l=> l!==linkedId);
+  saveState(); render();
+};
 VIEWS.entradas = function(){
   const scen = state.ui.scenTab.entradas;
   const e = state.entradas[scen];
@@ -3324,7 +3414,7 @@ VIEWS.entradas = function(){
       </div>
     </div>`;
   } else if(sec==='custos'){
-    body = `<div class="hint" style="margin-bottom:12px;">Clique no nome de uma categoria ou de um item para renomeá-lo, use "+ Adicionar item" para criar uma nova linha, ou ✕ para excluir — vale para os 3 cenários e não altera nenhum valor já lançado nos demais itens.</div>
+    body = `<div class="hint" style="margin-bottom:12px;">Clique no nome de uma categoria ou de um item para renomeá-lo, use "+ Adicionar item" para criar uma nova linha, ou ✕ para excluir — vale para os 3 cenários e não altera nenhum valor já lançado nos demais itens. Pra mover um item pra outra categoria, arraste pelo ⠿ e solte no card da categoria de destino — o valor lançado nos 3 cenários e o lançamento em Custos migram junto, nada se perde.</div>
       ${state.costGroups.map(g=>costGroupBlock(scen,g)).join('')}
       <button class="btn small" data-action="addCostGroup" style="margin-bottom:14px;">+ Nova categoria de custo</button>`;
   } else if(sec==='outros'){
@@ -3365,6 +3455,49 @@ VIEWS.entradas = function(){
   ${body}`;
 };
 ACTIONS.setEntradasSection = (id)=>{ state.ui.entradasSection = id; saveState(); render(); };
+// liga o arrastar-e-soltar da seção "Custo por categoria" (ver costItemRow/costGroupBlock) — chamada
+// automaticamente a cada render (ver render(), que procura VIEWS.<view>_wire). Guarda o item sendo
+// arrastado em variáveis locais (fechamento desta chamada) em vez de ler dataTransfer no "drop",
+// porque alguns navegadores restringem a leitura de dataTransfer fora do dragstart.
+function wireCostDragDrop(){
+  const view = $('#view');
+  if(!view) return;
+  let dragGroupKey = null, dragItemKey = null;
+  view.querySelectorAll('[data-drag-item]').forEach(el=>{
+    el.addEventListener('dragstart', e=>{
+      const [gk, ik] = el.dataset.dragItem.split(':');
+      dragGroupKey = gk; dragItemKey = ik;
+      el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try{ e.dataTransfer.setData('text/plain', el.dataset.dragItem); }catch(_){}
+    });
+    el.addEventListener('dragend', ()=>{ el.classList.remove('dragging'); });
+  });
+  view.querySelectorAll('[data-drop-group]').forEach(card=>{
+    card.addEventListener('dragover', e=>{
+      if(!dragGroupKey || card.dataset.dropGroup===dragGroupKey) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      card.classList.add('drag-over');
+    });
+    card.addEventListener('dragleave', e=>{ if(e.target===card) card.classList.remove('drag-over'); });
+    card.addEventListener('drop', e=>{
+      e.preventDefault();
+      card.classList.remove('drag-over');
+      const toGroupKey = card.dataset.dropGroup;
+      if(dragGroupKey && dragItemKey && toGroupKey && toGroupKey!==dragGroupKey){
+        undoSnapshotStart();
+        ACTIONS.moveCostItem(dragGroupKey, dragItemKey, toGroupKey);
+      }
+      dragGroupKey = null; dragItemKey = null;
+    });
+  });
+}
+VIEWS.entradas_wire = function(){
+  if(READONLY) return;
+  if((state.ui.entradasSection||'evento')!=='custos') return;
+  wireCostDragDrop();
+};
 // bebidas (consumo) saíram do modelo — "bebidas" (o nome do array em state, mantido pra não exigir
 // mais uma migração) só guarda ativações a partir de agora. qtdComprada começa em 0 — o usuário
 // preenche com a quantidade real investida nessa ativação, quando fizer sentido ter uma (ex.: 300
@@ -3431,6 +3564,48 @@ ACTIONS.rmCostItem = (groupKey, idx)=>{
   state.itemCatalog[groupKey].splice(Number(idx),1);
   SCEN.forEach(s=>{ delete state.entradas[s][groupKey][item.key]; });
   state.custos = state.custos.filter(c=> !(c.path[0]===groupKey && c.path[1]===item.key));
+  saveState(); render();
+};
+// move um item de custo de uma categoria pra outra (arrastar e soltar em Entradas PMO › Custo por
+// categoria, ver wireCostDragDrop) — leva junto o valor lançado nos 3 cenários e o lançamento
+// espelhado em Custos (path/grupo), sem perder nada do que já foi preenchido. Operação guarda o
+// valor como {qty,unitCost} (as demais categorias guardam um número simples), então a conversão
+// acontece nos dois sentidos: saindo de Operação vira o TOTAL (qty×unitCost) virando número; entrando
+// em Operação vira {qty:1, unitCost:<valor>}.
+ACTIONS.moveCostItem = (fromGroupKey, itemKey, toGroupKey)=>{
+  if(!fromGroupKey || !toGroupKey || fromGroupKey===toGroupKey) return;
+  if((PROTECTED_COST_KEYS[fromGroupKey]||[]).includes(itemKey)) return; // defesa extra — UI já não deixa arrastar
+  const fromCatalog = state.itemCatalog[fromGroupKey];
+  const toCatalog = state.itemCatalog[toGroupKey];
+  if(!fromCatalog || !toCatalog) return;
+  const idx = fromCatalog.findIndex(it=> it.key===itemKey);
+  if(idx<0) return;
+  if(toCatalog.some(it=> it.key===itemKey)) return; // colisão de chave (não deveria acontecer)
+  const item = fromCatalog[idx];
+  fromCatalog.splice(idx,1);
+  toCatalog.push(item);
+  SCEN.forEach(s=>{
+    const e = state.entradas[s];
+    if(!e[toGroupKey]) e[toGroupKey] = {};
+    let val = e[fromGroupKey] ? e[fromGroupKey][itemKey] : undefined;
+    if(fromGroupKey==='operacao'){
+      const obj = (val && typeof val==='object') ? val : {qty:1, unitCost:Number(val)||0};
+      val = toGroupKey==='operacao' ? obj : opItemTotal(obj);
+    } else if(toGroupKey==='operacao'){
+      val = {qty:1, unitCost:Number(val)||0};
+    } else if(val==null){
+      val = 0;
+    }
+    if(e[fromGroupKey]) delete e[fromGroupKey][itemKey];
+    e[toGroupKey][itemKey] = val;
+  });
+  const toGroup = state.costGroups.find(g=>g.key===toGroupKey);
+  state.custos.forEach(c=>{
+    if(c.path[0]===fromGroupKey && c.path[1]===itemKey){
+      c.path = [toGroupKey, itemKey];
+      if(toGroup) c.grupo = toGroup.label;
+    }
+  });
   saveState(); render();
 };
 
@@ -3521,6 +3696,7 @@ VIEWS.vendas = function(){
   const ativacaoRows = ativacaoTableRows(scen);
   const at = computeAtivacoes(scen);
   const iv = itensVendidosSummary();
+  const ranking = itensVendidosRanking();
   const ivRows = iv.rows.map(({r,i})=>{
     const semVenda = !r.qtdVendida;
     return `<tr${semVenda ? ' style="background:var(--warn-soft);"' : ''}>
@@ -3590,6 +3766,33 @@ VIEWS.vendas = function(){
       </table>
     </div>
     ${iv.semVenda.length ? `<div class="hint" style="margin-top:8px; color:var(--warn);">⚠ ${iv.semVenda.length} item${iv.semVenda.length>1?'s':''} comprado${iv.semVenda.length>1?'s':''} sem nenhuma venda lançada ainda — confira se entra mesmo como custo sem faturamento.</div>` : ''}
+  </div>
+
+  <div class="section">
+    <h2>Análise de margem por item ${infoIcon('Ranking de todo item vendido (pelo menos 1 unidade lançada em "Itens vendidos" acima), da melhor pra pior margem percentual. Use pra decidir o que vale continuar comprando/vendendo e o que está no vermelho. Um item pode agregar o custo de um ou mais OUTROS itens de Custos (coluna "Custos vinculados", na aba Custos) — útil pra insumo compartilhado entre vários itens (ex.: Gelo usado por Caipirinha e Mojito): o valor total desse insumo é rateado entre os itens que o usam pela quantidade VENDIDA de cada um.')}</h2>
+    ${ranking.ranked.length ? `
+      <div class="gridN" style="margin-bottom:12px;">
+        <div class="kpi" style="border-color:var(--good);"><div class="lbl">🏆 Melhor margem</div><div class="kpi-value" style="font-size:16px;">${esc(ranking.melhor.r.subcategoria)}</div><div class="hint">${fmtPct(ranking.melhor.r.margemPct)} · ${fmtCur(ranking.melhor.r.margemReal)}</div></div>
+        ${ranking.pior ? `<div class="kpi" style="border-color:var(--bad);"><div class="lbl">⚠ Pior margem</div><div class="kpi-value" style="font-size:16px;">${esc(ranking.pior.r.subcategoria)}</div><div class="hint">${fmtPct(ranking.pior.r.margemPct)} · ${fmtCur(ranking.pior.r.margemReal)}</div></div>` : ''}
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>#</th><th>Item</th><th class="num">Qtd. vendida</th><th class="num">Faturamento</th><th class="num">Custo alocado</th><th class="num">Margem</th><th class="num">Margem %</th></tr></thead>
+          <tbody>${ranking.ranked.map(({r},pos)=>{
+            const destaque = pos===0 ? 'var(--good-soft)' : (ranking.ranked.length>1 && pos===ranking.ranked.length-1) ? 'var(--bad-soft)' : 'transparent';
+            return `<tr style="background:${destaque};">
+              <td class="mono">${pos+1}</td>
+              <td>${esc(r.subcategoria)} <span class="hint">(${esc(r.grupo)})</span></td>
+              <td class="num mono">${fmtInt(r.qtdVendida)}</td>
+              <td class="num mono">${fmtCur(r.faturamento)}</td>
+              <td class="num mono">${fmtCur(r.custoAlocado)}</td>
+              <td class="num mono" style="color:${r.margemReal>=0?'var(--good)':'var(--bad)'};">${fmtCur(r.margemReal)}</td>
+              <td class="num mono">${fmtPct(r.margemPct)}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>
+    ` : `<div class="hint">Lance "Qtd. comprada" em Custos e registre alguma venda em "Itens vendidos" acima pra começar a ver o ranking de margem.</div>`}
   </div>
 
   <div class="section">
@@ -4020,6 +4223,7 @@ VIEWS.custos = function(){
       <td><input type="checkbox" data-action="toggleCustoSelect:${r.id}" ${selected[r.id]?'checked':''} title="Selecionar pra replicar data em lote"></td>
       <td>${r.subcategoria}</td>
       <td class="num">${tblInput(`custos.${i}.qtdComprada`, r.qtdComprada, {type:'number', step:'1', cls:'num'})}</td>
+      <td>${custoLinksCell(cs, r)}</td>
       <td>${tblInput(`custos.${i}.fornecedor`, r.fornecedor)}</td>
       <td class="num mono">${fmtCur(r.orcInicial)}</td>
       <td class="num">${tblInput(`custos.${i}.orcamentoAprovado`, Math.round(r.orcAprovado), {type:'number', cls:'num'})}</td>
@@ -4036,7 +4240,7 @@ VIEWS.custos = function(){
     </tr>`;
   };
   const rows = groupOrder.map(grupo=>
-    `<tr class="section-hdr-row"><td colspan="16">${grupo}</td></tr>` + byGroup.get(grupo).map(({r,i})=>rowHtml(r,i)).join('')
+    `<tr class="section-hdr-row"><td colspan="17">${grupo}</td></tr>` + byGroup.get(grupo).map(({r,i})=>rowHtml(r,i)).join('')
   ).join('');
 
   const atrasados = custosAtrasados(cs.rows);
@@ -4074,11 +4278,11 @@ VIEWS.custos = function(){
 
   <div class="tablewrap">
     <table>
-      <thead><tr><th><input type="checkbox" data-action="toggleCustoSelectAll" ${allSelected?'checked':''} title="Selecionar/limpar todos"></th><th>Subcategoria</th><th class="num">Qtd. comprada</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th>Origem do pagamento</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th><th>Data de pagamento</th><th>Vencimento</th><th>Comprovante</th></tr></thead>
+      <thead><tr><th><input type="checkbox" data-action="toggleCustoSelectAll" ${allSelected?'checked':''} title="Selecionar/limpar todos"></th><th>Subcategoria</th><th class="num">Qtd. comprada</th><th>Custos vinculados</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th>Origem do pagamento</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th><th>Data de pagamento</th><th>Vencimento</th><th>Comprovante</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>
-  <div class="hint" style="margin-top:8px;">Em "Qtd. comprada", informe a quantidade de unidades desse item (ex.: 15 Coca Zero) só se ele for revendido/controlado por unidade — deixe em branco/0 pra custos sem controle de quantidade (ex.: DJ, estrutura). Item com Qtd. comprada preenchida aparece automaticamente na aba <strong>Vendas › Itens vendidos</strong>, onde você lança quanto foi vendido de fato e o preço, pra ver o saldo (estoque) e a margem real. Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
+  <div class="hint" style="margin-top:8px;">Em "Qtd. comprada", informe a quantidade de unidades desse item (ex.: 15 Coca Zero) só se ele for revendido/controlado por unidade — deixe em branco/0 pra custos sem controle de quantidade (ex.: DJ, estrutura). Item com Qtd. comprada preenchida aparece automaticamente na aba <strong>Vendas › Itens vendidos</strong>, onde você lança quanto foi vendido de fato e o preço, pra ver o saldo (estoque) e a margem real. Em "Custos vinculados", agregue um ou mais OUTROS itens de Custos cujo valor compõe o custo real deste (ex.: Caipirinha vinculada a Cachaça + Limão + Açúcar + Copo) — se o mesmo item vinculado (ex.: Gelo) for usado por mais de uma linha, seu valor total é rateado entre elas pela quantidade VENDIDA de cada uma, aparecendo também na análise de margem em Vendas. Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
   <input type="file" id="custoComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
 };
 ACTIONS.toggleCustoSelect = (id)=>{
