@@ -1296,6 +1296,41 @@ function migrateState(){
       delete b.maoDeObraLink;
     });
   });
+  // aposentadoria das bebidas (tipo:'bebida') do catálogo de Entradas PMO — o controle de consumo
+  // por item saiu de lá e virou um custo "normal" na aba Custos, com Qtd. comprada/Preço de venda
+  // (ver Custos > Qtd. comprada e Vendas > Itens vendidos). Pra não perder o que já tinha sido
+  // lançado, cada item vira uma linha normal de Custos (preserva Qtd. comprada/Preço de venda já
+  // existentes) e some do catálogo, que a partir de agora só guarda ativações.
+  {
+    const bebidasBase = (state.entradas.base && state.entradas.base.bebidas) || [];
+    bebidasBase.filter(b=> b.tipo!=='ativacao').forEach(b=>{
+      const custo = (state.custos||[]).find(c=> c.path[0]==='marketing' && c.path[1]==='ativacao_'+b.id);
+      if(custo){
+        if(!custo.qtdComprada) custo.qtdComprada = Number(b.qtdComprada)||0;
+        if(!custo.precoVendaUnit) custo.precoVendaUnit = Number(b.precoVenda)||0;
+        // "graduado" pra custo normal (mesma convenção de path de um item criado via
+        // addCostItem) — não fica mais marcado como "ativacao_<id>", que a limpeza de órfãos logo
+        // abaixo apagaria (a bebida que o criou está sendo removida de propósito agora, não é bug)
+        custo.path = ['marketing', 'item_'+b.id];
+      }
+    });
+    SCEN.forEach(s=>{
+      if(state.entradas[s] && state.entradas[s].bebidas) state.entradas[s].bebidas = state.entradas[s].bebidas.filter(b=> b.tipo==='ativacao');
+    });
+  }
+  // limpeza de custos "orfãos": ACTIONS.rmBebida (antes desta correção) removia o item do catálogo
+  // mas não a linha de custo que syncAtivacaoCustos tinha sincronizado pra ele — toda vez que um
+  // item de bebida/ativação era removido, a linha ficava presa em Custos > Marketing pra sempre,
+  // sem nenhum item do catálogo que a gerasse, dando a impressão de itens duplicados/soltos ali.
+  // Remove aqui qualquer linha "ativacao_<id>" cujo id não é mais de nenhuma bebida/ativação do
+  // cenário Base (único cenário que syncAtivacaoCustos sincroniza).
+  {
+    const idsAtivos = new Set(((state.entradas.base&&state.entradas.base.bebidas)||[]).map(b=>b.id));
+    state.custos = (state.custos||[]).filter(c=>{
+      if(c.path[0]!=='marketing' || !(c.path[1]||'').startsWith('ativacao_')) return true;
+      return idsAtivos.has(c.path[1].slice('ativacao_'.length));
+    });
+  }
   // mapa de mesas (Feijoada do Bloco) — estados salvos antes disso nao tem essa lista; se ja
   // existir mas com menos de 100 (ex.: versao antiga com outro numero), completa o que falta
   if(!state.mesasFeijoada) state.mesasFeijoada = freshMesasFeijoada();
@@ -1648,16 +1683,12 @@ function computeScenario(scen, overrides){
   const receitaIngressos = pagantes * v.ticketMedio * ticketFactor;
   const custoTaxaIngressos = receitaIngressos * taxaTotal;
 
-  // se houver catalogo detalhado de bebidas cadastrado, ele substitui a estimativa simplificada —
-  // cada item do catalogo ja tem seu proprio "Nº de pessoas" embutido no total (um passaporte de
-  // criança nao escala com o total de pagantes do evento), entao o total do catalogo NAO é
-  // multiplicado de novo pelo total de pagantes; so a estimativa simplificada (sem catalogo) continua
-  // escalando pelo total de pagantes, por ser uma média geral por pessoa
+  // bebidas (consumo) saíram do modelo de cenário — não há mais estimativa de bar por pessoa nem
+  // catálogo de bebida; só sobram itens tipo "ativação" no catálogo (ver bebidaCalc), cada um já
+  // ponderado pela sua Probabilidade — "at" (computeAtivacoes) abaixo é só pra expor os KPIs de
+  // Vendas, NUNCA soma de novo aqui, senão duplicaria a receita/margem
   const beb = computeBebidas(scen);
-  const margemConsumoTotal = beb.ativo ? beb.margemCatalogoTotal : e.consumoBruto*(1-e.custoOpConsumoPct)*pagantes;
-  // itens tipo "ativação" do catálogo já entram aqui dentro de margemConsumoTotal (ver bebidaCalc,
-  // que pondera cada um pela Probabilidade) — "at" (computeAtivacoes) abaixo é só pra expor os
-  // KPIs de Vendas, NUNCA soma de novo aqui, senão duplicaria a receita/margem
+  const margemConsumoTotal = beb.margemCatalogoTotal;
   const receitaConsumo = margemConsumoTotal * consumoFactor;
   const margemConsumoPP = pagantes ? margemConsumoTotal/pagantes : 0;
 
@@ -1700,7 +1731,7 @@ function computeScenario(scen, overrides){
 
   return {
     scen, pagantes, publicoTotal, ocupacao, ticketMedio: v.ticketMedio*ticketFactor,
-    receitaIngressos, receitaConsumo, margemConsumoPP, bebidasAtivas: beb.ativo, patrocinio, outras, receitaTotal,
+    receitaIngressos, receitaConsumo, margemConsumoPP, patrocinio, outras, receitaTotal,
     custoTotal, resultado, margem, receitaPP, custoPP, contribPP, beSem, beCom, pctCapBe, mseg,
     patroMin, cobertura, status, classif,
     patroContratado: p.contratado, patroPipeline: p.pipeline, patroNominal: p.nominal, nCotas: p.nCotas,
@@ -1715,19 +1746,34 @@ function allScenarios(){ const r={}; SCEN.forEach(s=> r[s]=computeScenario(s)); 
 
 function computeCustosSummary(){
   const rows = state.custos.map(c=>{
-    // linha de custo vinculada a um item do catálogo de bebidas/ativações (ver syncAtivacaoCustos,
-    // vale pros dois tipos) não tem um "orçamento inicial" em Entradas PMO pra puxar — o path
-    // aponta pro ID do item, não pra uma chave real de state.entradas.base.marketing — fica 0,
-    // igual a um item novo de custo sem orçamento
+    // linha de custo vinculada a uma ativação (ver syncAtivacaoCustos) ou já "aposentada" de um
+    // item de bebida (ver migrateState) não tem um "orçamento inicial" real em Entradas PMO pra
+    // puxar — o path não aponta pra uma chave real de state.entradas.base.marketing — fica 0,
+    // igual a um item novo de custo sem orçamento (??0 cobre qualquer path que não resolva a nada)
     const orcInicial = c.computed ? computedCostValue(c)
-      : (c.path[1]||'').startsWith('ativacao_') ? 0
       : c.path[0]==='operacao' ? opItemTotal(getPath(state.entradas.base, c.path))
-      : getPath(state.entradas.base, c.path);
+      : (getPath(state.entradas.base, c.path) ?? 0);
     const orcAprovado = (c.orcamentoAprovado==null) ? orcInicial : Number(c.orcamentoAprovado);
     const contratado = Number(c.valorContratado)||0;
     const pago = Number(c.valorPago)||0;
     const eac = Math.max(orcAprovado, contratado);
-    return Object.assign({}, c, {orcInicial, orcAprovado, contratado, pago, saldo: contratado-pago, eac});
+    // controle de venda por item (opcional — só faz sentido pra item com "Qtd. comprada" > 0,
+    // ex.: bebidas/material revendido): custoUnitario vem do valor CONTRATADO (igual EAC, é a
+    // melhor estimativa de custo mesmo antes de pago 100%); custoAlocado só cobra o que foi de
+    // fato vendido (qtdVendida), deixando estoque parado fora da margem realizada
+    const qtdComprada = Number(c.qtdComprada)||0;
+    const qtdVendida = Number(c.qtdVendida)||0;
+    const precoVendaUnit = Number(c.precoVendaUnit)||0;
+    const custoUnitario = qtdComprada>0 ? contratado/qtdComprada : 0;
+    const saldoUnidades = qtdComprada - qtdVendida;
+    const faturamento = qtdVendida*precoVendaUnit;
+    const custoAlocado = qtdVendida*custoUnitario;
+    const margemReal = faturamento - custoAlocado;
+    const margemPct = faturamento ? margemReal/faturamento : 0;
+    return Object.assign({}, c, {
+      orcInicial, orcAprovado, contratado, pago, saldo: contratado-pago, eac,
+      qtdComprada, qtdVendida, precoVendaUnit, custoUnitario, saldoUnidades, faturamento, custoAlocado, margemReal, margemPct,
+    });
   });
   const bac = sum(rows.map(r=>r.orcAprovado));
   const ac = sum(rows.map(r=>r.pago));
@@ -1735,6 +1781,17 @@ function computeCustosSummary(){
   const eac = sum(rows.map(r=>r.eac));
   const etc = eac-ac; const vac = bac-eac;
   return {rows, bac, ac, committed, eac, etc, vac, pctComprom: bac?committed/bac:0, pctPago: bac?ac/bac:0};
+}
+// itens de Custos marcados como "controlados por unidade" (Qtd. comprada > 0) — mesma lista usada
+// pra lançar as vendas realizadas (aba Vendas › Itens vendidos) e pra análise de margem por item.
+// Não depende de cenário: é controle real, igual o resto da aba Custos.
+function itensVendidosSummary(){
+  const cs = computeCustosSummary();
+  const rows = cs.rows.map((r,i)=>({r,i})).filter(({r})=> r.qtdComprada>0);
+  const faturamentoTotal = sum(rows.map(({r})=>r.faturamento));
+  const margemTotal = sum(rows.map(({r})=>r.margemReal));
+  const semVenda = rows.filter(({r})=> !r.qtdVendida);
+  return {rows, faturamentoTotal, margemTotal, semVenda};
 }
 function computedCostValue(c){
   const base = computeScenario('base');
@@ -2060,10 +2117,9 @@ function syncAtivacaoCustos(){
       }
       return;
     }
-    const rotulo = b.tipo==='ativacao' ? 'ativação' : 'bebida';
     state.custos.push({
       id:uid(), grupo:'Marketing', path:['marketing', pathKey], subcategoria: b.nome||'Item do catálogo', computed:false,
-      fornecedor:'', descricao:`Custo de compra/execução — ${rotulo} cadastrada em Entradas PMO › Consumo/ativações`,
+      fornecedor:'', descricao:`Custo de compra/execução — ativação cadastrada em Vendas › Ativações`,
       orcamentoAprovado:null, valorContratado: valorAuto, valorContratadoAuto: valorAuto, valorPago:0,
       dataPrevista:'', dataPagamento:'', status:'Não iniciado', comprovantes:[],
       responsavel:'Marketing', obs:'',
@@ -2638,7 +2694,7 @@ VIEWS.dashboard = function(){
         <div class="kv total saldo-kpi-clickable" data-action="openScenarioBreakdown:${scen}:receita" title="Clique para ver de onde vem"><span class="k">Receita total 🔎</span><span class="v">${fmtCur(c.receitaTotal)}</span></div>
         <div class="kv"><span class="k">↳ Ingressos</span><span class="v">${fmtCur(c.receitaIngressos)}</span></div>
         <div class="kv"><span class="k">↳ Patrocínio</span><span class="v">${fmtCur(c.patrocinio)}</span></div>
-        <div class="kv"><span class="k">↳ Consumo/ativações</span><span class="v">${fmtCur(c.receitaConsumo)}</span></div>
+        <div class="kv"><span class="k">↳ Ativações</span><span class="v">${fmtCur(c.receitaConsumo)}</span></div>
         <div class="kv total saldo-kpi-clickable" data-action="openScenarioBreakdown:${scen}:custo" title="Clique para ver de onde vem"><span class="k">Custo total 🔎</span><span class="v">${fmtCur(c.custoTotal)}</span></div>
         <div class="kv total"><span class="k">Resultado</span><span class="v" style="color:${c.resultado>=0?'var(--good)':'var(--bad)'}">${fmtCur(c.resultado)}</span></div>
         <div class="kv"><span class="k">Margem líquida</span><span class="v">${fmtPct(c.margem)}</span></div>
@@ -2816,7 +2872,7 @@ function scenarioBreakdownLightbox(){
     linhas = [
       ['Ingressos vendidos', c.receitaIngressos, `${fmtInt(c.pagantes)} pagantes × ${fmtCur2(c.ticketMedio)} de ticket médio (bruto, antes das taxas)`],
       ['Patrocínio', c.patrocinio, `pipeline ponderado pela probabilidade de cada cota — contratado: ${fmtCur(c.patroContratado)}, em negociação: ${fmtCur(c.patroPipeline)}`],
-      ['Consumo/ativações', c.receitaConsumo, c.bebidasAtivas ? 'soma da margem de cada item do catálogo de bebidas/ativações, já considerando o nº de pessoas de cada item' : 'margem estimada por pessoa × pagantes'],
+      ['Ativações', c.receitaConsumo, 'soma da margem ponderada pela probabilidade de cada ativação cadastrada em Vendas'],
       ['Outras receitas', c.outras, 'valor fixo lançado em Entradas PMO'],
     ];
     total = c.receitaTotal;
@@ -3216,7 +3272,7 @@ VIEWS.entradas = function(){
   const cs = computeScenario(scen);
   const sec = state.ui.entradasSection || 'evento';
   const SECTIONS = [
-    ['evento','Evento'], ['ingressos','Ingressos'], ['patrocinio','Patrocínio'], ['consumo','Consumo/ativações'],
+    ['evento','Evento'], ['ingressos','Ingressos'], ['patrocinio','Patrocínio'],
     ['custos','Custos por categoria'], ['outros','Outros'],
   ];
 
@@ -3267,62 +3323,6 @@ VIEWS.entradas = function(){
         <div>${readonlyRow('Cobertura do cachê', fmtPct(cs.cobertura))}</div>
       </div>
     </div>`;
-  } else if(sec==='consumo'){
-    const bebCalc = computeBebidas(scen);
-    const bebRows = bebCalc.rows.map((r,i)=>{
-      const custo = scen==='base' ? ativacaoCustoLink(r.id) : null;
-      const custoCell = scen!=='base'
-        ? `<span class="hint">só no cenário Base</span>`
-        : custo
-          ? `${fmtCur(custo.valorPago)} de ${fmtCur(custo.valorContratado)} ${pagamentoStatusBadge(custo.dataPagamento, custo.dataPrevista)}`
-          : `<span class="hint">—</span>`;
-      return `<tr>
-      <td><select id="${mkId('entradas.'+scen+'.bebidas.'+i+'.tipo')}" data-bind="entradas.${scen}.bebidas.${i}.tipo">
-        <option value="bebida" ${r.tipo!=='ativacao'?'selected':''}>Bebida</option>
-        <option value="ativacao" ${r.tipo==='ativacao'?'selected':''}>Ativação</option>
-      </select></td>
-      <td>${tblInput(`entradas.${scen}.bebidas.${i}.nome`, r.nome)}</td>
-      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.custoUnit`, r.custoUnit, {type:'number', step:'0.1', cls:'num'})}</td>
-      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.precoVenda`, r.precoVenda, {type:'number', step:'0.1', cls:'num'})}</td>
-      <td class="num">${maoDeObraCell(scen, i, r)}</td>
-      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.taxaCartaoPct`, Math.round(r.taxaCartaoPct*1000)/10, {type:'number', step:'0.1', cls:'num', kind:'pct'})}</td>
-      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.qtdComprada`, r.qtdComprada, {type:'number', step:'1', cls:'num'})}</td>
-      <td class="num">${r.tipo==='ativacao' ? tblInput(`entradas.${scen}.bebidas.${i}.prob`, Math.round((Number(r.prob)||0)*1000)/10, {type:'number', step:'1', cls:'num', kind:'pct', width:'62px'}) : '<span class="hint">—</span>'}</td>
-      <td class="num mono">${fmtCur2(r.margemUnit)}</td>
-      <td class="num mono">${fmtPct(r.margemPct)}</td>
-      <td class="num mono">${fmtCur2(r.margemItemTotal)}</td>
-      <td style="font-size:12px; white-space:nowrap;">${custoCell}</td>
-      <td><button class="rm" data-action="rmBebida:${scen}:${i}" title="Remover bebida/ativação">✕</button></td>
-    </tr>`;
-    }).join('');
-    body = `<div class="section" style="margin:0 0 16px;">
-      <h3 style="margin:0 0 6px; font-size:14.5px;">Catálogo detalhado de bebidas/ativações</h3>
-      <div class="hint">Cadastre cada tipo de bebida (ou ativação) com custo do produto, preço de venda, mão de obra operacional para servir e taxa de cartão. Em "Quantidade comprada", informe o total de UNIDADES QUE VOCÊ REALMENTE COMPROU desse item (ex.: 24 latas de cerveja, 300 copos) — não uma estimativa de quantas pessoas vão consumir. É assim que a margem/custo aqui batem com o material de verdade investido (nota fiscal, comprovante em Custos), pra você ver o lucro sobre o que foi comprado. Em "Mão de obra/unid.", dá pra <strong>vincular um ou mais itens</strong> de <strong>Custos por categoria</strong> (ex.: "Operação: Garçons", 2 pessoas × R$100 cada = R$200) em vez de digitar um valor solto — o sistema divide automaticamente esse total pela Quantidade comprada (R$200 ÷ 100 cervejas = R$2,00/un.) e mantém os dois sempre batendo; precisando de mais de uma equipe na mesma bebida (ex.: Garçons + Monitores), vincule os dois que o valor mostrado soma os dois. Se <strong>mais de uma linha vincular o mesmo item</strong> (ex.: Heineken e refrigerante vinculados à mesma equipe de bar), o custo dessa equipe é <strong>rateado pela soma das Quantidades compradas das duas</strong> — 100 Heineken + 100 refri = 200 unidades, R$200 ÷ 200 = R$1,00/un. pra cada uma das duas linhas (nunca R$2,00/un. pra cada, que dobraria o custo real da equipe no total do evento). Remova um vínculo (✕) a qualquer momento pra voltar a digitar o valor manualmente. A margem total do item é calculada automaticamente, e essa mesma linha alimenta todas as outras abas que dependem dela (Vendas › Ativações, Custos › Marketing, Fluxo de Caixa, Dashboard, Orçamento x Real) — sem precisar lançar de novo em nenhuma delas. Itens marcados <strong>Tipo: Ativação</strong> ganham Probabilidade (pondera receita e margem, igual Patrocínio) e aparecem automaticamente na aba <strong>Vendas › Ativações</strong>, onde dá pra marcar Estágio (se ocorreu ou não) e lançar parcelas reais — sem duplicar o lançamento. Para <strong>qualquer item</strong> (bebida ou ativação), o custo real de compra/execução também vira automaticamente uma linha rastreável em <strong>Custos › Marketing</strong>, onde você lança fornecedor, valor pago, datas e anexa o(s) comprovante(s) — a coluna "Custo (Base)" abaixo mostra o status dessa linha sem precisar trocar de aba. Ao cadastrar pelo menos 1 item aqui, o catálogo substitui a estimativa simplificada abaixo.</div>
-      <div class="tablewrap" style="margin-top:10px;">
-        <table>
-          <thead><tr><th>Tipo</th><th>Bebida/ativação</th><th class="num">Custo unit. (R$)</th><th class="num">Preço venda (R$)</th><th class="num">Mão de obra/unid. (R$)</th><th class="num">Taxa cartão (%)</th><th class="num">Quantidade comprada</th><th class="num">Prob. %</th><th class="num">Margem unit.</th><th class="num">Margem %</th><th class="num">Margem total</th><th>Custo (Base)</th><th></th></tr></thead>
-          <tbody>${bebRows || `<tr><td colspan="13" class="hint">Nenhuma bebida cadastrada — usando a estimativa simplificada abaixo.</td></tr>`}</tbody>
-          ${bebCalc.rows.length ? `<tfoot><tr><td colspan="10">Total</td><td class="num mono">${fmtCur2(bebCalc.margemCatalogoTotal)}</td><td></td><td></td></tr></tfoot>` : ''}
-        </table>
-      </div>
-      <button class="btn small" style="margin-top:10px;" data-action="addBebida:${scen}">+ Adicionar bebida/ativação</button>
-    </div>
-    <div class="grid2">
-      <div class="card" style="padding:16px 18px;">
-        <h3 style="margin:0 0 10px; font-size:14.5px;">Estimativa simplificada${bebCalc.ativo ? ' <span class="hint">(inativa — há bebidas cadastradas acima)</span>' : ''}</h3>
-        <div class="gridN">
-          ${fld('Consumo médio bruto por pessoa', `entradas.${scen}.consumoBruto`, {kind:'currency', step:'0.5'})}
-          ${fld('Custo operacional do consumo', `entradas.${scen}.custoOpConsumoPct`, {kind:'pct'})}
-          ${fld('Outras receitas', `entradas.${scen}.outrasReceitas`, {kind:'currency'})}
-        </div>
-      </div>
-      <div class="card" style="padding:16px 18px;">
-        <h3 style="margin:0 0 10px; font-size:14.5px;">Calculado (usado no cenário)</h3>
-        ${readonlyRow(bebCalc.ativo ? 'Margem líquida por pessoa (média, total ÷ pagantes)' : 'Margem líquida por pessoa', fmtCur2(cs.margemConsumoPP))}
-        ${readonlyRow('Receita líquida de consumo/ativações', fmtCur(cs.receitaConsumo))}
-        ${bebCalc.ativo ? `<div class="hint" style="margin-top:8px;">Vem da soma do catálogo acima, já considerando o "Nº de pessoas" de cada item — não é mais multiplicado pelo total de pagantes do evento.</div>` : ''}
-      </div>
-    </div>`;
   } else if(sec==='custos'){
     body = `<div class="hint" style="margin-bottom:12px;">Clique no nome de uma categoria ou de um item para renomeá-lo, use "+ Adicionar item" para criar uma nova linha, ou ✕ para excluir — vale para os 3 cenários e não altera nenhum valor já lançado nos demais itens.</div>
       ${state.costGroups.map(g=>costGroupBlock(scen,g)).join('')}
@@ -3338,6 +3338,7 @@ VIEWS.entradas = function(){
           ${fld('Taxas bancárias', `entradas.${scen}.outros.taxasBancarias`, {kind:'pct'})}
           ${fld('Comissões sobre vendas', `entradas.${scen}.outros.comissoes`, {kind:'pct'})}
           ${fld('Reserva de contingência', `entradas.${scen}.outros.contingenciaPct`, {kind:'pct'})}
+          ${fld('Outras receitas', `entradas.${scen}.outrasReceitas`, {kind:'currency'})}
         </div>
         <div class="hint" style="margin-top:8px;">Open bar é cobrado sobre a CAPACIDADE do evento (não só sobre os pagantes) e fica fora da contingência — mesma regra da planilha original.</div>
       </div>
@@ -3364,14 +3365,21 @@ VIEWS.entradas = function(){
   ${body}`;
 };
 ACTIONS.setEntradasSection = (id)=>{ state.ui.entradasSection = id; saveState(); render(); };
-ACTIONS.addBebida = (scen)=>{
-  // qtdComprada começa em 0 — o usuário preenche com a quantidade real que vai comprar desse item
-  // (ex.: 24 latas de cerveja), não uma estimativa por pessoa
-  state.entradas[scen].bebidas.push({id:uid(), nome:'Nova bebida', tipo:'bebida', custoUnit:0, precoVenda:0, custoOperacionalUnit:0, taxaCartaoPct:0, qtdComprada:0, maoDeObraLinks:[], prob:1, estagio:'Prospecção', parcelas:[]});
+// bebidas (consumo) saíram do modelo — "bebidas" (o nome do array em state, mantido pra não exigir
+// mais uma migração) só guarda ativações a partir de agora. qtdComprada começa em 0 — o usuário
+// preenche com a quantidade real investida nessa ativação, quando fizer sentido ter uma (ex.: 300
+// camisas de uma ativação de patrocinador).
+ACTIONS.addAtivacao = (scen)=>{
+  state.entradas[scen].bebidas.push({id:uid(), nome:'Nova ativação', tipo:'ativacao', custoUnit:0, precoVenda:0, custoOperacionalUnit:0, taxaCartaoPct:0, qtdComprada:0, maoDeObraLinks:[], prob:1, estagio:'Prospecção', parcelas:[]});
   saveState(); render();
 };
 ACTIONS.rmBebida = (scen, idx)=>{
+  const b = state.entradas[scen].bebidas[Number(idx)];
   state.entradas[scen].bebidas.splice(Number(idx),1);
+  // remove junto a linha de custo sincronizada (ver syncAtivacaoCustos) — sem isso ela ficava
+  // orfã pra sempre em Custos > Marketing, mesmo sem nenhum item do catálogo que a gerou, dando a
+  // impressão de itens "duplicados"/soltos que não existem no catálogo de Entradas PMO
+  if(b) state.custos = state.custos.filter(c=> !(c.path[0]==='marketing' && c.path[1]==='ativacao_'+b.id));
   saveState(); render();
 };
 // vincula/desvincula um item de Custos por categoria na "Mão de obra/unid." de uma bebida/ativação
@@ -3436,10 +3444,9 @@ function ativacaoParcelaSummary(a){
   const pago = sum(parcelas.filter(p=>p.dataPagamento).map(p=> Number(p.valor)||0));
   return {total, pago, pendente: total-pago, n: parcelas.length};
 }
-// Custo vinculado de um item do catálogo de bebidas/ativações, bebida ou ativação (ver
-// syncAtivacaoCustos) — só existe no cenário Base, mesma convenção de patrocínio/lib/cash.js
-// (dinheiro real só é rastreado no cenário Base). Usado tanto na tabela de Ativações (Vendas)
-// quanto no catálogo completo (Entradas PMO › Consumo/ativações).
+// Custo vinculado de uma ativação (ver syncAtivacaoCustos) — só existe no cenário Base, mesma
+// convenção de patrocínio/lib/cash.js (dinheiro real só é rastreado no cenário Base). Usado na
+// tabela de Ativações (Vendas).
 function ativacaoCustoLink(itemId){
   return (state.custos||[]).find(c=> c.path[0]==='marketing' && c.path[1]==='ativacao_'+itemId);
 }
@@ -3452,7 +3459,7 @@ function ativacaoTableRows(scen){
   const openParc = state.ui.ativacaoParcelasOpen || {};
   const bebidas = (state.entradas[scen]||{}).bebidas||[];
   return bebidas.map((a,i)=> ({a,i})).filter(x=> x.a.tipo==='ativacao').map(({a,i})=>{
-    const calc = bebidaCalc(a, scen);
+    const calc = Object.assign({}, a, bebidaCalc(a, scen));
     const asum = ativacaoParcelaSummary(a);
     const isParcOpen = !!openParc[a.id];
     const custo = scen==='base' ? ativacaoCustoLink(a.id) : null;
@@ -3462,7 +3469,11 @@ function ativacaoTableRows(scen){
         ? `${fmtCur(custo.valorPago)} de ${fmtCur(custo.valorContratado)} ${pagamentoStatusBadge(custo.dataPagamento, custo.dataPrevista)}`
         : `<span class="hint">—</span>`;
     const mainRow = `<tr>
-      <td>${tblInput(`entradas.${scen}.bebidas.${i}.nome`, a.nome, {width:'200px'})}</td>
+      <td>${tblInput(`entradas.${scen}.bebidas.${i}.nome`, a.nome, {width:'160px'})}</td>
+      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.custoUnit`, a.custoUnit, {type:'number', step:'0.1', cls:'num'})}</td>
+      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.precoVenda`, a.precoVenda, {type:'number', step:'0.1', cls:'num'})}</td>
+      <td class="num">${maoDeObraCell(scen, i, calc)}</td>
+      <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.qtdComprada`, a.qtdComprada, {type:'number', step:'1', cls:'num'})}</td>
       <td class="num mono">${fmtCur(calc.precoVenda*calc.qtdTotal)}</td>
       <td><select id="${mkId('entradas.'+scen+'.bebidas.'+i+'.estagio')}" data-bind="entradas.${scen}.bebidas.${i}.estagio">${ATIVACAO_ESTAGIOS.map(s=>`<option value="${s}" ${s===a.estagio?'selected':''}>${s}</option>`).join('')}</select></td>
       <td class="num">${tblInput(`entradas.${scen}.bebidas.${i}.prob`, Math.round((Number(a.prob)||0)*1000)/10, {type:'number', step:'1', cls:'num', kind:'pct', width:'62px'})}</td>
@@ -3479,7 +3490,7 @@ function ativacaoTableRows(scen){
       <td>${parcelaStatusBadge(pc)}</td>
       <td><button class="rm" data-action="rmParcelaAtivacao:${scen}:${i}:${pi}">✕</button></td>
     </tr>`).join('');
-    return mainRow + `<tr><td colspan="8" style="background:var(--surface-2); padding:10px 14px;">
+    return mainRow + `<tr><td colspan="12" style="background:var(--surface-2); padding:10px 14px;">
       <div style="font-size:12.5px; font-weight:700; margin-bottom:6px;">Parcelas de "${esc(a.nome||'(sem nome)')}" ${asum.n?`<span class="hint" style="font-weight:400;">— pago ${fmtCur(asum.pago)} de ${fmtCur(asum.total)}</span>`:''}</div>
       <table style="width:auto; min-width:560px;"><thead><tr><th class="num">Valor</th><th>Data prevista</th><th>Data de pagamento</th><th>Status</th><th></th></tr></thead>
       <tbody>${parcelaRows || `<tr><td colspan="5" class="hint">Nenhuma parcela ainda.</td></tr>`}</tbody></table>
@@ -3509,6 +3520,22 @@ VIEWS.vendas = function(){
     : '';
   const ativacaoRows = ativacaoTableRows(scen);
   const at = computeAtivacoes(scen);
+  const iv = itensVendidosSummary();
+  const ivRows = iv.rows.map(({r,i})=>{
+    const semVenda = !r.qtdVendida;
+    return `<tr${semVenda ? ' style="background:var(--warn-soft);"' : ''}>
+      <td>${esc(r.subcategoria)} <span class="hint">(${esc(r.grupo)})</span></td>
+      <td class="num mono">${fmtInt(r.qtdComprada)}</td>
+      <td class="num">${tblInput(`custos.${i}.qtdVendida`, r.qtdVendida, {type:'number', step:'1', cls:'num'})}</td>
+      <td class="num">${tblInput(`custos.${i}.precoVendaUnit`, r.precoVendaUnit, {type:'number', step:'0.1', cls:'num'})}</td>
+      <td class="num mono">${fmtInt(r.saldoUnidades)}</td>
+      <td class="num mono">${fmtCur2(r.custoUnitario)}</td>
+      <td class="num mono">${fmtCur(r.faturamento)}</td>
+      <td class="num mono" style="color:${r.margemReal>=0?'var(--good)':'var(--bad)'};">${fmtCur(r.margemReal)}</td>
+      <td class="num mono">${fmtPct(r.margemPct)}</td>
+      <td>${semVenda ? '<span class="hint" style="color:var(--warn);">⚠ sem venda lançada</span>' : ''}</td>
+    </tr>`;
+  }).join('');
 
   return `
   <div class="topline"><div><h1>Vendas de ingressos${infoIcon('Cadastre os lotes de venda de cada cenário. A quantidade total já vem travada nos pagantes calculados em Entradas PMO (capacidade × conversão) — aqui você só define o preço e o % mix de cada lote, e a quantidade de ingressos é gerada automaticamente. Mais abaixo, registre quantos ingressos já foram vendidos de verdade.')}</h1><div class="desc">Fonte única dos lotes de ingresso por cenário, mais o acompanhamento de vendas realizadas.</div></div></div>
@@ -3535,20 +3562,34 @@ VIEWS.vendas = function(){
   </div>
 
   <div class="section">
-    <h2>Ativações ${infoIcon('Ativações cadastradas no catálogo de Entradas PMO (Consumo/ativações, tipo "Ativação") aparecem aqui automaticamente — não é um lançamento separado. Preço/custo/quantidade ficam em Entradas PMO; aqui você só acompanha e atualiza o Estágio (escolhe se ocorreu ou não) e a Probabilidade. Receita ponderada = Valor × Probabilidade, já embutida na linha "Bar / Ativações" do cenário — uma vez só, sem duplicar. Quando a ativação é confirmada, clique em "Parcelas" e cadastre valor + data de cada parcela: elas alimentam o Fluxo de Caixa automaticamente no mês certo, e o custo de execução fica rastreável na aba Custos (categoria Marketing), com comprovante.')}</h2>
-    <div class="hint">Cenário ${SCEN_LABEL[scen]} — pra adicionar uma nova ativação, vá em Entradas PMO › Consumo/ativações › "+ Adicionar bebida/ativação" e marque o Tipo como "Ativação".</div>
+    <h2>Ativações ${infoIcon('Cadastre aqui cada ativação com custo do produto, preço de venda, mão de obra (dá pra vincular um ou mais itens de Custos por categoria) e Quantidade comprada. Estágio marca se a ativação ocorreu ou não; Probabilidade pondera a receita esperada — Receita ponderada = Valor × Probabilidade, já embutida na linha "Ativações" do cenário, uma vez só, sem duplicar. Quando a ativação é confirmada, clique em "Parcelas" e cadastre valor + data de cada parcela: elas alimentam o Fluxo de Caixa automaticamente no mês certo, e o custo de execução fica rastreável na aba Custos (categoria Marketing), com comprovante.')}</h2>
+    <div class="hint">Cenário ${SCEN_LABEL[scen]}.</div>
     <div class="tablewrap" style="margin-top:8px;">
       <table>
-        <thead><tr><th>Ativação</th><th class="num">Valor (catálogo)</th><th>Estágio</th><th class="num">Prob. %</th><th class="num">Receita ponderada</th><th>Custo (Base)</th><th>Parcelas</th><th></th></tr></thead>
-        <tbody>${ativacaoRows || `<tr><td colspan="8" class="hint">Nenhuma ativação cadastrada ainda — adicione em Entradas PMO › Consumo/ativações.</td></tr>`}</tbody>
-        <tfoot><tr><td>Total</td><td class="num mono">${fmtCur(at.nominal)}</td><td></td><td></td><td class="num mono">${fmtCur(at.esperado)}</td><td></td><td></td><td></td></tr></tfoot>
+        <thead><tr><th>Ativação</th><th class="num">Custo unit. (R$)</th><th class="num">Preço venda (R$)</th><th class="num">Mão de obra/unid. (R$)</th><th class="num">Quantidade comprada</th><th class="num">Valor (catálogo)</th><th>Estágio</th><th class="num">Prob. %</th><th class="num">Receita ponderada</th><th>Custo (Base)</th><th>Parcelas</th><th></th></tr></thead>
+        <tbody>${ativacaoRows || `<tr><td colspan="12" class="hint">Nenhuma ativação cadastrada ainda.</td></tr>`}</tbody>
+        <tfoot><tr><td colspan="5">Total</td><td class="num mono">${fmtCur(at.nominal)}</td><td></td><td></td><td class="num mono">${fmtCur(at.esperado)}</td><td></td><td></td><td></td></tr></tfoot>
       </table>
     </div>
+    <button class="btn small" style="margin-top:10px;" data-action="addAtivacao:${scen}">+ Adicionar ativação</button>
     <div class="gridN" style="margin-top:16px;">
       <div class="kpi"><div class="lbl">Ativações confirmadas</div><div class="kpi-value">${fmtCur(at.confirmado)}</div></div>
       <div class="kpi"><div class="lbl">Ativações em pipeline</div><div class="kpi-value">${fmtCur(at.pipeline)}</div></div>
       <div class="kpi"><div class="lbl">Receita ponderada (esperado)</div><div class="kpi-value">${fmtCur(at.esperado)}</div></div>
     </div>
+  </div>
+
+  <div class="section">
+    <h2>Itens vendidos ${infoIcon('Todo item de Custos com "Qtd. comprada" preenchida aparece aqui automaticamente. Lance quanto foi de fato vendido e o preço de venda — o Saldo mostra quanto sobrou em estoque (comprado menos vendido) e a Margem é a receita realizada menos o custo só da parte que foi vendida (o estoque parado não entra na conta). Itens em laranja ainda não têm nenhuma venda lançada — confira se é mesmo um custo sem faturamento (ex.: brinde) ou se falta lançar a venda.')}</h2>
+    <div class="hint">Pra adicionar um item aqui, vá em <strong>Custos</strong> e preencha "Qtd. comprada" na linha dele.</div>
+    <div class="tablewrap" style="margin-top:8px;">
+      <table>
+        <thead><tr><th>Item</th><th class="num">Qtd. comprada</th><th class="num">Qtd. vendida</th><th class="num">Preço venda (R$)</th><th class="num">Saldo</th><th class="num">Custo unit.</th><th class="num">Faturamento</th><th class="num">Margem</th><th class="num">Margem %</th><th></th></tr></thead>
+        <tbody>${ivRows || `<tr><td colspan="10" class="hint">Nenhum item com "Qtd. comprada" lançada ainda em Custos.</td></tr>`}</tbody>
+        ${iv.rows.length ? `<tfoot><tr><td colspan="6">Total</td><td class="num mono">${fmtCur(iv.faturamentoTotal)}</td><td class="num mono" style="color:${iv.margemTotal>=0?'var(--good)':'var(--bad)'};">${fmtCur(iv.margemTotal)}</td><td></td><td></td></tr></tfoot>` : ''}
+      </table>
+    </div>
+    ${iv.semVenda.length ? `<div class="hint" style="margin-top:8px; color:var(--warn);">⚠ ${iv.semVenda.length} item${iv.semVenda.length>1?'s':''} comprado${iv.semVenda.length>1?'s':''} sem nenhuma venda lançada ainda — confira se entra mesmo como custo sem faturamento.</div>` : ''}
   </div>
 
   <div class="section">
@@ -3978,6 +4019,7 @@ VIEWS.custos = function(){
     return `<tr>
       <td><input type="checkbox" data-action="toggleCustoSelect:${r.id}" ${selected[r.id]?'checked':''} title="Selecionar pra replicar data em lote"></td>
       <td>${r.subcategoria}</td>
+      <td class="num">${tblInput(`custos.${i}.qtdComprada`, r.qtdComprada, {type:'number', step:'1', cls:'num'})}</td>
       <td>${tblInput(`custos.${i}.fornecedor`, r.fornecedor)}</td>
       <td class="num mono">${fmtCur(r.orcInicial)}</td>
       <td class="num">${tblInput(`custos.${i}.orcamentoAprovado`, Math.round(r.orcAprovado), {type:'number', cls:'num'})}</td>
@@ -3994,7 +4036,7 @@ VIEWS.custos = function(){
     </tr>`;
   };
   const rows = groupOrder.map(grupo=>
-    `<tr class="section-hdr-row"><td colspan="15">${grupo}</td></tr>` + byGroup.get(grupo).map(({r,i})=>rowHtml(r,i)).join('')
+    `<tr class="section-hdr-row"><td colspan="16">${grupo}</td></tr>` + byGroup.get(grupo).map(({r,i})=>rowHtml(r,i)).join('')
   ).join('');
 
   const atrasados = custosAtrasados(cs.rows);
@@ -4032,11 +4074,11 @@ VIEWS.custos = function(){
 
   <div class="tablewrap">
     <table>
-      <thead><tr><th><input type="checkbox" data-action="toggleCustoSelectAll" ${allSelected?'checked':''} title="Selecionar/limpar todos"></th><th>Subcategoria</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th>Origem do pagamento</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th><th>Data de pagamento</th><th>Vencimento</th><th>Comprovante</th></tr></thead>
+      <thead><tr><th><input type="checkbox" data-action="toggleCustoSelectAll" ${allSelected?'checked':''} title="Selecionar/limpar todos"></th><th>Subcategoria</th><th class="num">Qtd. comprada</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th>Origem do pagamento</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th><th>Data de pagamento</th><th>Vencimento</th><th>Comprovante</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>
-  <div class="hint" style="margin-top:8px;">Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
+  <div class="hint" style="margin-top:8px;">Em "Qtd. comprada", informe a quantidade de unidades desse item (ex.: 15 Coca Zero) só se ele for revendido/controlado por unidade — deixe em branco/0 pra custos sem controle de quantidade (ex.: DJ, estrutura). Item com Qtd. comprada preenchida aparece automaticamente na aba <strong>Vendas › Itens vendidos</strong>, onde você lança quanto foi vendido de fato e o preço, pra ver o saldo (estoque) e a margem real. Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
   <input type="file" id="custoComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
 };
 ACTIONS.toggleCustoSelect = (id)=>{
@@ -5053,7 +5095,7 @@ VIEWS.comparativo = function(){
   const rows = [
     ['Pagantes', s=>fmtInt(cs[s].pagantes)], ['% Ocupação', s=>fmtPct(cs[s].ocupacao)],
     ['Ticket médio', s=>fmtCur2(cs[s].ticketMedio)], ['Receita de ingressos', s=>fmtCur(cs[s].receitaIngressos)],
-    ['Receita de consumo/ativações', s=>fmtCur(cs[s].receitaConsumo)], ['Patrocínio esperado', s=>fmtCur(cs[s].patrocinio)],
+    ['Receita de ativações', s=>fmtCur(cs[s].receitaConsumo)], ['Patrocínio esperado', s=>fmtCur(cs[s].patrocinio)],
     ['RECEITA TOTAL', s=>fmtCur(cs[s].receitaTotal)], ['CUSTO TOTAL', s=>fmtCur(cs[s].custoTotal)],
     ['RESULTADO', s=>fmtCur(cs[s].resultado)], ['MARGEM', s=>fmtPct(cs[s].margem)],
     ['Break-even (ingressos)', s=>fmtInt(cs[s].beCom)],
