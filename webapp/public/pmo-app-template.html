@@ -1740,7 +1740,23 @@ function computeCustosSummary(){
     const contratado = Number(c.valorContratado)||0;
     const pago = Number(c.valorPago)||0;
     const eac = Math.max(orcAprovado, contratado);
-    return Object.assign({}, c, {orcInicial, orcAprovado, contratado, pago, saldo: contratado-pago, eac});
+    // controle de venda por item (opcional — só faz sentido pra item com "Qtd. comprada" > 0,
+    // ex.: bebidas/material revendido): custoUnitario vem do valor CONTRATADO (igual EAC, é a
+    // melhor estimativa de custo mesmo antes de pago 100%); custoAlocado só cobra o que foi de
+    // fato vendido (qtdVendida), deixando estoque parado fora da margem realizada
+    const qtdComprada = Number(c.qtdComprada)||0;
+    const qtdVendida = Number(c.qtdVendida)||0;
+    const precoVendaUnit = Number(c.precoVendaUnit)||0;
+    const custoUnitario = qtdComprada>0 ? contratado/qtdComprada : 0;
+    const saldoUnidades = qtdComprada - qtdVendida;
+    const faturamento = qtdVendida*precoVendaUnit;
+    const custoAlocado = qtdVendida*custoUnitario;
+    const margemReal = faturamento - custoAlocado;
+    const margemPct = faturamento ? margemReal/faturamento : 0;
+    return Object.assign({}, c, {
+      orcInicial, orcAprovado, contratado, pago, saldo: contratado-pago, eac,
+      qtdComprada, qtdVendida, precoVendaUnit, custoUnitario, saldoUnidades, faturamento, custoAlocado, margemReal, margemPct,
+    });
   });
   const bac = sum(rows.map(r=>r.orcAprovado));
   const ac = sum(rows.map(r=>r.pago));
@@ -1748,6 +1764,17 @@ function computeCustosSummary(){
   const eac = sum(rows.map(r=>r.eac));
   const etc = eac-ac; const vac = bac-eac;
   return {rows, bac, ac, committed, eac, etc, vac, pctComprom: bac?committed/bac:0, pctPago: bac?ac/bac:0};
+}
+// itens de Custos marcados como "controlados por unidade" (Qtd. comprada > 0) — mesma lista usada
+// pra lançar as vendas realizadas (aba Vendas › Itens vendidos) e pra análise de margem por item.
+// Não depende de cenário: é controle real, igual o resto da aba Custos.
+function itensVendidosSummary(){
+  const cs = computeCustosSummary();
+  const rows = cs.rows.map((r,i)=>({r,i})).filter(({r})=> r.qtdComprada>0);
+  const faturamentoTotal = sum(rows.map(({r})=>r.faturamento));
+  const margemTotal = sum(rows.map(({r})=>r.margemReal));
+  const semVenda = rows.filter(({r})=> !r.qtdVendida);
+  return {rows, faturamentoTotal, margemTotal, semVenda};
 }
 function computedCostValue(c){
   const base = computeScenario('base');
@@ -3527,6 +3554,22 @@ VIEWS.vendas = function(){
     : '';
   const ativacaoRows = ativacaoTableRows(scen);
   const at = computeAtivacoes(scen);
+  const iv = itensVendidosSummary();
+  const ivRows = iv.rows.map(({r,i})=>{
+    const semVenda = !r.qtdVendida;
+    return `<tr${semVenda ? ' style="background:var(--warn-soft);"' : ''}>
+      <td>${esc(r.subcategoria)} <span class="hint">(${esc(r.grupo)})</span></td>
+      <td class="num mono">${fmtInt(r.qtdComprada)}</td>
+      <td class="num">${tblInput(`custos.${i}.qtdVendida`, r.qtdVendida, {type:'number', step:'1', cls:'num'})}</td>
+      <td class="num">${tblInput(`custos.${i}.precoVendaUnit`, r.precoVendaUnit, {type:'number', step:'0.1', cls:'num'})}</td>
+      <td class="num mono">${fmtInt(r.saldoUnidades)}</td>
+      <td class="num mono">${fmtCur2(r.custoUnitario)}</td>
+      <td class="num mono">${fmtCur(r.faturamento)}</td>
+      <td class="num mono" style="color:${r.margemReal>=0?'var(--good)':'var(--bad)'};">${fmtCur(r.margemReal)}</td>
+      <td class="num mono">${fmtPct(r.margemPct)}</td>
+      <td>${semVenda ? '<span class="hint" style="color:var(--warn);">⚠ sem venda lançada</span>' : ''}</td>
+    </tr>`;
+  }).join('');
 
   return `
   <div class="topline"><div><h1>Vendas de ingressos${infoIcon('Cadastre os lotes de venda de cada cenário. A quantidade total já vem travada nos pagantes calculados em Entradas PMO (capacidade × conversão) — aqui você só define o preço e o % mix de cada lote, e a quantidade de ingressos é gerada automaticamente. Mais abaixo, registre quantos ingressos já foram vendidos de verdade.')}</h1><div class="desc">Fonte única dos lotes de ingresso por cenário, mais o acompanhamento de vendas realizadas.</div></div></div>
@@ -3567,6 +3610,19 @@ VIEWS.vendas = function(){
       <div class="kpi"><div class="lbl">Ativações em pipeline</div><div class="kpi-value">${fmtCur(at.pipeline)}</div></div>
       <div class="kpi"><div class="lbl">Receita ponderada (esperado)</div><div class="kpi-value">${fmtCur(at.esperado)}</div></div>
     </div>
+  </div>
+
+  <div class="section">
+    <h2>Itens vendidos ${infoIcon('Todo item de Custos com "Qtd. comprada" preenchida aparece aqui automaticamente. Lance quanto foi de fato vendido e o preço de venda — o Saldo mostra quanto sobrou em estoque (comprado menos vendido) e a Margem é a receita realizada menos o custo só da parte que foi vendida (o estoque parado não entra na conta). Itens em laranja ainda não têm nenhuma venda lançada — confira se é mesmo um custo sem faturamento (ex.: brinde) ou se falta lançar a venda.')}</h2>
+    <div class="hint">Pra adicionar um item aqui, vá em <strong>Custos</strong> e preencha "Qtd. comprada" na linha dele.</div>
+    <div class="tablewrap" style="margin-top:8px;">
+      <table>
+        <thead><tr><th>Item</th><th class="num">Qtd. comprada</th><th class="num">Qtd. vendida</th><th class="num">Preço venda (R$)</th><th class="num">Saldo</th><th class="num">Custo unit.</th><th class="num">Faturamento</th><th class="num">Margem</th><th class="num">Margem %</th><th></th></tr></thead>
+        <tbody>${ivRows || `<tr><td colspan="10" class="hint">Nenhum item com "Qtd. comprada" lançada ainda em Custos.</td></tr>`}</tbody>
+        ${iv.rows.length ? `<tfoot><tr><td colspan="6">Total</td><td class="num mono">${fmtCur(iv.faturamentoTotal)}</td><td class="num mono" style="color:${iv.margemTotal>=0?'var(--good)':'var(--bad)'};">${fmtCur(iv.margemTotal)}</td><td></td><td></td></tr></tfoot>` : ''}
+      </table>
+    </div>
+    ${iv.semVenda.length ? `<div class="hint" style="margin-top:8px; color:var(--warn);">⚠ ${iv.semVenda.length} item${iv.semVenda.length>1?'s':''} comprado${iv.semVenda.length>1?'s':''} sem nenhuma venda lançada ainda — confira se entra mesmo como custo sem faturamento.</div>` : ''}
   </div>
 
   <div class="section">
@@ -3996,6 +4052,7 @@ VIEWS.custos = function(){
     return `<tr>
       <td><input type="checkbox" data-action="toggleCustoSelect:${r.id}" ${selected[r.id]?'checked':''} title="Selecionar pra replicar data em lote"></td>
       <td>${r.subcategoria}</td>
+      <td class="num">${tblInput(`custos.${i}.qtdComprada`, r.qtdComprada, {type:'number', step:'1', cls:'num'})}</td>
       <td>${tblInput(`custos.${i}.fornecedor`, r.fornecedor)}</td>
       <td class="num mono">${fmtCur(r.orcInicial)}</td>
       <td class="num">${tblInput(`custos.${i}.orcamentoAprovado`, Math.round(r.orcAprovado), {type:'number', cls:'num'})}</td>
@@ -4012,7 +4069,7 @@ VIEWS.custos = function(){
     </tr>`;
   };
   const rows = groupOrder.map(grupo=>
-    `<tr class="section-hdr-row"><td colspan="15">${grupo}</td></tr>` + byGroup.get(grupo).map(({r,i})=>rowHtml(r,i)).join('')
+    `<tr class="section-hdr-row"><td colspan="16">${grupo}</td></tr>` + byGroup.get(grupo).map(({r,i})=>rowHtml(r,i)).join('')
   ).join('');
 
   const atrasados = custosAtrasados(cs.rows);
@@ -4050,11 +4107,11 @@ VIEWS.custos = function(){
 
   <div class="tablewrap">
     <table>
-      <thead><tr><th><input type="checkbox" data-action="toggleCustoSelectAll" ${allSelected?'checked':''} title="Selecionar/limpar todos"></th><th>Subcategoria</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th>Origem do pagamento</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th><th>Data de pagamento</th><th>Vencimento</th><th>Comprovante</th></tr></thead>
+      <thead><tr><th><input type="checkbox" data-action="toggleCustoSelectAll" ${allSelected?'checked':''} title="Selecionar/limpar todos"></th><th>Subcategoria</th><th class="num">Qtd. comprada</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th>Origem do pagamento</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th><th>Data de pagamento</th><th>Vencimento</th><th>Comprovante</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>
-  <div class="hint" style="margin-top:8px;">Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
+  <div class="hint" style="margin-top:8px;">Em "Qtd. comprada", informe a quantidade de unidades desse item (ex.: 15 Coca Zero) só se ele for revendido/controlado por unidade — deixe em branco/0 pra custos sem controle de quantidade (ex.: DJ, estrutura). Item com Qtd. comprada preenchida aparece automaticamente na aba <strong>Vendas › Itens vendidos</strong>, onde você lança quanto foi vendido de fato e o preço, pra ver o saldo (estoque) e a margem real. Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
   <input type="file" id="custoComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
 };
 ACTIONS.toggleCustoSelect = (id)=>{
