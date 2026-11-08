@@ -1296,6 +1296,19 @@ function migrateState(){
       delete b.maoDeObraLink;
     });
   });
+  // limpeza de custos "orfãos": ACTIONS.rmBebida (antes desta correção) removia o item do catálogo
+  // mas não a linha de custo que syncAtivacaoCustos tinha sincronizado pra ele — toda vez que um
+  // item de bebida/ativação era removido, a linha ficava presa em Custos > Marketing pra sempre,
+  // sem nenhum item do catálogo que a gerasse, dando a impressão de itens duplicados/soltos ali.
+  // Remove aqui qualquer linha "ativacao_<id>" cujo id não é mais de nenhuma bebida/ativação do
+  // cenário Base (único cenário que syncAtivacaoCustos sincroniza).
+  {
+    const idsAtivos = new Set(((state.entradas.base&&state.entradas.base.bebidas)||[]).map(b=>b.id));
+    state.custos = (state.custos||[]).filter(c=>{
+      if(c.path[0]!=='marketing' || !(c.path[1]||'').startsWith('ativacao_')) return true;
+      return idsAtivos.has(c.path[1].slice('ativacao_'.length));
+    });
+  }
   // mapa de mesas (Feijoada do Bloco) — estados salvos antes disso nao tem essa lista; se ja
   // existir mas com menos de 100 (ex.: versao antiga com outro numero), completa o que falta
   if(!state.mesasFeijoada) state.mesasFeijoada = freshMesasFeijoada();
@@ -3371,7 +3384,12 @@ ACTIONS.addBebida = (scen)=>{
   saveState(); render();
 };
 ACTIONS.rmBebida = (scen, idx)=>{
+  const b = state.entradas[scen].bebidas[Number(idx)];
   state.entradas[scen].bebidas.splice(Number(idx),1);
+  // remove junto a linha de custo sincronizada (ver syncAtivacaoCustos) — sem isso ela ficava
+  // orfã pra sempre em Custos > Marketing, mesmo sem nenhum item do catálogo que a gerou, dando a
+  // impressão de itens "duplicados"/soltos que não existem no catálogo de Entradas PMO
+  if(b) state.custos = state.custos.filter(c=> !(c.path[0]==='marketing' && c.path[1]==='ativacao_'+b.id));
   saveState(); render();
 };
 // vincula/desvincula um item de Custos por categoria na "Mão de obra/unid." de uma bebida/ativação
