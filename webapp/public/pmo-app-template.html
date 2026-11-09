@@ -1781,7 +1781,26 @@ function computeCustosSummary(){
     // ex.: bebidas/material revendido): custoUnitario vem do valor CONTRATADO (igual EAC, é a
     // melhor estimativa de custo mesmo antes de pago 100%); custoAlocado só cobra o que foi de
     // fato vendido (qtdVendida), deixando estoque parado fora da margem realizada
-    const qtdComprada = Number(c.qtdComprada)||0;
+    // "Qtd. comprada" começa puxando a Quantidade já lançada em Entradas PMO > Custo por categoria
+    // (só o grupo Operação tem esse campo) — segue ACOMPANHANDO essa quantidade automaticamente
+    // enquanto a pessoa nunca editar o campo aqui (c.qtdComprada ainda null/undefined). No momento
+    // em que a pessoa digita um valor aqui (mesmo que igual ao sugerido), ele vira fixo/manual e
+    // para de seguir Entradas PMO — é o "se for diferente, editável pra eu editar" pedido.
+    let qtdCompradaSugerida = null;
+    if(c.path[0]==='operacao'){
+      const rawOp = getPath(state.entradas.base, c.path);
+      // valor de Operação pode vir como {qty,unitCost} (normal) ou número solto (legado, nunca
+      // editado na tela — nesse caso a Quantidade implícita é 1, mesma leitura de costItemRowOperacao)
+      qtdCompradaSugerida = (rawOp && typeof rawOp==='object') ? (Number(rawOp.qty)||0) : (rawOp!=null ? 1 : 0);
+    }
+    const qtdComprada = (c.qtdComprada==null) ? (qtdCompradaSugerida||0) : (Number(c.qtdComprada)||0);
+    // true só quando a PESSOA de fato editou "Qtd. comprada" nessa linha (travando o valor) — usado
+    // pra decidir o que entra em Vendas › Itens vendidos (ver itensVendidosSummary): sem isso, todo
+    // item de Operação com equipe/quantidade alocada (segurança, brigadistas, limpeza…) entraria
+    // sozinho na lista de "item revendido" só por ter uma Quantidade > 0 puxada automaticamente, sem
+    // nenhuma venda fazer sentido ali — a sincronização alimenta só o campo em Custos, não decide por
+    // si só que o item é "revendido por unidade".
+    const qtdCompradaManual = c.qtdComprada!=null;
     const qtdVendida = Number(c.qtdVendida)||0;
     const precoVendaUnit = Number(c.precoVendaUnit)||0;
     const custoUnitario = qtdComprada>0 ? contratado/qtdComprada : 0;
@@ -1808,7 +1827,7 @@ function computeCustosSummary(){
     const margemPct = faturamento ? margemReal/faturamento : 0;
     return Object.assign({}, c, {
       orcInicial, orcAprovado, contratado, pago, saldo: contratado-pago, eac,
-      qtdComprada, qtdVendida, precoVendaUnit, custoUnitario, saldoUnidades, faturamento,
+      qtdComprada, qtdCompradaManual, qtdVendida, precoVendaUnit, custoUnitario, saldoUnidades, faturamento,
       custoLinks, custoLinkInfos, custoAlocadoProprio, custoAlocadoLinks, custoAlocado, margemReal, margemPct,
     });
   });
@@ -1824,7 +1843,10 @@ function computeCustosSummary(){
 // Não depende de cenário: é controle real, igual o resto da aba Custos.
 function itensVendidosSummary(){
   const cs = computeCustosSummary();
-  const rows = cs.rows.map((r,i)=>({r,i})).filter(({r})=> r.qtdComprada>0);
+  // só entra na lista quem a PESSOA marcou como revendido por unidade (editou "Qtd. comprada" na
+  // mão) ou já tem venda/preço lançado — item de Operação com Quantidade só sincronizada
+  // automaticamente (ex.: 4 seguranças) não é um "item revendido", mesmo tendo Qtd. comprada > 0
+  const rows = cs.rows.map((r,i)=>({r,i})).filter(({r})=> r.qtdComprada>0 && (r.qtdCompradaManual || r.qtdVendida>0 || r.precoVendaUnit>0));
   const faturamentoTotal = sum(rows.map(({r})=>r.faturamento));
   const margemTotal = sum(rows.map(({r})=>r.margemReal));
   const semVenda = rows.filter(({r})=> !r.qtdVendida);
@@ -4282,7 +4304,7 @@ VIEWS.custos = function(){
       <tbody>${rows}</tbody>
     </table>
   </div>
-  <div class="hint" style="margin-top:8px;">Em "Qtd. comprada", informe a quantidade de unidades desse item (ex.: 15 Coca Zero) só se ele for revendido/controlado por unidade — deixe em branco/0 pra custos sem controle de quantidade (ex.: DJ, estrutura). Item com Qtd. comprada preenchida aparece automaticamente na aba <strong>Vendas › Itens vendidos</strong>, onde você lança quanto foi vendido de fato e o preço, pra ver o saldo (estoque) e a margem real. Em "Custos vinculados", agregue um ou mais OUTROS itens de Custos cujo valor compõe o custo real deste (ex.: Caipirinha vinculada a Cachaça + Limão + Açúcar + Copo) — se o mesmo item vinculado (ex.: Gelo) for usado por mais de uma linha, seu valor total é rateado entre elas pela quantidade VENDIDA de cada uma, aparecendo também na análise de margem em Vendas. Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
+  <div class="hint" style="margin-top:8px;">Em "Qtd. comprada", item do grupo <strong>Operação</strong> já vem com a Quantidade lançada em Entradas PMO › Custo por categoria (e continua acompanhando se você mudar lá) — edite aqui só se a quantidade REALMENTE comprada for diferente da planejada; a partir daí o valor fica fixo nessa linha e para de seguir Entradas PMO. Pros demais grupos (sem campo de quantidade em Entradas PMO), informe a quantidade de unidades desse item (ex.: 15 Coca Zero) só se ele for revendido/controlado por unidade — deixe em branco/0 pra custos sem controle de quantidade (ex.: DJ, estrutura). Item com Qtd. comprada preenchida aparece automaticamente na aba <strong>Vendas › Itens vendidos</strong>, onde você lança quanto foi vendido de fato e o preço, pra ver o saldo (estoque) e a margem real. Em "Custos vinculados", agregue um ou mais OUTROS itens de Custos cujo valor compõe o custo real deste (ex.: Caipirinha vinculada a Cachaça + Limão + Açúcar + Copo) — se o mesmo item vinculado (ex.: Gelo) for usado por mais de uma linha, seu valor total é rateado entre elas pela quantidade VENDIDA de cada uma, aparecendo também na análise de margem em Vendas. Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
   <input type="file" id="custoComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
 };
 ACTIONS.toggleCustoSelect = (id)=>{
