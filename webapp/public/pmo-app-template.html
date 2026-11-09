@@ -1794,13 +1794,6 @@ function computeCustosSummary(){
       qtdCompradaSugerida = (rawOp && typeof rawOp==='object') ? (Number(rawOp.qty)||0) : (rawOp!=null ? 1 : 0);
     }
     const qtdComprada = (c.qtdComprada==null) ? (qtdCompradaSugerida||0) : (Number(c.qtdComprada)||0);
-    // true só quando a PESSOA de fato editou "Qtd. comprada" nessa linha (travando o valor) — usado
-    // pra decidir o que entra em Vendas › Itens vendidos (ver itensVendidosSummary): sem isso, todo
-    // item de Operação com equipe/quantidade alocada (segurança, brigadistas, limpeza…) entraria
-    // sozinho na lista de "item revendido" só por ter uma Quantidade > 0 puxada automaticamente, sem
-    // nenhuma venda fazer sentido ali — a sincronização alimenta só o campo em Custos, não decide por
-    // si só que o item é "revendido por unidade".
-    const qtdCompradaManual = c.qtdComprada!=null;
     const qtdVendida = Number(c.qtdVendida)||0;
     const precoVendaUnit = Number(c.precoVendaUnit)||0;
     const custoUnitario = qtdComprada>0 ? contratado/qtdComprada : 0;
@@ -1827,7 +1820,7 @@ function computeCustosSummary(){
     const margemPct = faturamento ? margemReal/faturamento : 0;
     return Object.assign({}, c, {
       orcInicial, orcAprovado, contratado, pago, saldo: contratado-pago, eac,
-      qtdComprada, qtdCompradaManual, qtdVendida, precoVendaUnit, custoUnitario, saldoUnidades, faturamento,
+      qtdComprada, qtdVendida, precoVendaUnit, custoUnitario, saldoUnidades, faturamento,
       custoLinks, custoLinkInfos, custoAlocadoProprio, custoAlocadoLinks, custoAlocado, margemReal, margemPct,
     });
   });
@@ -1843,10 +1836,7 @@ function computeCustosSummary(){
 // Não depende de cenário: é controle real, igual o resto da aba Custos.
 function itensVendidosSummary(){
   const cs = computeCustosSummary();
-  // só entra na lista quem a PESSOA marcou como revendido por unidade (editou "Qtd. comprada" na
-  // mão) ou já tem venda/preço lançado — item de Operação com Quantidade só sincronizada
-  // automaticamente (ex.: 4 seguranças) não é um "item revendido", mesmo tendo Qtd. comprada > 0
-  const rows = cs.rows.map((r,i)=>({r,i})).filter(({r})=> r.qtdComprada>0 && (r.qtdCompradaManual || r.qtdVendida>0 || r.precoVendaUnit>0));
+  const rows = cs.rows.map((r,i)=>({r,i})).filter(({r})=> r.qtdComprada>0);
   const faturamentoTotal = sum(rows.map(({r})=>r.faturamento));
   const margemTotal = sum(rows.map(({r})=>r.margemReal));
   const semVenda = rows.filter(({r})=> !r.qtdVendida);
