@@ -857,6 +857,97 @@ function ensurePdfJs(){
   });
   return pdfjsLibPromise;
 }
+/* ---------------- Importar planilha (Custos/Vendas) ---------------- */
+// mesma ideia de ensurePdfJs acima (carrega só quando alguém usa) — só que o build principal do
+// SheetJS é UMD (seta window.XLSX), não ESM, então aqui é uma <script> de verdade, não import().
+let xlsxLibPromise = null;
+function ensureXlsxLib(){
+  if(xlsxLibPromise) return xlsxLibPromise;
+  xlsxLibPromise = new Promise((resolve, reject)=>{
+    if(window.XLSX){ resolve(window.XLSX); return; }
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    script.onload = ()=> resolve(window.XLSX);
+    script.onerror = ()=> reject(new Error('Não consegui carregar a biblioteca de leitura de planilha — confira sua conexão e tente de novo.'));
+    document.head.appendChild(script);
+  });
+  return xlsxLibPromise;
+}
+// "15/03/2026", "2026-03-15", ou uma data já formatada pelo Excel (ex. "15/03/2026") -> ISO
+// yyyy-mm-dd; vazio/irreconhecível vira '' (o lançamento então entra sem data de pagamento, como
+// "ainda não pago" — revisável na tabela antes de aprovar)
+function planilhaParseData(raw){
+  const s = String(raw==null?'':raw).trim();
+  if(!s) return '';
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if(m){
+    const yyyy = m[3].length===2 ? '20'+m[3] : m[3];
+    return `${yyyy}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  }
+  return '';
+}
+function planilhaParseNumero(raw){
+  const s = String(raw==null?'':raw).trim();
+  if(!s) return 0;
+  // aceita tanto "1234.56" (Excel já numérico) quanto "1.234,56" (texto digitado em formato BR)
+  const normalized = /,\d{1,2}$/.test(s) ? s.replace(/\./g,'').replace(',','.') : s.replace(/,/g,'');
+  const n = parseFloat(normalized);
+  return isNaN(n) ? 0 : n;
+}
+// colunas fixas esperadas (A-J, 1ª linha = cabeçalho, ignorada): Grupo | Subcategoria/Descrição |
+// Tipo (Custo/Venda) | Valor contratado | Valor pago | Data de pagamento | Qtd. comprada |
+// Qtd. vendida | Preço de venda unitário | Fornecedor — mesmas colunas que já existem em Custos,
+// só lidas de uma planilha em vez de digitadas uma a uma. Sem IA: a ordem das colunas importa.
+async function planilhaProcessarArquivo(file){
+  if(!state.ui.importPlanilha) state.ui.importPlanilha = {linhas:[], aberto:true};
+  const ip = state.ui.importPlanilha;
+  ip.parsing = true; ip.parseError = null;
+  render();
+  try{
+    const XLSX = await ensureXlsxLib();
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array'});
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const linhasCru = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false, defval:''});
+    const linhas = linhasCru.slice(1)
+      .filter(r=> r.some(c=> String(c==null?'':c).trim()!==''))
+      .map(r=>{
+        const grupoRaw = String(r[0]||'').trim();
+        const grupoMatch = state.costGroups.find(g=> g.label.toLowerCase()===grupoRaw.toLowerCase());
+        const subcategoria = String(r[1]||'').trim();
+        const linha = {
+          id: uid(),
+          grupoRaw, grupo: (grupoMatch||state.costGroups[0]||{}).key,
+          subcategoria,
+          tipo: /venda/i.test(String(r[2]||'')) ? 'venda' : 'custo',
+          valorContratado: planilhaParseNumero(r[3]),
+          valorPago: planilhaParseNumero(r[4]),
+          dataPagamento: planilhaParseData(r[5]),
+          qtdComprada: planilhaParseNumero(r[6]),
+          qtdVendida: planilhaParseNumero(r[7]),
+          precoVendaUnit: planilhaParseNumero(r[8]),
+          fornecedor: String(r[9]||'').trim(),
+          matchCustoId: '', lancado: false,
+        };
+        // sugere automaticamente um item já existente com o mesmo nome (revisável/trocável antes
+        // de aprovar) — é o que decide "soma numa linha existente" x "cria item novo"
+        const existente = state.custos.find(c=> (c.subcategoria||'').toLowerCase()===subcategoria.toLowerCase());
+        if(existente) linha.matchCustoId = existente.id;
+        return linha;
+      });
+    if(!linhas.length){
+      ip.parseError = 'Não encontrei nenhuma linha de dado na planilha — confira se a 1ª linha é o cabeçalho e as colunas seguem o modelo (Grupo, Subcategoria, Tipo, Valor contratado, Valor pago, Data, Qtd. comprada, Qtd. vendida, Preço de venda, Fornecedor).';
+    } else {
+      ip.linhas = (ip.linhas||[]).concat(linhas);
+    }
+  } catch(err){
+    ip.parseError = 'Erro ao ler a planilha: ' + (err && err.message ? err.message : String(err));
+  } finally {
+    ip.parsing = false;
+    render();
+  }
+}
 // "1.234,56" -> 1234.56 (formato brasileiro: ponto de milhar, vírgula decimal); sinal de menos
 // em qualquer posição (ex. "-150,00" ou "150,00-", comum em extrato) marca valor negativo
 function extratoParseBRNumber(raw){
@@ -1926,6 +2017,29 @@ function computeOxR(){
     const desvioPct = orcRevisado ? desvio/orcRevisado : 0;
     const classif = desvioPct<=0 ? 'Dentro do orçamento' : desvioPct<=0.05 ? 'Atenção' : 'Estourado';
     return {cat, orcInicial, orcRevisado, contratado, realizado, saldo, desvio, desvioPct, projFinal, classif};
+  });
+}
+// lado da RECEITA do Orçamento x Real — sempre cenário Base (mesma convenção do lado de custos
+// acima, que também só lê state.entradas.base/state.custos): Planejado vem do cenário, Realizado
+// vem do dinheiro que já de fato entrou (data de pagamento confirmada), uma linha por fonte de
+// receita, pra não misturar "ainda é só previsão" com "já é dinheiro de verdade no caixa".
+function computeReceitaOxR(){
+  const cs = computeScenario('base');
+  const p = computePatrocinio('base');
+  const at = computeAtivacoes('base');
+  const iv = itensVendidosSummary();
+  const vt = computeVendaTracking();
+  const linhas = [
+    {cat:'Ingressos', planejado: cs.receitaIngressos, realizado: vt.receitaRealizada},
+    {cat:'Patrocínio', planejado: p.esperado, realizado: sum(patrocinioDatedAmounts('base','real').map(d=>d.valor))},
+    {cat:'Ativações', planejado: at.esperado, realizado: sum(ativacoesDatedAmounts('base','real').map(d=>d.valor))},
+    {cat:'Itens vendidos (bar/consumo)', planejado: 0, realizado: iv.faturamentoTotal},
+    {cat:'Outras receitas', planejado: cs.outras, realizado: 0},
+  ];
+  return linhas.map(l=>{
+    const saldo = l.planejado - l.realizado;
+    const pctRealizado = l.planejado ? l.realizado/l.planejado : (l.realizado ? 1 : 0);
+    return Object.assign({}, l, {saldo, pctRealizado});
   });
 }
 
@@ -4410,6 +4524,15 @@ VIEWS.custos = function(){
     <button class="btn small" data-action="applyCustoBulkDate:dataPagamento" ${selectedIds.length?'':'disabled'}>Aplicar como Data de pagamento</button>
   </div>
 
+  <div class="card" style="padding:12px 16px; margin-bottom:12px;">
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <strong style="font-size:12.5px; white-space:nowrap;">📥 Importar planilha ${infoIcon('Envie uma planilha Excel (.xlsx) com custos e/ou vendas já lançados em outro lugar (ex.: controle que você já mantinha à parte) — revise e aprove linha a linha antes de qualquer coisa entrar de verdade. Item com nome igual a um já existente SOMA nele; nome novo cria um item do zero, mesmo que não estivesse no planejamento (é assim que você enxerga o que foi um acréscimo fora do previsto). Colunas esperadas, nesta ordem, com cabeçalho na 1ª linha: Grupo, Subcategoria, Tipo (Custo ou Venda), Valor contratado, Valor pago, Data de pagamento, Qtd. comprada, Qtd. vendida, Preço de venda unitário, Fornecedor.')}</strong>
+      <button class="btn small" data-action="planilhaTogglePanel">${(state.ui.importPlanilha&&state.ui.importPlanilha.aberto) ? 'Fechar' : (state.ui.importPlanilha&&state.ui.importPlanilha.linhas&&state.ui.importPlanilha.linhas.length ? 'Abrir' : 'Importar excel…')}</button>
+      ${state.ui.importPlanilha&&state.ui.importPlanilha.linhas&&state.ui.importPlanilha.linhas.length ? `<span class="hint">${state.ui.importPlanilha.linhas.filter(l=>l.lancado).length}/${state.ui.importPlanilha.linhas.length} já lançado(s)</span>` : ''}
+    </div>
+    ${(state.ui.importPlanilha&&state.ui.importPlanilha.aberto) ? renderImportPlanilhaPanel(cs) : ''}
+  </div>
+
   <div class="tablewrap">
     <table>
       <thead><tr><th><input type="checkbox" data-action="toggleCustoSelectAll" ${allSelected?'checked':''} title="Selecionar/limpar todos"></th><th>Subcategoria</th><th class="num">Qtd. comprada</th><th>Custos vinculados</th><th>Fornecedor</th><th class="num">Orç. inicial</th><th class="num">Orç. aprovado</th><th class="num">Contratado</th><th class="num">Pago</th><th>Origem do pagamento</th><th class="num">Saldo</th><th>Status</th><th>Responsável</th><th>Data prevista</th><th>Data de pagamento</th><th>Vencimento</th><th>Comprovante</th></tr></thead>
@@ -4417,8 +4540,50 @@ VIEWS.custos = function(){
     </table>
   </div>
   <div class="hint" style="margin-top:8px;">Em "Qtd. comprada", item do grupo <strong>Operação</strong> já vem com a Quantidade lançada em Entradas PMO › Custo por categoria (e continua acompanhando se você mudar lá) — edite aqui só se a quantidade REALMENTE comprada for diferente da planejada; a partir daí o valor fica fixo nessa linha e para de seguir Entradas PMO. Pros demais grupos (sem campo de quantidade em Entradas PMO), informe a quantidade de unidades desse item (ex.: 15 Coca Zero) só se ele for revendido/controlado por unidade — deixe em branco/0 pra custos sem controle de quantidade (ex.: DJ, estrutura). Item com Qtd. comprada preenchida aparece automaticamente na aba <strong>Vendas › Itens vendidos</strong>, onde você lança quanto foi vendido de fato e o preço, pra ver o saldo (estoque) e a margem real — desmarque "aparece em Vendas" pra tirar um item de lá sem perder a Qtd. comprada aqui (ex.: Gelo, que já entra como Custo vinculado em outro item e nunca tem venda própria; ou equipe/staff como Caixas, Banheristas). Em "Custos vinculados", agregue um ou mais OUTROS itens de Custos cujo valor compõe o custo real deste (ex.: Caipirinha vinculada a Cachaça + Limão + Açúcar + Copo) — se o mesmo item vinculado (ex.: Gelo) for usado por mais de uma linha, seu valor total é rateado entre elas pela quantidade VENDIDA de cada uma, aparecendo também na análise de margem em Vendas. Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. O emoji 🤝 no Saldo indica que parte desse item já está coberta por um patrocínio de permuta (lançado na aba Patrocínios › Fechados) — passe o mouse em cima pra ver quem cobre quanto. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
-  <input type="file" id="custoComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
+  <input type="file" id="custoComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">
+  <input type="file" id="planilhaFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
+  <input type="file" id="planilhaComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
 };
+// painel de revisão/aprovação da planilha importada (ver planilhaProcessarArquivo) — cada linha
+// mostra os campos editáveis + um <select> pra escolher "somar num item já existente" (sugerido
+// automaticamente por nome igual) ou deixar em branco pra criar um item novo ao aprovar
+function renderImportPlanilhaPanel(cs){
+  const ip = state.ui.importPlanilha || {linhas:[]};
+  const linhas = ip.linhas || [];
+  const opcoesExistentes = cs.rows.map(r=>({id:r.id, label:`${r.grupo}: ${r.subcategoria}`}));
+  const rows = linhas.map((l,idx)=>{
+    const match = l.matchCustoId ? opcoesExistentes.find(o=>o.id===l.matchCustoId) : null;
+    return `<tr${l.lancado ? ' style="opacity:.55;"' : ''}>
+      <td>${tblInput(`ui.importPlanilha.linhas.${idx}.subcategoria`, l.subcategoria, {width:'160px'})}</td>
+      <td><select data-bind="ui.importPlanilha.linhas.${idx}.tipo" style="font-size:11px;"><option value="custo" ${l.tipo==='custo'?'selected':''}>Custo</option><option value="venda" ${l.tipo==='venda'?'selected':''}>Venda</option></select></td>
+      <td class="num">${tblInput(`ui.importPlanilha.linhas.${idx}.valorContratado`, l.valorContratado, {type:'number', step:'0.01', cls:'num', width:'90px'})}</td>
+      <td class="num">${tblInput(`ui.importPlanilha.linhas.${idx}.valorPago`, l.valorPago, {type:'number', step:'0.01', cls:'num', width:'90px'})}</td>
+      <td>${tblInput(`ui.importPlanilha.linhas.${idx}.dataPagamento`, l.dataPagamento, {type:'date'})}</td>
+      <td>
+        <select onchange="undoSnapshotStart(); ACTIONS.planilhaSetMatch(${idx}, this.value);" style="font-size:11px; max-width:170px;" ${l.lancado?'disabled':''}>
+          <option value="">+ Novo item (fora do planejamento)</option>
+          ${opcoesExistentes.map(o=>`<option value="${o.id}" ${o.id===l.matchCustoId?'selected':''}>${esc(o.label)}</option>`).join('')}
+        </select>
+        ${!match ? '<div class="hint" style="color:var(--warn);">⚠ será criado como item novo</div>' : ''}
+      </td>
+      <td>${l.lancado ? '<span class="hint" style="color:var(--good);">✓ lançado</span>' : `<button class="btn small" data-action="planilhaLancarLinha:${idx}">Aprovar e lançar</button>`}</td>
+      <td>${l.lancado ? '' : `<button class="rm" data-action="planilhaRemoverLinha:${idx}" title="Descartar esta linha sem lançar">✕</button>`}</td>
+    </tr>`;
+  }).join('');
+  return `
+    <div style="margin-top:10px; display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
+      <button class="btn small" data-action="planilhaEscolherArquivo" ${ip.parsing?'disabled':''}>${ip.parsing ? 'Lendo planilha…' : '📄 Escolher arquivo (.xlsx)'}</button>
+      <button class="btn small" data-action="planilhaEscolherComprovante">${ip.comprovanteFile ? `📎 ${esc(ip.comprovanteFile.name)}` : '+ Anexar comprovante (opcional, aplica a tudo que for aprovado)'}</button>
+      ${linhas.length ? `<button class="btn small" data-action="planilhaLancarTodas">Aprovar e lançar todos os pendentes</button><button class="btn small" data-action="planilhaLimpar">Limpar lista</button>` : ''}
+    </div>
+    ${ip.parseError ? `<div class="hint" style="color:var(--bad); margin-top:8px;">${esc(ip.parseError)}</div>` : ''}
+    ${linhas.length ? `<div class="tablewrap" style="margin-top:10px;">
+      <table>
+        <thead><tr><th>Subcategoria</th><th>Tipo</th><th class="num">Valor contratado</th><th class="num">Valor pago</th><th>Data de pagamento</th><th>Soma em item existente?</th><th></th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>` : `<div class="hint" style="margin-top:8px;">Nenhuma planilha carregada ainda. Modelo de colunas (com cabeçalho na 1ª linha): Grupo, Subcategoria, Tipo (Custo/Venda), Valor contratado, Valor pago, Data de pagamento, Qtd. comprada, Qtd. vendida, Preço de venda unitário, Fornecedor.</div>`}`;
+}
 ACTIONS.toggleCustoSelect = (id)=>{
   if(!state.ui.custosSelected) state.ui.custosSelected = {};
   if(state.ui.custosSelected[id]) delete state.ui.custosSelected[id];
@@ -4465,6 +4630,99 @@ ACTIONS.rmComprovanteCusto = (itemId,ci)=>{
   if(!row || !row.comprovantes) return;
   row.comprovantes.splice(Number(ci),1);
   saveState(); render();
+};
+// importar planilha (Custos/Vendas) — ver planilhaProcessarArquivo acima pra parsing
+ACTIONS.planilhaTogglePanel = ()=>{
+  if(!state.ui.importPlanilha) state.ui.importPlanilha = {linhas:[]};
+  state.ui.importPlanilha.aberto = !state.ui.importPlanilha.aberto;
+  render();
+};
+ACTIONS.planilhaEscolherArquivo = ()=>{
+  if(READONLY) return;
+  const input = document.getElementById('planilhaFileInput');
+  if(!input) return;
+  input.value = '';
+  input.onchange = ()=>{
+    const file = input.files && input.files[0];
+    if(file) planilhaProcessarArquivo(file);
+  };
+  input.click();
+};
+ACTIONS.planilhaEscolherComprovante = ()=>{
+  if(READONLY) return;
+  const input = document.getElementById('planilhaComprovanteFileInput');
+  if(!input) return;
+  input.value = '';
+  input.onchange = ()=>{
+    state.ui.importPlanilha.comprovanteFile = (input.files && input.files[0]) || null;
+    render();
+  };
+  input.click();
+};
+ACTIONS.planilhaSetMatch = (idx, custoId)=>{
+  const linha = state.ui.importPlanilha.linhas[Number(idx)];
+  if(!linha) return;
+  linha.matchCustoId = custoId;
+  render();
+};
+ACTIONS.planilhaRemoverLinha = (idx)=>{
+  state.ui.importPlanilha.linhas.splice(Number(idx),1);
+  render();
+};
+ACTIONS.planilhaLimpar = ()=>{
+  if(!state.ui.importPlanilha) return;
+  state.ui.importPlanilha.linhas = [];
+  state.ui.importPlanilha.parseError = null;
+  render();
+};
+// aprova UMA linha: soma no item já escolhido (matchCustoId) ou cria um item NOVO — mesmo sem
+// estar no planejamento, é assim que o usuário vê "acréscimo de item fora do planejado" (pedido
+// explícito: "insira como custo e venda mesmo que não esteja planejado"). Mesmo caminho de
+// "Entradas PMO > Custo por categoria > + Adicionar item" (ver ACTIONS.addCostItem), só preenchido
+// com os dados da planilha — não existe lógica divergente pra um item "vindo de importação".
+ACTIONS.planilhaLancarLinha = (idx)=>{
+  if(READONLY) return;
+  const ip = state.ui.importPlanilha;
+  const linha = ip && ip.linhas[Number(idx)];
+  if(!linha || linha.lancado) return;
+  let row = linha.matchCustoId ? state.custos.find(c=>c.id===linha.matchCustoId) : null;
+  if(!row){
+    const groupKey = linha.grupo || (state.costGroups[0]||{}).key;
+    const group = state.costGroups.find(g=>g.key===groupKey);
+    if(!group) return;
+    ACTIONS.addCostItem(groupKey);
+    row = state.custos[state.custos.length-1];
+    const catItem = (state.itemCatalog[groupKey]||[]).find(it=>it.key===row.path[1]);
+    const label = linha.subcategoria || '(planilha)';
+    if(catItem) catItem.label = label;
+    row.subcategoria = label;
+    row.grupo = group.label;
+    row.obs = (row.obs ? row.obs+' | ' : '') + 'Lançado a partir de planilha importada.';
+  }
+  row.valorContratado = (Number(row.valorContratado)||0) + (Number(linha.valorContratado)||0);
+  row.valorPago = (Number(row.valorPago)||0) + (Number(linha.valorPago)||0);
+  if(linha.fornecedor && !row.fornecedor) row.fornecedor = linha.fornecedor;
+  if(linha.dataPagamento){
+    row.dataPagamento = linha.dataPagamento;
+    if(!row.status || row.status==='Não iniciado'){
+      row.status = (Number(row.valorPago) >= Number(row.valorContratado) && Number(row.valorContratado)>0) ? 'Pago Total' : 'Pago Parcial';
+    }
+  }
+  if(linha.tipo==='venda'){
+    row.qtdComprada = (Number(row.qtdComprada)||0) + (Number(linha.qtdComprada)||0);
+    row.qtdVendida = (Number(row.qtdVendida)||0) + (Number(linha.qtdVendida)||0);
+    if(linha.precoVendaUnit) row.precoVendaUnit = Number(linha.precoVendaUnit)||0;
+  }
+  linha.lancado = true;
+  linha.custoIdLancado = row.id;
+  saveState(); render();
+  if(ip.comprovanteFile) requestComprovanteUpload('custos', row.id, ip.comprovanteFile);
+};
+ACTIONS.planilhaLancarTodas = ()=>{
+  if(READONLY) return;
+  const ip = state.ui.importPlanilha;
+  if(!ip) return;
+  (ip.linhas||[]).forEach((linha,idx)=>{ if(!linha.lancado) ACTIONS.planilhaLancarLinha(idx); });
 };
 
 /* ================= MESAS (Feijoada do Bloco) ================= */
@@ -5037,8 +5295,49 @@ VIEWS.oxr = function(){
     <td class="num mono">${fmtCur(r.saldo)}</td><td class="num mono">${fmtCur(r.desvio)}</td>
     <td class="num mono">${fmtPct(r.desvioPct)}</td><td class="num mono">${fmtCur(r.projFinal)}</td><td>${badge(r.classif)}</td>
   </tr>`).join('');
+
+  // lado da receita (planejado x ja realizado de verdade) — ver computeReceitaOxR
+  const receitaRows = computeReceitaOxR();
+  const receitaTotais = {
+    planejado: sum(receitaRows.map(r=>r.planejado)), realizado: sum(receitaRows.map(r=>r.realizado)),
+    saldo: sum(receitaRows.map(r=>r.saldo)),
+  };
+  const receitaTrs = receitaRows.map(r=>`<tr>
+    <td>${esc(r.cat)}</td><td class="num mono">${fmtCur(r.planejado)}</td><td class="num mono" style="color:var(--good);">${fmtCur(r.realizado)}</td>
+    <td class="num mono">${fmtCur(r.saldo)}</td><td class="num mono">${r.planejado ? fmtPct(r.pctRealizado) : '—'}</td>
+  </tr>`).join('');
+
+  // placar geral do evento — receita/custo/margem planejados (cenario Base) vs o que ja e dinheiro
+  // de verdade (entrou ou saiu do caixa), resposta direta de "preciso ver a separacao entre
+  // planejado e ocorrido" sem precisar abrir mais nenhuma aba
+  const custoTotalPlanejado = totals.orcRevisado;
+  const custoTotalRealizado = totals.realizado;
+  const margemPlanejada = receitaTotais.planejado - custoTotalPlanejado;
+  const margemRealizada = receitaTotais.realizado - custoTotalRealizado;
+
   return `
-  <div class="topline"><div><h1>Orçamento × Real${infoIcon('Consolida a aba Custos em 9 categorias e compara o orçamento revisado (aprovado) com o que foi de fato contratado e realizado, sinalizando se cada categoria está Dentro do orçamento, em Atenção ou Estourada.')}</h1><div class="desc">Rollup automático por categoria — tudo vem da aba Custos.</div></div></div>
+  <div class="topline"><div><h1>Orçamento × Real${infoIcon('Compara o cenário Base PLANEJADO (Entradas PMO) com o que de fato OCORREU: receita já recebida em caixa (ingressos, patrocínio, ativações, itens vendidos) e custo já pago, mês a pagamento, sem depender de estimativa. O lado de custos continua consolidando a aba Custos em 9 categorias, comparando o orçamento revisado (aprovado) com o contratado/realizado.')}</h1><div class="desc">Cenário Base: o que foi planejado × o que já é dinheiro de verdade (entrou ou saiu do caixa).</div></div></div>
+
+  <div class="gridN" style="margin-bottom:22px;">
+    <div class="kpi"><div class="lbl">Receita planejada</div><div class="kpi-value">${fmtCur(receitaTotais.planejado)}</div></div>
+    <div class="kpi"><div class="lbl">Receita realizada</div><div class="kpi-value" style="color:var(--good);">${fmtCur(receitaTotais.realizado)}</div></div>
+    <div class="kpi"><div class="lbl">Custo planejado (orç. revisado)</div><div class="kpi-value">${fmtCur(custoTotalPlanejado)}</div></div>
+    <div class="kpi"><div class="lbl">Custo realizado (pago)</div><div class="kpi-value" style="color:var(--bad);">${fmtCur(custoTotalRealizado)}</div></div>
+    <div class="kpi"><div class="lbl">Margem planejada</div><div class="kpi-value" style="color:${margemPlanejada>=0?'var(--text)':'var(--bad)'};">${fmtCur(margemPlanejada)}</div></div>
+    <div class="kpi"><div class="lbl">Margem realizada (até agora)</div><div class="kpi-value" style="color:${margemRealizada>=0?'var(--good)':'var(--bad)'};">${fmtCur(margemRealizada)}</div></div>
+  </div>
+
+  <h2 style="font-size:15px; margin:0 0 8px;">Receita — Planejado × Realizado</h2>
+  <div class="hint" style="margin-bottom:8px;">"Realizado" aqui é só dinheiro que já de fato entrou no caixa (ingressos recebidos, parcelas de patrocínio/ativação já pagas, itens vendidos já faturados) — nunca uma estimativa.</div>
+  <div class="tablewrap" style="margin-bottom:24px;">
+    <table>
+      <thead><tr><th>Categoria</th><th class="num">Planejado</th><th class="num">Realizado</th><th class="num">Saldo a receber</th><th class="num">% Realizado</th></tr></thead>
+      <tbody>${receitaTrs}</tbody>
+      <tfoot><tr><td>TOTAL</td><td class="num mono">${fmtCur(receitaTotais.planejado)}</td><td class="num mono" style="color:var(--good);">${fmtCur(receitaTotais.realizado)}</td><td class="num mono">${fmtCur(receitaTotais.saldo)}</td><td></td></tr></tfoot>
+    </table>
+  </div>
+
+  <h2 style="font-size:15px; margin:0 0 8px;">Custos — Planejado × Realizado</h2>
   <div class="tablewrap">
     <table>
       <thead><tr><th>Categoria</th><th class="num">Orç. inicial</th><th class="num">Orç. revisado</th><th class="num">Contratado</th><th class="num">Realizado</th><th class="num">Saldo</th><th class="num">Desvio R$</th><th class="num">Desvio %</th><th class="num">Projeção final</th><th>Classificação</th></tr></thead>
