@@ -130,6 +130,7 @@ nav.groups{padding:14px 10px 20px; flex:1;}
   /* tabelas com varias colunas de input nao cabem espremidas num celular — melhor
      rolar de lado com cada coluna numa largura legivel do que cortar o texto */
   .tablewrap table{min-width:640px;}
+  .tablewrap{max-height:min(78vh, 520px);}
 }
 .topline{display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:22px; flex-wrap:wrap;}
 .topline h1{font-size:26px; margin:0; font-weight:600;}
@@ -172,7 +173,14 @@ th{text-align:left; font-size:10.8px; text-transform:uppercase; letter-spacing:.
 td{padding:7px 10px; border-bottom:1px solid var(--border-soft); vertical-align:middle;}
 tr:last-child td{border-bottom:none;}
 td.num, th.num{text-align:right;}
-.tablewrap{overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface);}
+/* max-height + overflow:auto (em vez de só overflow-x) dá um scroll PRÓPRIO à tabela, igual
+   "congelar painel" de planilha — sem isso, sticky no thead não funciona: overflow-x:auto sozinho
+   já faz o navegador tratar overflow-y como auto por baixo dos panos (regra da spec de CSS), mas
+   sem altura limitada essa "área de scroll" nunca rola de verdade, e o sticky não tem em cima do
+   que grudar. Com max-height, tabelas curtas continuam exatamente iguais (só pega esse limite
+   quando tem conteúdo suficiente pra passar dele). */
+.tablewrap{overflow:auto; max-height:min(72vh, 640px); border:1px solid var(--border); border-radius:var(--radius); background:var(--surface);}
+.tablewrap table thead th{position:sticky; top:0; z-index:5; background:var(--surface); box-shadow:0 1px 0 var(--border);}
 table input, table select{padding:5px 7px; font-size:12.4px;}
 table input{min-width:64px;}
 table select{min-width:128px;}
@@ -1762,8 +1770,27 @@ function qtdVendidaPorCustoLink(){
   });
   return out;
 }
+// patrocínio por permuta: uma empresa que fechou uma cota (ver VIEWS.patrocinios) pode, em vez de
+// pagar em dinheiro, cobrir parte do custo de um item específico de Custos (ex.: item custa R$1000,
+// a permuta cobre R$500, sobra R$500 pra pagar em dinheiro). Cada fechamento marcado "permuta" e
+// vinculado a um item de Custos entra aqui — sempre lendo state.patrocinios.base, mesma convenção
+// de dado real usada no resto de Custos (orcInicial também só lê state.entradas.base).
+function permutaDetalhesPorCusto(){
+  const out = {};
+  (state.patrocinios.base||[]).forEach(t=>{
+    (t.fechamentos||[]).forEach(f=>{
+      const p = f.permuta;
+      if(p && p.ativo && p.custoId){
+        if(!out[p.custoId]) out[p.custoId] = [];
+        out[p.custoId].push({empresa: f.empresa||'(sem nome)', cota: t.cota, valor: Number(p.valor)||0});
+      }
+    });
+  });
+  return out;
+}
 function computeCustosSummary(){
   const qtdVendidaPorLink = qtdVendidaPorCustoLink();
+  const permutaPorCusto = permutaDetalhesPorCusto();
   const byId = new Map(state.custos.map(c=>[c.id, c]));
   const rows = state.custos.map(c=>{
     // linha de custo vinculada a uma ativação (ver syncAtivacaoCustos) ou já "aposentada" de um
@@ -1828,10 +1855,14 @@ function computeCustosSummary(){
     // fora de Vendas › Itens vendidos (ver itensVendidosSummary), mesmo tendo Qtd. comprada > 0;
     // continua existindo normalmente em Custos e pode seguir sendo usado como "Custo vinculado"
     const excluidoVendas = !!c.excluidoVendas;
+    // cobertura por permuta (ver permutaDetalhesPorCusto acima) — abate do Saldo junto com o que já
+    // foi pago em dinheiro, já que também não precisa mais sair do caixa
+    const permutaDetalhes = permutaPorCusto[c.id] || [];
+    const coberturaPermuta = sum(permutaDetalhes.map(d=> d.valor));
     return Object.assign({}, c, {
-      orcInicial, orcAprovado, contratado, pago, saldo: contratado-pago, eac,
+      orcInicial, orcAprovado, contratado, pago, saldo: contratado-pago-coberturaPermuta, eac,
       qtdComprada, qtdVendida, precoVendaUnit, custoUnitario, custoUnitarioLinks, custoUnitarioTotal,
-      saldoUnidades, faturamento, excluidoVendas,
+      saldoUnidades, faturamento, excluidoVendas, permutaDetalhes, coberturaPermuta,
       custoLinks, custoLinkInfos, custoAlocadoProprio, custoAlocadoLinks, custoAlocado, margemReal, margemPct,
     });
   });
@@ -4096,6 +4127,7 @@ VIEWS.patrocinios = function(){
     fechamentos.forEach(f=>{ const s=fechamentoParcelaSummary(f); pago+=s.pago; totalParcelado+=s.total; });
     return {nFechamentos: fechamentos.length, pago, totalParcelado};
   }
+  const cs = computeCustosSummary();
   const openFech = state.ui.patrocFechamentosOpen || {};
   const openParc = state.ui.patrocParcelasOpen || {};
   const rows = tiers.map((t,i)=>{
@@ -4120,10 +4152,13 @@ VIEWS.patrocinios = function(){
     const fechRows = (t.fechamentos||[]).map((f,fi)=>{
       const fsum = fechamentoParcelaSummary(f);
       const isParcOpen = !!openParc[f.id];
+      const p = f.permuta || {ativo:false, custoId:'', valor:0};
       const fRow = `<tr>
         <td>${tblInput(`patrocinios.${scen}.${i}.fechamentos.${fi}.empresa`, f.empresa, {width:'160px'})}</td>
         <td class="num mono">${fmtCur(fsum.pago)}</td>
         <td class="num mono">${fmtCur(fsum.pendente)}</td>
+        <td style="text-align:center;"><input type="checkbox" data-action="togglePermutaFechamento:${scen}:${i}:${fi}" ${p.ativo?'checked':''} title="Em vez de pagar em dinheiro, essa empresa cobre parte do custo de um item (permuta)"></td>
+        <td>${permutaCell(cs, scen, i, fi, f)}</td>
         <td><button class="btn small" data-action="toggleFechamentoParcelas:${f.id}">${fsum.n ? `📅 ${fsum.n} parcela${fsum.n>1?'s':''}` : '📅 Parcelas'}</button></td>
         <td><button class="rm" data-action="rmFechamento:${scen}:${i}:${fi}">✕</button></td>
       </tr>`;
@@ -4135,7 +4170,7 @@ VIEWS.patrocinios = function(){
         <td>${parcelaStatusBadge(pc)}</td>
         <td><button class="rm" data-action="rmParcela:${scen}:${i}:${fi}:${pi}">✕</button></td>
       </tr>`).join('');
-      return fRow + `<tr><td colspan="5" style="background:var(--surface-1, #fff); padding:8px 12px;">
+      return fRow + `<tr><td colspan="7" style="background:var(--surface-1, #fff); padding:8px 12px;">
         <div style="font-size:12px; font-weight:700; margin-bottom:6px;">Parcelas de "${esc(f.empresa||'(sem nome)')}" ${fsum.n?`<span class="hint" style="font-weight:400;">— pago ${fmtCur(fsum.pago)} de ${fmtCur(fsum.total)}</span>`:''}</div>
         <table style="width:auto; min-width:560px;"><thead><tr><th class="num">Valor</th><th>Data prevista</th><th>Data de pagamento</th><th>Status</th><th></th></tr></thead>
         <tbody>${parcelaRows || `<tr><td colspan="5" class="hint">Nenhuma parcela ainda.</td></tr>`}</tbody></table>
@@ -4145,8 +4180,8 @@ VIEWS.patrocinios = function(){
 
     return mainRow + `<tr><td colspan="9" style="background:var(--surface-2); padding:10px 14px;">
       <div style="font-size:12.5px; font-weight:700; margin-bottom:6px;">Empresas que fecharam "${esc(t.cota)}" <span class="hint" style="font-weight:400;">(meta: ${t.qtd})</span> ${fs.nFechamentos?`<span class="hint" style="font-weight:400;">— pago ${fmtCur(fs.pago)} de ${fmtCur(fs.totalParcelado)} parcelado</span>`:''}</div>
-      <table style="width:auto; min-width:620px;"><thead><tr><th>Empresa</th><th class="num">Pago</th><th class="num">Pendente</th><th>Parcelas</th><th></th></tr></thead>
-      <tbody>${fechRows || `<tr><td colspan="5" class="hint">Nenhuma empresa fechou essa cota ainda.</td></tr>`}</tbody></table>
+      <table style="width:auto; min-width:760px;"><thead><tr><th>Empresa</th><th class="num">Pago</th><th class="num">Pendente</th><th>Permuta?</th><th>Cobre custo de</th><th>Parcelas</th><th></th></tr></thead>
+      <tbody>${fechRows || `<tr><td colspan="7" class="hint">Nenhuma empresa fechou essa cota ainda.</td></tr>`}</tbody></table>
       <button class="btn small" style="margin-top:8px;" data-action="addFechamento:${scen}:${i}">+ Adicionar empresa</button>
     </td></tr>`;
   }).join('');
@@ -4160,7 +4195,7 @@ VIEWS.patrocinios = function(){
   </div>`;
 
   return `
-  <div class="topline"><div><h1>Patrocínios ${infoIcon('Pipeline comercial de cotas de patrocínio. A Probabilidade é editável linha a linha — o Estágio é só uma etiqueta de acompanhamento (não altera o cálculo). Receita ponderada = Valor × Qtd × Probabilidade. Qtd. alvo é quantas empresas podem fechar aquela mesma cota (ex.: Prata com alvo 6 pode ter até 6 empresas diferentes) — clique em "Fechados" pra cadastrar cada empresa com seu nome e suas próprias parcelas. As parcelas (valor + data) de cada empresa alimentam o Fluxo de Caixa automaticamente, no mês certo — com data de pagamento é "Realizado"; só com data prevista é "Previsto".')}</h1><div class="desc">Pipeline comercial por cenário. A probabilidade de fechamento é editável cota a cota.</div></div></div>
+  <div class="topline"><div><h1>Patrocínios ${infoIcon('Pipeline comercial de cotas de patrocínio. A Probabilidade é editável linha a linha — o Estágio é só uma etiqueta de acompanhamento (não altera o cálculo). Receita ponderada = Valor × Qtd × Probabilidade. Qtd. alvo é quantas empresas podem fechar aquela mesma cota (ex.: Prata com alvo 6 pode ter até 6 empresas diferentes) — clique em "Fechados" pra cadastrar cada empresa com seu nome e suas próprias parcelas. As parcelas (valor + data) de cada empresa alimentam o Fluxo de Caixa automaticamente, no mês certo — com data de pagamento é "Realizado"; só com data prevista é "Previsto". Marque "Permuta?" quando a empresa, em vez de pagar em dinheiro, cobre parte do custo de um item específico (ex.: item custa R$1000, a permuta cobre R$500, sobra R$500 pra pagar em dinheiro) — escolha o item de Custos e o valor coberto em "Cobre custo de"; o Saldo desse item em Custos já desconta esse valor automaticamente.')}</h1><div class="desc">Pipeline comercial por cenário. A probabilidade de fechamento é editável cota a cota.</div></div></div>
 
   ${alertaAtrasados}
 
@@ -4183,8 +4218,19 @@ VIEWS.patrocinios = function(){
     <div class="kpi"><div class="lbl">Patrocínio contratado (assinado)</div><div class="kpi-value">${fmtCur(p.contratado)}</div></div>
     <div class="kpi"><div class="lbl">Patrocínio em pipeline</div><div class="kpi-value">${fmtCur(p.pipeline)}</div></div>
     <div class="kpi"><div class="lbl">Receita ponderada (esperado)</div><div class="kpi-value">${fmtCur(p.esperado)}</div></div>
+    ${permutaResumoKpi(cs)}
   </div>`;
 };
+// resumo "quanto já tá coberto por permuta" — soma todo custoAlocado/coberturaPermuta de
+// qualquer item de Custos no projeto (não só do cenário aberto agora, já que permuta sempre lê
+// state.patrocinios.base), com o detalhe de cada item coberto no ícone i
+function permutaResumoKpi(cs){
+  const cobertos = cs.rows.filter(r=> r.coberturaPermuta>0);
+  if(!cobertos.length) return '';
+  const total = sum(cobertos.map(r=>r.coberturaPermuta));
+  const detalhe = cobertos.map(r=> `↳ ${esc(r.subcategoria)}: ${esc(fmtCur(r.coberturaPermuta))}`).join('<br>');
+  return `<div class="kpi"><div class="lbl">Custo coberto por permuta${infoIcon('Itens de Custos cobertos:<br>'+detalhe)}</div><div class="kpi-value" style="color:var(--accent-strong);">${fmtCur(total)}</div><div class="hint" style="margin-top:4px;">${cobertos.length} item${cobertos.length>1?'s':''} de Custos — veja a aba Custos</div></div>`;
+}
 ACTIONS.addTier = (scen)=>{ state.patrocinios[scen].push({id:uid(), cota:'Nova cota', valorUnit:5000, qtd:1, estagio:'Prospecção', prob:state.stageProb['Prospecção']||0.15, contrapartida:'', perfil:'', fechamentos:[]}); saveState(); render(); };
 ACTIONS.rmTier = (scen,i)=>{ state.patrocinios[scen].splice(Number(i),1); saveState(); render(); };
 ACTIONS.toggleFechamentos = (tierId)=>{
@@ -4221,6 +4267,48 @@ ACTIONS.rmParcela = (scen,i,fi,pi)=>{
   f.parcelas.splice(Number(pi),1);
   saveState(); render();
 };
+// patrocínio por permuta (ver permutaDetalhesPorCusto) — uma empresa fechou a cota mas, em vez de
+// pagar em dinheiro, cobre parte do custo de um item de Custos específico
+ACTIONS.togglePermutaFechamento = (scen,i,fi)=>{
+  const t = state.patrocinios[scen][Number(i)]; if(!t) return;
+  const f = t.fechamentos && t.fechamentos[Number(fi)]; if(!f) return;
+  if(!f.permuta) f.permuta = {ativo:false, custoId:'', valor:0};
+  f.permuta.ativo = !f.permuta.ativo;
+  saveState(); render();
+};
+ACTIONS.setPermutaCusto = (scen,i,fi,custoId)=>{
+  const t = state.patrocinios[scen][Number(i)]; if(!t) return;
+  const f = t.fechamentos && t.fechamentos[Number(fi)]; if(!f) return;
+  if(!f.permuta) f.permuta = {ativo:true, custoId:'', valor:0};
+  f.permuta.custoId = custoId;
+  saveState(); render();
+};
+ACTIONS.rmPermutaCusto = (scen,i,fi)=>{
+  const t = state.patrocinios[scen][Number(i)]; if(!t) return;
+  const f = t.fechamentos && t.fechamentos[Number(fi)]; if(!f || !f.permuta) return;
+  f.permuta.custoId = ''; f.permuta.valor = 0;
+  saveState(); render();
+};
+// coluna "Permuta" da tabela de empresas que fecharam uma cota — some (travessão) se a empresa não
+// marcou "permuta"; marcado e sem item escolhido ainda, mostra o <select> pra vincular; vinculado,
+// mostra o item + o campo de valor coberto editável + botão pra desvincular
+function permutaCell(cs, scen, i, fi, f){
+  const p = f.permuta || {ativo:false, custoId:'', valor:0};
+  if(!p.ativo) return '<span class="hint">—</span>';
+  const linked = p.custoId ? cs.rows.find(r=>r.id===p.custoId) : null;
+  if(!linked){
+    const opts = cs.rows.map(r=>({id:r.id, label:r.subcategoria, grupo:r.grupo}));
+    return `<select style="font-size:11px; max-width:190px;" onchange="if(this.value){ undoSnapshotStart(); ACTIONS.setPermutaCusto('${scen}',${i},${fi}, this.value); }">
+      <option value="">Escolher item de custo…</option>
+      ${opts.map(o=>`<option value="${o.id}">${esc(o.grupo)}: ${esc(o.label)}</option>`).join('')}
+    </select>`;
+  }
+  return `<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+    <span class="hint" style="white-space:nowrap;">${esc(linked.grupo)}: ${esc(linked.subcategoria)}</span>
+    ${tblInput(`patrocinios.${scen}.${i}.fechamentos.${fi}.permuta.valor`, p.valor, {type:'number', step:'50', cls:'num', width:'90px'})}
+    <button class="rm" data-action="rmPermutaCusto:${scen}:${i}:${fi}" title="Desvincular sem desmarcar permuta">✕</button>
+  </div>`;
+}
 
 /* ================= CUSTOS ================= */
 const CUSTO_STATUS = ['Não iniciado','Em cotação','Contratado','Pago Parcial','Pago Total','Cancelado'];
@@ -4276,7 +4364,7 @@ VIEWS.custos = function(){
       <td class="num">${tblInput(`custos.${i}.valorContratado`, r.contratado, {type:'number', cls:'num'})}</td>
       <td class="num">${tblInput(`custos.${i}.valorPago`, r.pago, {type:'number', cls:'num'})}</td>
       <td><select data-bind="custos.${i}.origemPagamento" title="De onde saiu o dinheiro desse pagamento">${Object.keys(ORIGEM_PAGAMENTO_LABEL).map(k=>`<option value="${k}" ${k===(r.origemPagamento||'dominio')?'selected':''}>${ORIGEM_PAGAMENTO_LABEL[k]}</option>`).join('')}</select></td>
-      <td class="num mono">${fmtCur(r.saldo)}</td>
+      <td class="num mono">${fmtCur(r.saldo)}${r.coberturaPermuta>0 ? ` <span class="hint" style="color:var(--accent-strong); white-space:nowrap;" title="Saldo já desconta ${esc(fmtCur(r.coberturaPermuta))} coberto por permuta: ${r.permutaDetalhes.map(d=>`${esc(d.empresa)} (${esc(fmtCur(d.valor))})`).join(', ')}">🤝 -${fmtCur2(r.coberturaPermuta)}</span>` : ''}</td>
       <td><select id="${mkId('custos.'+i+'.status')}" data-bind="custos.${i}.status">${CUSTO_STATUS.map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')}</select></td>
       <td>${tblInput(`custos.${i}.responsavel`, r.responsavel)}</td>
       <td>${tblInput(`custos.${i}.dataPrevista`, r.dataPrevista, {type:'date'})}</td>
@@ -4328,7 +4416,7 @@ VIEWS.custos = function(){
       <tbody>${rows}</tbody>
     </table>
   </div>
-  <div class="hint" style="margin-top:8px;">Em "Qtd. comprada", item do grupo <strong>Operação</strong> já vem com a Quantidade lançada em Entradas PMO › Custo por categoria (e continua acompanhando se você mudar lá) — edite aqui só se a quantidade REALMENTE comprada for diferente da planejada; a partir daí o valor fica fixo nessa linha e para de seguir Entradas PMO. Pros demais grupos (sem campo de quantidade em Entradas PMO), informe a quantidade de unidades desse item (ex.: 15 Coca Zero) só se ele for revendido/controlado por unidade — deixe em branco/0 pra custos sem controle de quantidade (ex.: DJ, estrutura). Item com Qtd. comprada preenchida aparece automaticamente na aba <strong>Vendas › Itens vendidos</strong>, onde você lança quanto foi vendido de fato e o preço, pra ver o saldo (estoque) e a margem real — desmarque "aparece em Vendas" pra tirar um item de lá sem perder a Qtd. comprada aqui (ex.: Gelo, que já entra como Custo vinculado em outro item e nunca tem venda própria; ou equipe/staff como Caixas, Banheristas). Em "Custos vinculados", agregue um ou mais OUTROS itens de Custos cujo valor compõe o custo real deste (ex.: Caipirinha vinculada a Cachaça + Limão + Açúcar + Copo) — se o mesmo item vinculado (ex.: Gelo) for usado por mais de uma linha, seu valor total é rateado entre elas pela quantidade VENDIDA de cada uma, aparecendo também na análise de margem em Vendas. Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
+  <div class="hint" style="margin-top:8px;">Em "Qtd. comprada", item do grupo <strong>Operação</strong> já vem com a Quantidade lançada em Entradas PMO › Custo por categoria (e continua acompanhando se você mudar lá) — edite aqui só se a quantidade REALMENTE comprada for diferente da planejada; a partir daí o valor fica fixo nessa linha e para de seguir Entradas PMO. Pros demais grupos (sem campo de quantidade em Entradas PMO), informe a quantidade de unidades desse item (ex.: 15 Coca Zero) só se ele for revendido/controlado por unidade — deixe em branco/0 pra custos sem controle de quantidade (ex.: DJ, estrutura). Item com Qtd. comprada preenchida aparece automaticamente na aba <strong>Vendas › Itens vendidos</strong>, onde você lança quanto foi vendido de fato e o preço, pra ver o saldo (estoque) e a margem real — desmarque "aparece em Vendas" pra tirar um item de lá sem perder a Qtd. comprada aqui (ex.: Gelo, que já entra como Custo vinculado em outro item e nunca tem venda própria; ou equipe/staff como Caixas, Banheristas). Em "Custos vinculados", agregue um ou mais OUTROS itens de Custos cujo valor compõe o custo real deste (ex.: Caipirinha vinculada a Cachaça + Limão + Açúcar + Copo) — se o mesmo item vinculado (ex.: Gelo) for usado por mais de uma linha, seu valor total é rateado entre elas pela quantidade VENDIDA de cada uma, aparecendo também na análise de margem em Vendas. Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. O emoji 🤝 no Saldo indica que parte desse item já está coberta por um patrocínio de permuta (lançado na aba Patrocínios › Fechados) — passe o mouse em cima pra ver quem cobre quanto. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
   <input type="file" id="custoComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
 };
 ACTIONS.toggleCustoSelect = (id)=>{
