@@ -2679,7 +2679,7 @@ function onEnterCommit(e){
 // acoes que so navegam a tela (nao alteram dados do projeto) — continuam liberadas em modo convidado
 // reserva de mesa é a UNICA area do app onde convidado tambem grava de verdade (ver schema.sql,
 // secao 11) — por isso essas acoes de mesa entram aqui, mesmo nao sendo "so navegacao"
-const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa', 'openSaldoHistorico', 'closeSaldoHistorico', 'setSaldoHistoricoFiltro', 'openMesasLista', 'closeMesasLista', 'mesaListaAbrirMesa', 'mesaListaVerComprovante', 'mesaListaAnexarComprovante', 'openScenarioBreakdown', 'closeScenarioBreakdown', 'openRitmistasLista', 'closeRitmistasLista', 'imprimirLupa', 'openPrevisoesCaixa', 'closePrevisoesCaixa']);
+const READONLY_SAFE_ACTIONS = new Set(['setEntradasSection', 'selectMesa', 'closeMesaPanel', 'mesaZoom', 'openMesa3d', 'closeMesa3d', 'mesa3dZoom', 'claimMesa', 'saveMyMesa', 'cancelMyMesa', 'addPessoaMesaForm', 'rmPessoaMesaForm', 'savePagamentoMesa', 'attachComprovanteMesaPagamento', 'viewComprovanteMesaPagamento', 'rmComprovanteMesaPagamento', 'moverMesa', 'openSaldoHistorico', 'closeSaldoHistorico', 'setSaldoHistoricoFiltro', 'openMesasLista', 'closeMesasLista', 'mesaListaAbrirMesa', 'mesaListaVerComprovante', 'mesaListaAnexarComprovante', 'openScenarioBreakdown', 'closeScenarioBreakdown', 'openRitmistasLista', 'closeRitmistasLista', 'imprimirLupa', 'openPrevisoesCaixa', 'closePrevisoesCaixa', 'abrirLupaNumero', 'fecharLupaNumero']);
 function onAction(e){
   const el = e.currentTarget || e.target.closest('[data-action]');
   const [action, ...args] = el.dataset.action.split(':');
@@ -2929,16 +2929,16 @@ VIEWS.dashboard = function(){
   };
 
   const execKpis = [
-    ['Receita projetada (Base)', fmtCur(base.receitaTotal)], ['Receita contratada (patrocínio)', fmtCur(base.patroContratado)],
-    ['Custo projetado (BAC)', fmtCur(cust.bac)], ['Custo contratado', fmtCur(cust.committed)],
-    ['Resultado projetado (Base)', fmtCur(base.resultado)], ['Margem (Base)', fmtPct(base.margem)],
+    ['Receita projetada (Base)', fmtCur(base.receitaTotal), 'openScenarioBreakdown:base:receita'], ['Receita contratada (patrocínio)', fmtCur(base.patroContratado)],
+    ['Custo projetado (BAC)', fmtCur(cust.bac), 'abrirLupaNumero:custos_bac'], ['Custo contratado', fmtCur(cust.committed), 'abrirLupaNumero:custos_committed'],
+    ['Resultado projetado (Base)', fmtCur(base.resultado), 'openScenarioBreakdown:base:resultado'], ['Margem (Base)', fmtPct(base.margem)],
     ['Break-even (ingressos)', fmtInt(base.beCom)],
     isBateria ? ['Integrantes que já contribuíram', `${fmtInt(contribTrk.jaContribuiram)} / ${fmtInt(contribTrk.totalIntegrantes)}`] : ['Ingressos vendidos', fmtInt(trk.vendidos)],
     isBateria ? ['Total já arrecadado (Bateria)', fmtCur(contribTrk.totalArrecadado)] : ['Ingressos restantes (meta)', fmtInt(Math.max(0,trk.gap))],
     ['Ocupação (Base)', fmtPct(base.ocupacao)],
     ['Patrocínio pipeline', fmtCur(base.patroPipeline)], ['Cobertura de patrocínio', fmtPct(base.cobertura)],
-    ['Capital de giro necessário', fmtCur(capGiroFor('base'))], ['Exposição financeira', fmtCur(cust.bac-base.patroContratado)],
-    ['Forecast final (EAC)', fmtCur(cust.eac)], ['Score de viabilidade', fmtNum(scoreRes.score,1)],
+    ['Capital de giro necessário', fmtCur(capGiroFor('base'))], ['Exposição financeira', fmtCur(cust.bac-base.patroContratado), 'abrirLupaNumero:dashboard_exposicao'],
+    ['Forecast final (EAC)', fmtCur(cust.eac), 'abrirLupaNumero:custos_eac'], ['Score de viabilidade', fmtNum(scoreRes.score,1)],
   ];
   if(isFeijoada){
     execKpis.push(
@@ -2989,7 +2989,9 @@ VIEWS.dashboard = function(){
 
   <div class="section">
     <h2>KPIs executivos${infoIcon('Os números-chave do cenário Base, combinando o que está orçado com o que já foi contratado/realizado até agora. Pense nisso como o "resumo de uma linha" para a diretoria.')} <span class="hint">· cenário Base / realizado</span></h2>
-    <div class="gridN">${execKpis.map(([l,v])=>`<div class="kpi"><div class="lbl">${l}</div><div class="kpi-value">${v}</div></div>`).join('')}</div>
+    <div class="gridN">${execKpis.map(([l,v,action])=> action
+      ? `<div class="kpi saldo-kpi-clickable" data-action="${action}" title="Clique para ver de onde vem este número"><div class="lbl">${l} 🔎</div><div class="kpi-value">${v}</div></div>`
+      : `<div class="kpi"><div class="lbl">${l}</div><div class="kpi-value">${v}</div></div>`).join('')}</div>
   </div>
 
   <div class="section">
@@ -3045,7 +3047,8 @@ VIEWS.dashboard = function(){
   </div>
   ${state.ui.saldoHistoricoOpen ? saldoHistoricoLightbox() : ''}
   ${state.ui.scenarioBreakdownOpen ? scenarioBreakdownLightbox() : ''}
-  ${state.ui.previsoesCaixaOpen ? previsoesCaixaLightbox() : ''}`;
+  ${state.ui.previsoesCaixaOpen ? previsoesCaixaLightbox() : ''}
+  ${lupaNumeroLightbox()}`;
 };
 // campo de busca reutilizável em qualquer lupa — filtra client-side (sem mexer em state/render,
 // só esconde/mostra <tr>), funciona em qualquer lupa mesmo com várias tabelas dentro (ex.: o
@@ -3090,6 +3093,13 @@ function scenarioBreakdownLightbox(){
       ['Outras receitas', c.outras, 'valor fixo lançado em Entradas PMO'],
     ];
     total = c.receitaTotal;
+  } else if(tipo==='resultado'){
+    titulo = `Resultado — ${SCEN_LABEL[scen]}`;
+    linhas = [
+      ['Receita total', c.receitaTotal, null],
+      ['Custo total', -c.custoTotal, null],
+    ];
+    total = c.resultado;
   } else {
     titulo = `Custo total — ${SCEN_LABEL[scen]}`;
     const extraRows = (c.extraGroups||[]).map(g=> [g.label, sumObj(e[g.key]||{}), 'categoria de custo extra, cadastrada em Entradas PMO']);
@@ -3140,6 +3150,128 @@ ACTIONS.closeScenarioBreakdown = ()=>{
   state.ui.scenarioBreakdownOpen = false;
   render();
 };
+
+/* ---- lupa genérica "de onde vem esse número", reutilizável em qualquer KPI de qualquer aba ----
+   Mesmo padrão já usado acima (scenarioBreakdownLightbox) e no Dashboard/Fluxo (saldo-kpi-clickable
+   + 🔎), só que parametrizado por uma chave (LUPA_GERADORES) em vez de 1 função por tela — assim
+   dá pra "plugar" a lupa em qualquer .kpi sem duplicar a lightbox inteira de novo. Cada gerador
+   recalcula na hora (não guarda nada em cache) pra nunca mostrar um número velho. */
+function lupaKpi(label, key, valueHtml, opts){
+  opts = opts||{};
+  const style = opts.style ? ` style="${opts.style}"` : '';
+  const title = opts.title || 'Clique para ver de onde vem este número';
+  const hint = opts.hint ? `<div class="hint" style="margin-top:4px;">${opts.hint}</div>` : '';
+  return `<div class="kpi saldo-kpi-clickable" data-action="abrirLupaNumero:${key}" title="${esc(title)}"><div class="lbl">${esc(label)} 🔎</div><div class="kpi-value"${style}>${valueHtml}</div>${hint}</div>`;
+}
+// cache só de leitura-na-hora: Fluxo de Caixa monta "previstoByKey/realByKey" dentro da própria
+// função de render (resumoPrevistoRealizado) — mais simples guardar o resultado já pronto aqui do
+// que recalcular tudo de novo a partir da chave sozinha
+let LUPA_FLUXO_CACHE = {};
+const LUPA_GERADORES = {
+  oxr_receita_planejada: ()=>{
+    const r = computeReceitaOxR();
+    return {titulo:'Receita planejada — por fonte', linhas: r.map(l=>[l.cat, l.planejado, null]), totalLabel:'Receita planejada total', totalDisplay: fmtCur(sum(r.map(l=>l.planejado)))};
+  },
+  oxr_receita_realizada: ()=>{
+    const r = computeReceitaOxR();
+    return {titulo:'Receita realizada — por fonte (já é dinheiro de verdade no caixa)', linhas: r.map(l=>[l.cat, l.realizado, null]), totalLabel:'Receita realizada total', totalDisplay: fmtCur(sum(r.map(l=>l.realizado)))};
+  },
+  oxr_custo_planejado: ()=>{
+    const r = computeOxR();
+    return {titulo:'Custo planejado (orçamento revisado) — por categoria', linhas: r.map(l=>[l.cat, l.orcRevisado, null]), totalLabel:'Custo planejado total', totalDisplay: fmtCur(sum(r.map(l=>l.orcRevisado)))};
+  },
+  oxr_custo_realizado: ()=>{
+    const r = computeOxR();
+    return {titulo:'Custo realizado (pago) — por categoria', linhas: r.map(l=>[l.cat, l.realizado, null]), totalLabel:'Custo realizado total', totalDisplay: fmtCur(sum(r.map(l=>l.realizado)))};
+  },
+  oxr_margem_planejada: ()=>{
+    const rec = sum(computeReceitaOxR().map(l=>l.planejado)), cus = sum(computeOxR().map(l=>l.orcRevisado));
+    return {titulo:'Margem planejada (Receita planejada − Custo planejado)', linhas:[['Receita planejada', rec, null], ['Custo planejado', -cus, null]], totalLabel:'Margem planejada', totalDisplay: fmtCur(rec-cus)};
+  },
+  oxr_margem_realizada: ()=>{
+    const rec = sum(computeReceitaOxR().map(l=>l.realizado)), cus = sum(computeOxR().map(l=>l.realizado));
+    return {titulo:'Margem realizada até agora (Receita realizada − Custo realizado)', linhas:[['Receita realizada', rec, null], ['Custo realizado', -cus, null]], totalLabel:'Margem realizada', totalDisplay: fmtCur(rec-cus)};
+  },
+  custos_bac: ()=>{
+    const cs = computeCustosSummary(); const g = custosGroupBreakdown(cs,'orcAprovado');
+    return {titulo:'BAC — orçamento aprovado, por categoria', linhas:g, totalLabel:'BAC total', totalDisplay: fmtCur(cs.bac)};
+  },
+  custos_ac: ()=>{
+    const cs = computeCustosSummary(); const g = custosGroupBreakdown(cs,'pago');
+    return {titulo:'AC — custo realizado (pago), por categoria', linhas:g, totalLabel:'AC total', totalDisplay: fmtCur(cs.ac)};
+  },
+  custos_committed: ()=>{
+    const cs = computeCustosSummary(); const g = custosGroupBreakdown(cs,'contratado');
+    return {titulo:'Valor contratado, por categoria', linhas:g, totalLabel:'Contratado total', totalDisplay: fmtCur(cs.committed)};
+  },
+  custos_eac: ()=>{
+    const cs = computeCustosSummary(); const g = custosGroupBreakdown(cs,'eac');
+    return {titulo:'EAC — projeção final, por categoria (maior entre orçamento aprovado e contratado)', linhas:g, totalLabel:'EAC total', totalDisplay: fmtCur(cs.eac)};
+  },
+  custos_etc: ()=>{
+    const cs = computeCustosSummary();
+    return {titulo:'ETC — quanto ainda falta gastar (EAC − AC já pago)', linhas:[['EAC — projeção final', cs.eac, null], ['AC — já pago', -cs.ac, null]], totalLabel:'ETC', totalDisplay: fmtCur(cs.etc)};
+  },
+  custos_vac: ()=>{
+    const cs = computeCustosSummary();
+    return {titulo:'VAC — variação entre orçamento e projeção (BAC − EAC)', linhas:[['BAC — orçamento aprovado', cs.bac, null], ['EAC — projeção final', -cs.eac, null]], totalLabel:'VAC', totalDisplay: fmtCur(cs.vac)};
+  },
+  custos_pct_comprom: ()=>{
+    const cs = computeCustosSummary();
+    return {titulo:'% comprometido (contratado ÷ BAC)', linhas:[['Valor contratado', cs.committed, null], ['BAC — orçamento aprovado', cs.bac, null]], totalLabel:'% comprometido', totalDisplay: fmtPct(cs.pctComprom)};
+  },
+  custos_pct_pago: ()=>{
+    const cs = computeCustosSummary();
+    return {titulo:'% pago (pago ÷ BAC)', linhas:[['AC — já pago', cs.ac, null], ['BAC — orçamento aprovado', cs.bac, null]], totalLabel:'% pago', totalDisplay: fmtPct(cs.pctPago)};
+  },
+  dashboard_exposicao: ()=>{
+    const cust = computeCustosSummary(), base = computeScenario('base');
+    return {titulo:'Exposição financeira — quanto do custo ainda não está coberto por patrocínio fechado', linhas:[['BAC — custo projetado (orçamento aprovado)', cust.bac, null], ['Patrocínio contratado', -base.patroContratado, null]], totalLabel:'Exposição financeira', totalDisplay: fmtCur(cust.bac-base.patroContratado)};
+  },
+  patrocinio_permuta: ()=>{
+    const cs = computeCustosSummary();
+    const cobertos = cs.rows.filter(r=> r.coberturaPermuta>0);
+    const linhas = cobertos.map(r=> [r.subcategoria, r.coberturaPermuta, r.permutaDetalhes.map(d=>`${d.empresa} (${fmtCur2(d.valor)})`).join(', ')]);
+    return {titulo:'Custo coberto por permuta — por item de Custos', linhas, totalLabel:'Total coberto por permuta', totalDisplay: fmtCur(sum(cobertos.map(r=>r.coberturaPermuta)))};
+  },
+};
+function custosGroupBreakdown(cs, field){
+  const byGroup = new Map();
+  cs.rows.forEach(r=>{ byGroup.set(r.grupo, (byGroup.get(r.grupo)||0) + (Number(r[field])||0)); });
+  return [...byGroup.entries()].filter(([,v])=> v>0).map(([grupo,v])=> [grupo, v, null]);
+}
+function lupaNumeroConteudo(key){
+  if(LUPA_FLUXO_CACHE[key]) return LUPA_FLUXO_CACHE[key];
+  const gerador = LUPA_GERADORES[key];
+  return gerador ? gerador() : {titulo:'(sem detalhe cadastrado)', linhas:[], totalLabel:'Total', totalDisplay:'—'};
+}
+function lupaNumeroLightbox(){
+  const key = state.ui.lupaNumero;
+  if(!key) return '';
+  const d = lupaNumeroConteudo(key);
+  const rows = (d.linhas||[]).map(([label,valor,nota])=>`<tr>
+      <td>${esc(label)}${nota ? ` <span class="hint">— ${esc(nota)}</span>` : ''}</td>
+      <td class="num mono">${fmtCur2(valor)}</td>
+    </tr>`).join('') || `<tr><td colspan="2" class="hint">Nenhum valor lançado ainda.</td></tr>`;
+  return `
+  <div class="saldo-hist-lightbox" data-action="fecharLupaNumero">
+    <div class="lb-bar" onclick="event.stopPropagation();">
+      <span class="hint" style="font-weight:600; color:var(--text);">🔎 ${esc(d.titulo)}</span>
+      ${lbPrintButton()}
+      <button class="btn small lb-close guest-ok" data-action="fecharLupaNumero">Fechar ✕</button>
+    </div>
+    <div class="lb-viewport" onclick="event.stopPropagation();">
+      <div class="tablewrap"><table>
+        <thead><tr><th>Origem</th><th class="num">Valor</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td>${esc(d.totalLabel||'Total')}</td><td class="num mono" style="font-weight:700;">${esc(d.totalDisplay!=null ? d.totalDisplay : '')}</td></tr></tfoot>
+      </table></div>
+    </div>
+  </div>`;
+}
+ACTIONS.abrirLupaNumero = (key)=>{ state.ui.lupaNumero = key; render(); };
+ACTIONS.fecharLupaNumero = ()=>{ state.ui.lupaNumero = null; render(); };
+
 // histórico item a item do saldo de caixa compartilhado — reaproveitado tanto no card do
 // Dashboard quanto no do Fluxo de Caixa (os dois mostram o mesmo saldo, só que em telas diferentes)
 const SALDO_HIST_DOMAIN_LABEL = {main:'Piquinzada 2027', 'feijoada-bloco':'Feijoada do Bloco', 'bateria-piquinzada':'Bateria Piquinzada'};
@@ -4333,7 +4465,8 @@ VIEWS.patrocinios = function(){
     <div class="kpi"><div class="lbl">Patrocínio em pipeline</div><div class="kpi-value">${fmtCur(p.pipeline)}</div></div>
     <div class="kpi"><div class="lbl">Receita ponderada (esperado)</div><div class="kpi-value">${fmtCur(p.esperado)}</div></div>
     ${permutaResumoKpi(cs)}
-  </div>`;
+  </div>
+  ${lupaNumeroLightbox()}`;
 };
 // resumo "quanto já tá coberto por permuta" — soma todo custoAlocado/coberturaPermuta de
 // qualquer item de Custos no projeto (não só do cenário aberto agora, já que permuta sempre lê
@@ -4343,7 +4476,7 @@ function permutaResumoKpi(cs){
   if(!cobertos.length) return '';
   const total = sum(cobertos.map(r=>r.coberturaPermuta));
   const detalhe = cobertos.map(r=> `↳ ${esc(r.subcategoria)}: ${esc(fmtCur(r.coberturaPermuta))}`).join('<br>');
-  return `<div class="kpi"><div class="lbl">Custo coberto por permuta${infoIcon('Itens de Custos cobertos:<br>'+detalhe)}</div><div class="kpi-value" style="color:var(--accent-strong);">${fmtCur(total)}</div><div class="hint" style="margin-top:4px;">${cobertos.length} item${cobertos.length>1?'s':''} de Custos — veja a aba Custos</div></div>`;
+  return `<div class="kpi saldo-kpi-clickable" data-action="abrirLupaNumero:patrocinio_permuta" title="Clique para ver de onde vem este número"><div class="lbl">Custo coberto por permuta 🔎${infoIcon('Itens de Custos cobertos:<br>'+detalhe)}</div><div class="kpi-value" style="color:var(--accent-strong);">${fmtCur(total)}</div><div class="hint" style="margin-top:4px;">${cobertos.length} item${cobertos.length>1?'s':''} de Custos — veja a aba Custos</div></div>`;
 }
 ACTIONS.addTier = (scen)=>{ state.patrocinios[scen].push({id:uid(), cota:'Nova cota', valorUnit:5000, qtd:1, estagio:'Prospecção', prob:state.stageProb['Prospecção']||0.15, contrapartida:'', perfil:'', fechamentos:[]}); saveState(); render(); };
 ACTIONS.rmTier = (scen,i)=>{ state.patrocinios[scen].splice(Number(i),1); saveState(); render(); };
@@ -4505,14 +4638,14 @@ VIEWS.custos = function(){
   ${alertaAtrasados}
 
   <div class="gridN" style="margin-bottom:18px;">
-    <div class="kpi"><div class="lbl">BAC — orçamento aprovado</div><div class="kpi-value">${fmtCur(cs.bac)}</div></div>
-    <div class="kpi"><div class="lbl">AC — custo realizado (pago)</div><div class="kpi-value">${fmtCur(cs.ac)}</div></div>
-    <div class="kpi"><div class="lbl">Valor contratado</div><div class="kpi-value">${fmtCur(cs.committed)}</div></div>
-    <div class="kpi"><div class="lbl">ETC — a gastar ainda</div><div class="kpi-value">${fmtCur(cs.etc)}</div></div>
-    <div class="kpi"><div class="lbl">EAC — projeção final</div><div class="kpi-value">${fmtCur(cs.eac)}</div></div>
-    <div class="kpi"><div class="lbl">VAC — variação (BAC−EAC)</div><div class="kpi-value" style="color:${cs.vac>=0?'var(--good)':'var(--bad)'}">${fmtCur(cs.vac)}</div></div>
-    <div class="kpi"><div class="lbl">% comprometido</div><div class="kpi-value">${fmtPct(cs.pctComprom)}</div></div>
-    <div class="kpi"><div class="lbl">% pago</div><div class="kpi-value">${fmtPct(cs.pctPago)}</div></div>
+    ${lupaKpi('BAC — orçamento aprovado', 'custos_bac', fmtCur(cs.bac))}
+    ${lupaKpi('AC — custo realizado (pago)', 'custos_ac', fmtCur(cs.ac))}
+    ${lupaKpi('Valor contratado', 'custos_committed', fmtCur(cs.committed))}
+    ${lupaKpi('ETC — a gastar ainda', 'custos_etc', fmtCur(cs.etc))}
+    ${lupaKpi('EAC — projeção final', 'custos_eac', fmtCur(cs.eac))}
+    ${lupaKpi('VAC — variação (BAC−EAC)', 'custos_vac', fmtCur(cs.vac), {style:`color:${cs.vac>=0?'var(--good)':'var(--bad)'}`})}
+    ${lupaKpi('% comprometido', 'custos_pct_comprom', fmtPct(cs.pctComprom))}
+    ${lupaKpi('% pago', 'custos_pct_pago', fmtPct(cs.pctPago))}
   </div>
 
   <div class="card" style="padding:12px 16px; margin-bottom:12px; display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
@@ -4542,7 +4675,8 @@ VIEWS.custos = function(){
   <div class="hint" style="margin-top:8px;">Em "Qtd. comprada", item do grupo <strong>Operação</strong> já vem com a Quantidade lançada em Entradas PMO › Custo por categoria (e continua acompanhando se você mudar lá) — edite aqui só se a quantidade REALMENTE comprada for diferente da planejada; a partir daí o valor fica fixo nessa linha e para de seguir Entradas PMO. Pros demais grupos (sem campo de quantidade em Entradas PMO), informe a quantidade de unidades desse item (ex.: 15 Coca Zero) só se ele for revendido/controlado por unidade — deixe em branco/0 pra custos sem controle de quantidade (ex.: DJ, estrutura). Item com Qtd. comprada preenchida aparece automaticamente na aba <strong>Vendas › Itens vendidos</strong>, onde você lança quanto foi vendido de fato e o preço, pra ver o saldo (estoque) e a margem real — desmarque "aparece em Vendas" pra tirar um item de lá sem perder a Qtd. comprada aqui (ex.: Gelo, que já entra como Custo vinculado em outro item e nunca tem venda própria; ou equipe/staff como Caixas, Banheristas). Em "Custos vinculados", agregue um ou mais OUTROS itens de Custos cujo valor compõe o custo real deste (ex.: Caipirinha vinculada a Cachaça + Limão + Açúcar + Copo) — se o mesmo item vinculado (ex.: Gelo) for usado por mais de uma linha, seu valor total é rateado entre elas pela quantidade VENDIDA de cada uma, aparecendo também na análise de margem em Vendas. Orçamento aprovado começa igual ao orçamento inicial; edite para registrar uma revisão formal. Mudar o Status pra "Contratado"/"Pago Parcial"/"Pago Total" já preenche a data e o valor sozinho (ajuste se o valor pago for diferente do contratado); é isso que faz o valor entrar no mês certo do Fluxo de Caixa em vez da estimativa percentual. A coluna "Vencimento" avisa quando a data prevista já passou sem pagamento registrado. Um item com pagamento parcelado (ex.: cachê pago em várias vezes) pode ter vários comprovantes anexados — um por pagamento. "Origem do pagamento" marca se o dinheiro saiu da receita deste domínio ou do caixa geral da organização (ex.: adiantado antes de arrecadar o suficiente aqui) — útil pra depois conferir o que precisa ser reposto pro caixa. O emoji 🤝 no Saldo indica que parte desse item já está coberta por um patrocínio de permuta (lançado na aba Patrocínios › Fechados) — passe o mouse em cima pra ver quem cobre quanto. Pra preencher a mesma data em vários itens de uma vez, marque as caixinhas e use "Replicar data em lote" acima da tabela.</div>
   <input type="file" id="custoComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">
   <input type="file" id="planilhaFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
-  <input type="file" id="planilhaComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">`;
+  <input type="file" id="planilhaComprovanteFileInput" accept="image/*,application/pdf" style="display:none;">
+  ${lupaNumeroLightbox()}`;
 };
 // painel de revisão/aprovação da planilha importada (ver planilhaProcessarArquivo) — cada linha
 // mostra os campos editáveis + um <select> pra escolher "somar num item já existente" (sugerido
@@ -5319,12 +5453,12 @@ VIEWS.oxr = function(){
   <div class="topline"><div><h1>Orçamento × Real${infoIcon('Compara o cenário Base PLANEJADO (Entradas PMO) com o que de fato OCORREU: receita já recebida em caixa (ingressos, patrocínio, ativações, itens vendidos) e custo já pago, mês a pagamento, sem depender de estimativa. O lado de custos continua consolidando a aba Custos em 9 categorias, comparando o orçamento revisado (aprovado) com o contratado/realizado.')}</h1><div class="desc">Cenário Base: o que foi planejado × o que já é dinheiro de verdade (entrou ou saiu do caixa).</div></div></div>
 
   <div class="gridN" style="margin-bottom:22px;">
-    <div class="kpi"><div class="lbl">Receita planejada</div><div class="kpi-value">${fmtCur(receitaTotais.planejado)}</div></div>
-    <div class="kpi"><div class="lbl">Receita realizada</div><div class="kpi-value" style="color:var(--good);">${fmtCur(receitaTotais.realizado)}</div></div>
-    <div class="kpi"><div class="lbl">Custo planejado (orç. revisado)</div><div class="kpi-value">${fmtCur(custoTotalPlanejado)}</div></div>
-    <div class="kpi"><div class="lbl">Custo realizado (pago)</div><div class="kpi-value" style="color:var(--bad);">${fmtCur(custoTotalRealizado)}</div></div>
-    <div class="kpi"><div class="lbl">Margem planejada</div><div class="kpi-value" style="color:${margemPlanejada>=0?'var(--text)':'var(--bad)'};">${fmtCur(margemPlanejada)}</div></div>
-    <div class="kpi"><div class="lbl">Margem realizada (até agora)</div><div class="kpi-value" style="color:${margemRealizada>=0?'var(--good)':'var(--bad)'};">${fmtCur(margemRealizada)}</div></div>
+    ${lupaKpi('Receita planejada', 'oxr_receita_planejada', fmtCur(receitaTotais.planejado))}
+    ${lupaKpi('Receita realizada', 'oxr_receita_realizada', fmtCur(receitaTotais.realizado), {style:'color:var(--good);'})}
+    ${lupaKpi('Custo planejado (orç. revisado)', 'oxr_custo_planejado', fmtCur(custoTotalPlanejado))}
+    ${lupaKpi('Custo realizado (pago)', 'oxr_custo_realizado', fmtCur(custoTotalRealizado), {style:'color:var(--bad);'})}
+    ${lupaKpi('Margem planejada', 'oxr_margem_planejada', fmtCur(margemPlanejada), {style:`color:${margemPlanejada>=0?'var(--text)':'var(--bad)'};`})}
+    ${lupaKpi('Margem realizada (até agora)', 'oxr_margem_realizada', fmtCur(margemRealizada), {style:`color:${margemRealizada>=0?'var(--good)':'var(--bad)'};`})}
   </div>
 
   <h2 style="font-size:15px; margin:0 0 8px;">Receita — Planejado × Realizado</h2>
@@ -5346,7 +5480,8 @@ VIEWS.oxr = function(){
         <td class="num mono">${fmtCur(totals.contratado)}</td><td class="num mono">${fmtCur(totals.realizado)}</td>
         <td class="num mono">${fmtCur(totals.saldo)}</td><td></td><td></td><td class="num mono">${fmtCur(totals.projFinal)}</td><td></td></tr></tfoot>
     </table>
-  </div>`;
+  </div>
+  ${lupaNumeroLightbox()}`;
 };
 
 /* ================= FLUXO DE CAIXA ================= */
@@ -5368,20 +5503,23 @@ function datedSubRow(label, monthlyArr, colorVar, bgVar, annualTotal){
 // resumo "Previsto x Realizado" no topo da aba — responde de cara "quanto já é dinheiro de
 // verdade" em R$ E em %, tanto do total anual quanto (no ícone i de cada cartão) categoria por
 // categoria, pra nunca ficar escondido "de onde vem" a soma.
-function resumoPrevistoRealizado(labels, annualArr, previstoByKey, realByKey){
+function resumoPrevistoRealizado(labels, annualArr, previstoByKey, realByKey, tipo){
   const totalAnual = sum(annualArr);
   const totalPrevisto = sum(previstoByKey.map(arr=> sum(arr)));
   const totalReal = sum(realByKey.map(arr=> sum(arr)));
   const totalProjecao = Math.max(0, totalAnual-totalPrevisto-totalReal);
   const pct = v => totalAnual>0 ? fmtNum(Math.round((v/totalAnual)*1000)/10,1)+'%' : '—';
-  function breakdown(byKey, titulo){
-    const lines = labels.map((lb,i)=>{ const v = sum(byKey[i]); return v>0 ? `↳ ${lb}: ${fmtCur(v)}` : null; }).filter(Boolean);
-    return lines.length ? `<strong>${titulo}</strong><br>${lines.join('<br>')}` : `${titulo}: nenhum valor ainda.`;
-  }
+  // "de onde vem" cada total agora é a lupa clicável genérica (funciona com toque, diferente de
+  // um hover) — ver LUPA_FLUXO_CACHE abaixo, preenchido aqui mesmo a cada render desta função
+  const tipoLabel = tipo==='entradas' ? 'Entradas' : 'Saídas';
+  const linhasPrevisto = labels.map((lb,i)=> [lb, sum(previstoByKey[i]), null]).filter(l=> l[1]>0);
+  const linhasReal = labels.map((lb,i)=> [lb, sum(realByKey[i]), null]).filter(l=> l[1]>0);
+  LUPA_FLUXO_CACHE[`fluxo_${tipo}_previsto`] = {titulo:`${tipoLabel} — Previsto (contratado, ainda sem pagamento)`, linhas:linhasPrevisto, totalLabel:'Total previsto', totalDisplay: fmtCur(totalPrevisto)};
+  LUPA_FLUXO_CACHE[`fluxo_${tipo}_real`] = {titulo:`${tipoLabel} — Realizado (já pago/recebido de verdade)`, linhas:linhasReal, totalLabel:'Total realizado', totalDisplay: fmtCur(totalReal)};
   return `<div class="gridN">
     <div class="kpi"><div class="lbl">Total anual (projeção do cenário)</div><div class="kpi-value">${fmtCur(totalAnual)}</div><div class="hint" style="margin-top:4px;">100%</div></div>
-    <div class="kpi"><div class="lbl">Previsto / contratado${infoIcon(breakdown(previstoByKey,'De onde vem o Previsto (contratado, com data esperada, ainda sem pagamento)'))}</div><div class="kpi-value" style="color:var(--text-dim)">${fmtCur(totalPrevisto)}</div><div class="hint" style="margin-top:4px;">${pct(totalPrevisto)} do total anual</div></div>
-    <div class="kpi"><div class="lbl">Realizado / já pago${infoIcon(breakdown(realByKey,'De onde vem o Realizado (já pago/recebido de verdade, com data)'))}</div><div class="kpi-value" style="color:var(--good)">${fmtCur(totalReal)}</div><div class="hint" style="margin-top:4px;">${pct(totalReal)} do total anual</div></div>
+    ${lupaKpi('Previsto / contratado', `fluxo_${tipo}_previsto`, fmtCur(totalPrevisto), {style:'color:var(--text-dim)', hint:`${pct(totalPrevisto)} do total anual`})}
+    ${lupaKpi('Realizado / já pago', `fluxo_${tipo}_real`, fmtCur(totalReal), {style:'color:var(--good)', hint:`${pct(totalReal)} do total anual`})}
     <div class="kpi"><div class="lbl">Ainda só projeção (%)${infoIcon('Parte do total anual que ainda não tem nenhum contrato nem pagamento com data — continua distribuída pela % manual que você define nas linhas abaixo, mês a mês.')}</div><div class="kpi-value" style="color:var(--text-faint)">${fmtCur(totalProjecao)}</div><div class="hint" style="margin-top:4px;">${pct(totalProjecao)} do total anual</div></div>
   </div>`;
 }
@@ -5484,12 +5622,12 @@ VIEWS.fluxo = function(){
 
   <div class="section">
     <h2>📊 Entradas — Previsto x Realizado${infoIcon('Previsto = já contratado/com data esperada, mas ainda sem pagamento (pode não se confirmar). Realizado = já pago/recebido de verdade, com data. O que sobra dos 100% ainda não tem nenhum dos dois — continua sendo só a sua estimativa manual (%) distribuída nas linhas abaixo.')}</h2>
-    ${resumoPrevistoRealizado(FC_ENT_LABELS, entAnnualArr, entPrevisto, entReal)}
+    ${resumoPrevistoRealizado(FC_ENT_LABELS, entAnnualArr, entPrevisto, entReal, 'entradas')}
   </div>
 
   <div class="section">
     <h2>📊 Saídas — Previsto x Realizado${infoIcon('Mesma lógica das Entradas: Previsto = contratado em Custos, com data prevista, ainda sem pagamento. Realizado = já pago de verdade, com data de pagamento.')}</h2>
-    ${resumoPrevistoRealizado(FC_SAI_LABELS, saiAnnualArr, saiPrevisto, saiReal)}
+    ${resumoPrevistoRealizado(FC_SAI_LABELS, saiAnnualArr, saiPrevisto, saiReal, 'saidas')}
   </div>
 
   <div class="section">
@@ -5524,7 +5662,8 @@ VIEWS.fluxo = function(){
     <div class="gridN">${SCEN.map(s=>`<div class="kpi"><div class="lbl">${SCEN_LABEL[s]}</div><div class="kpi-value">${fmtCur(capGiroFor(s))}</div></div>`).join('')}</div>
   </div>
   ${state.ui.saldoHistoricoOpen ? saldoHistoricoLightbox() : ''}
-  ${state.ui.previsoesCaixaOpen ? previsoesCaixaLightbox() : ''}`;
+  ${state.ui.previsoesCaixaOpen ? previsoesCaixaLightbox() : ''}
+  ${lupaNumeroLightbox()}`;
 };
 
 /* ================= BREAK-EVEN ================= */
