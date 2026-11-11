@@ -2061,7 +2061,10 @@ function computeVendaTracking(){
   const vendaDiariaNecessaria = diasRestantes>0 ? Math.max(0,gap)/diasRestantes : 0;
   const projecaoFinal = vendidos + velocidade*diasRestantes;
   const pctVendido = cs.capMax ? vendidos/cs.capMax : 0;
-  const receitaRealizada = vendidos * cs.ticketMedio;
+  // "Realizado" tem que ser dinheiro de verdade (mesma régua do resto do app) — venda.valorRecebido
+  // já é o total certo pros 3 domínios (ver syncVendaFeijoada/bateria em saveState), NUNCA
+  // "vendidos × ticket médio planejado" (isso é só uma projeção, não bate com o caixa de verdade)
+  const receitaRealizada = Number(v.valorRecebido)||0;
   return {diasDecorridos, diasRestantes, vendidos, metaVendas, gap, velocidade, vendaDiariaNecessaria, projecaoFinal, pctVendido, receitaRealizada, ingressosDisponiveis: cs.capMax-vendidos};
 }
 // equivalente do computeVendaTracking() acima, mas pra Bateria Piquinzada — lá não tem venda de
@@ -2447,7 +2450,7 @@ function computePrevistoRealizadoStatus(scen){
   const ofensores = entRows.concat(saiRows)
     .filter(r=> r.plannedToDate>=OFENSOR_MIN_PLANNED && r.gapPct>=OFENSOR_MIN_GAP_PCT)
     .sort((a,b)=> b.gap-a.gap);
-  return {curIdx, entPlanned, entExecutado, saiPlanned, saiExecutado, ofensores};
+  return {curIdx, entPlanned, entExecutado, saiPlanned, saiExecutado, ofensores, entRows, saiRows};
 }
 function computeFluxoCaixa(){
   const scen = state.fluxo.scen;
@@ -3005,10 +3008,10 @@ VIEWS.dashboard = function(){
   <div class="section">
     <h2>📊 Status PMO: Previsto x Realizado${infoIcon('Compara o que a % que você definiu no Fluxo de Caixa dizia que já devia ter acontecido até o mês de hoje (linha de base do plano) contra o que já foi de fato pago/recebido com data — cenário Base. Ajuda a enxergar atraso de receita ou pagamento antes que vire problema de caixa.')} <span class="hint">cenário Base · até ${pmoStatus.curIdx>=0 ? mesLabel(Math.min(pmoStatus.curIdx, MESES.length-1)) : 'o projeto ainda não começou'}</span></h2>
     <div class="gridN">
-      <div class="kpi"><div class="lbl">Receitas planejadas até hoje</div><div class="kpi-value">${fmtCur(pmoStatus.entPlanned)}</div></div>
-      <div class="kpi"><div class="lbl">Receitas realizadas até hoje</div><div class="kpi-value" style="color:${pmoStatus.entExecutado>=pmoStatus.entPlanned*0.7?'var(--good)':'var(--warn)'}">${fmtCur(pmoStatus.entExecutado)}</div></div>
-      <div class="kpi"><div class="lbl">Custos planejados até hoje</div><div class="kpi-value">${fmtCur(pmoStatus.saiPlanned)}</div></div>
-      <div class="kpi"><div class="lbl">Custos realizados até hoje</div><div class="kpi-value">${fmtCur(pmoStatus.saiExecutado)}</div></div>
+      ${lupaKpi('Receitas planejadas até hoje', 'dashboard_pmo_receitas_planejadas', fmtCur(pmoStatus.entPlanned))}
+      ${lupaKpi('Receitas realizadas até hoje', 'dashboard_pmo_receitas_realizadas', fmtCur(pmoStatus.entExecutado), {style:`color:${pmoStatus.entExecutado>=pmoStatus.entPlanned*0.7?'var(--good)':'var(--warn)'}`})}
+      ${lupaKpi('Custos planejados até hoje', 'dashboard_pmo_custos_planejadas', fmtCur(pmoStatus.saiPlanned))}
+      ${lupaKpi('Custos realizados até hoje', 'dashboard_pmo_custos_realizadas', fmtCur(pmoStatus.saiExecutado))}
     </div>
     ${pmoStatus.ofensores.length ? `
     <div style="margin-top:16px;">
@@ -3234,6 +3237,138 @@ const LUPA_GERADORES = {
     const linhas = cobertos.map(r=> [r.subcategoria, r.coberturaPermuta, r.permutaDetalhes.map(d=>`${d.empresa} (${fmtCur2(d.valor)})`).join(', ')]);
     return {titulo:'Custo coberto por permuta — por item de Custos', linhas, totalLabel:'Total coberto por permuta', totalDisplay: fmtCur(sum(cobertos.map(r=>r.coberturaPermuta)))};
   },
+  vendas_ingressos_disponiveis: ()=>{
+    const cs = computeScenario('base'), trk = computeVendaTracking();
+    return {titulo:'Ingressos disponíveis = Capacidade máxima (Base) − já vendidos', linhas:[['Capacidade máxima (Base)', cs.capMax, null], ['Já vendidos', -trk.vendidos, null]], fmt:'int', totalLabel:'Ingressos disponíveis', totalDisplay: fmtInt(trk.ingressosDisponiveis)};
+  },
+  vendas_pct_vendido: ()=>{
+    const cs = computeScenario('base'), trk = computeVendaTracking();
+    return {titulo:'% vendido (capacidade Base) = já vendidos ÷ capacidade máxima', linhas:[['Já vendidos', trk.vendidos, null], ['Capacidade máxima (Base)', cs.capMax, null]], fmt:'int', totalLabel:'% vendido', totalDisplay: fmtPct(trk.pctVendido)};
+  },
+  vendas_receita_realizada: ()=>{
+    const trk = computeVendaTracking();
+    let linhas;
+    if(PROJECT_ID==='feijoada-bloco'){
+      const mesasVB = mesasFeijoadaVendaBreakdown();
+      linhas = [['Valor recebido (1º lote, fora das mesas)', Number(state.venda.valorRecebidoLote1)||0, null], ['Valor recebido via mesas pagas', mesasVB.valor, null]];
+    } else if(PROJECT_ID==='bateria-piquinzada'){
+      linhas = [['Total já pago pelos integrantes (Pagamentos por pessoa)', contribuintesBateriaTotalPago(), null]];
+    } else {
+      linhas = [['Valor recebido em caixa (Acompanhamento de vendas)', Number(state.venda.valorRecebido)||0, null]];
+    }
+    return {titulo:'Receita realizada = dinheiro que já de fato entrou no caixa (nunca uma estimativa de ticket médio)', linhas, totalLabel:'Receita realizada', totalDisplay: fmtCur(trk.receitaRealizada)};
+  },
+  vendas_meta: ()=>{
+    const cs = computeScenario('base');
+    return {titulo:'Meta de vendas (Base) = Capacidade máxima × Conversão estimada', linhas:[['Capacidade máxima (Base)', cs.capMax, `conversão estimada: ${fmtPct(cs.conversaoPct)}`]], fmt:'int', totalLabel:'Meta de vendas (Base)', totalDisplay: fmtInt(cs.pagantes)};
+  },
+  vendas_gap: ()=>{
+    const cs = computeScenario('base'), trk = computeVendaTracking();
+    return {titulo:'Gap para a meta = Meta de vendas (Base) − já vendidos', linhas:[['Meta de vendas (Base)', cs.pagantes, null], ['Já vendidos', -trk.vendidos, null]], fmt:'int', totalLabel:'Gap para a meta', totalDisplay: fmtInt(trk.gap)};
+  },
+  vendas_velocidade: ()=>{
+    const trk = computeVendaTracking();
+    return {titulo:'Velocidade média (ingressos/dia) = já vendidos ÷ dias decorridos desde o início das vendas', linhas:[['Já vendidos', trk.vendidos, null], ['Dias decorridos desde o início das vendas', trk.diasDecorridos, null]], fmt:'int', totalLabel:'Velocidade média (ing./dia)', totalDisplay: fmtNum(trk.velocidade,2)};
+  },
+  vendas_venda_diaria: ()=>{
+    const trk = computeVendaTracking();
+    return {titulo:'Venda diária necessária = o que ainda falta vender (gap) ÷ dias restantes até o evento', linhas:[['Gap para a meta (ainda falta vender)', Math.max(0,trk.gap), null], ['Dias restantes até o evento', trk.diasRestantes, null]], fmt:'int', totalLabel:'Venda diária necessária', totalDisplay: fmtNum(trk.vendaDiariaNecessaria,2)};
+  },
+  vendas_projecao_final: ()=>{
+    const trk = computeVendaTracking();
+    return {titulo:'Projeção de público final = já vendidos + (velocidade média × dias restantes)', linhas:[['Já vendidos', trk.vendidos, null], ['Velocidade média × dias restantes', trk.velocidade*trk.diasRestantes, `${fmtNum(trk.velocidade,2)}/dia × ${fmtInt(trk.diasRestantes)} dias`]], fmt:'int', totalLabel:'Projeção de público final', totalDisplay: fmtInt(trk.projecaoFinal)};
+  },
+  vendas_ingressos_planejados: ()=>{
+    const scen = state.ui.scenTab.vendas; const v = computeVendas(scen);
+    return {titulo:`Ingressos planejados — ${SCEN_LABEL[scen]}, por lote`, linhas: v.lots.map(l=>[l.lote, l.qtd, null]), fmt:'int', totalLabel:'Total planejado', totalDisplay: fmtInt(v.qtd)};
+  },
+  vendas_ticket_medio: ()=>{
+    const scen = state.ui.scenTab.vendas; const v = computeVendas(scen);
+    const linhas = v.lots.map(l=> [l.lote, l.preco, `${fmtInt(l.qtd)} ingressos planejados`]);
+    return {titulo:`Ticket médio planejado — ${SCEN_LABEL[scen]} (preço de cada lote, ponderado pela quantidade)`, linhas, totalLabel:'Ticket médio (ponderado)', totalDisplay: fmtCur2(v.ticketMedio)};
+  },
+  vendas_receita_bruta_planejada: ()=>{
+    const scen = state.ui.scenTab.vendas; const v = computeVendas(scen);
+    const linhas = v.lots.map(l=>[l.lote, l.preco*l.qtd, `${fmtInt(l.qtd)} × ${fmtCur2(l.preco)}`]);
+    return {titulo:`Receita bruta planejada — ${SCEN_LABEL[scen]}, por lote`, linhas, totalLabel:'Receita bruta total', totalDisplay: fmtCur(v.receitaBruta)};
+  },
+  vendas_receita_liquida_planejada: ()=>{
+    const scen = state.ui.scenTab.vendas; const v = computeVendas(scen);
+    const e = state.entradas[scen]; const taxaTotal = e.taxaPlataforma+e.taxaCartao+e.tributosIngressos;
+    return {titulo:'Receita líquida planejada = Receita bruta − taxas (plataforma + cartão + tributos)', linhas:[['Receita bruta planejada', v.receitaBruta, null], ['Taxas (plataforma + cartão + tributos)', -v.receitaBruta*taxaTotal, `${fmtPct(taxaTotal)} sobre a receita bruta`]], totalLabel:'Receita líquida', totalDisplay: fmtCur(v.receitaLiquida)};
+  },
+  vendas_ativacoes_confirmadas: ()=>{
+    const scen = state.ui.scenTab.vendas;
+    const items = ((state.entradas[scen]||{}).bebidas||[]).filter(b=>b.tipo==='ativacao' && b.estagio==='Confirmada');
+    const linhas = items.map(b=>[b.nome||'Ativação', bebidaCalc(b,scen).receitaItemTotal, null]);
+    return {titulo:`Ativações confirmadas — ${SCEN_LABEL[scen]}`, linhas, totalLabel:'Total confirmado', totalDisplay: fmtCur(sum(linhas.map(l=>l[1])))};
+  },
+  vendas_ativacoes_pipeline: ()=>{
+    const scen = state.ui.scenTab.vendas;
+    const items = ((state.entradas[scen]||{}).bebidas||[]).filter(b=>b.tipo==='ativacao' && b.estagio!=='Confirmada');
+    const linhas = items.map(b=>[`${b.nome||'Ativação'} (${b.estagio})`, bebidaCalc(b,scen).receitaItemTotal, null]);
+    return {titulo:`Ativações em pipeline (ainda não confirmadas) — ${SCEN_LABEL[scen]}`, linhas, totalLabel:'Total em pipeline', totalDisplay: fmtCur(sum(linhas.map(l=>l[1])))};
+  },
+  vendas_ativacoes_esperado: ()=>{
+    const scen = state.ui.scenTab.vendas;
+    const items = ((state.entradas[scen]||{}).bebidas||[]).filter(b=>b.tipo==='ativacao');
+    const linhas = items.map(b=>[`${b.nome||'Ativação'} (${b.estagio})`, bebidaCalc(b,scen).receitaItemTotal, null]);
+    return {titulo:`Receita ponderada esperada de ativações — ${SCEN_LABEL[scen]}`, linhas, totalLabel:'Total esperado', totalDisplay: fmtCur(sum(linhas.map(l=>l[1])))};
+  },
+  patrocinio_contratado: ()=>{
+    const scen = state.ui.scenTab.patrocinios||'base'; const tiers = state.patrocinios[scen]||[];
+    const linhas = tiers.filter(t=>t.estagio==='Contratado').map(t=>[t.cota, (t.valorUnit*t.qtd)*(Number(t.prob)||0), `${fmtInt(t.qtd)} cota(s) × ${fmtCur2(t.valorUnit)} × ${fmtPct(t.prob)} prob.`]);
+    return {titulo:`Patrocínio contratado (assinado) — ${SCEN_LABEL[scen]}`, linhas, totalLabel:'Total contratado', totalDisplay: fmtCur(sum(linhas.map(l=>l[1])))};
+  },
+  patrocinio_pipeline: ()=>{
+    const scen = state.ui.scenTab.patrocinios||'base'; const tiers = state.patrocinios[scen]||[];
+    const linhas = tiers.filter(t=>t.estagio!=='Contratado').map(t=>[`${t.cota} (${t.estagio})`, (t.valorUnit*t.qtd)*(Number(t.prob)||0), `${fmtInt(t.qtd)} cota(s) × ${fmtCur2(t.valorUnit)} × ${fmtPct(t.prob)} prob.`]);
+    return {titulo:`Patrocínio em pipeline (ainda não assinado) — ${SCEN_LABEL[scen]}`, linhas, totalLabel:'Total em pipeline', totalDisplay: fmtCur(sum(linhas.map(l=>l[1])))};
+  },
+  patrocinio_esperado: ()=>{
+    const scen = state.ui.scenTab.patrocinios||'base'; const tiers = state.patrocinios[scen]||[];
+    const linhas = tiers.map(t=>[`${t.cota} (${t.estagio})`, (t.valorUnit*t.qtd)*(Number(t.prob)||0), `${fmtInt(t.qtd)} cota(s) × ${fmtCur2(t.valorUnit)} × ${fmtPct(t.prob)} prob.`]);
+    return {titulo:`Receita ponderada (esperada) de patrocínio — ${SCEN_LABEL[scen]}`, linhas, totalLabel:'Total esperado', totalDisplay: fmtCur(sum(linhas.map(l=>l[1])))};
+  },
+  dashboard_pmo_receitas_planejadas: ()=>{
+    const st = computePrevistoRealizadoStatus('base');
+    const linhas = st.entRows.filter(r=>r.plannedToDate>0).map(r=>[r.label, r.plannedToDate, null]);
+    return {titulo:'Receitas planejadas até hoje — por categoria (% definida no Fluxo de Caixa até o mês atual)', linhas, totalLabel:'Total planejado até hoje', totalDisplay: fmtCur(st.entPlanned)};
+  },
+  dashboard_pmo_receitas_realizadas: ()=>{
+    const st = computePrevistoRealizadoStatus('base');
+    const linhas = st.entRows.filter(r=>r.executado>0).map(r=>[r.label, r.executado, null]);
+    return {titulo:'Receitas realizadas até hoje — por categoria (já pago/recebido de verdade, com data)', linhas, totalLabel:'Total realizado até hoje', totalDisplay: fmtCur(st.entExecutado)};
+  },
+  dashboard_pmo_custos_planejadas: ()=>{
+    const st = computePrevistoRealizadoStatus('base');
+    const linhas = st.saiRows.filter(r=>r.plannedToDate>0).map(r=>[r.label, r.plannedToDate, null]);
+    return {titulo:'Custos planejados até hoje — por categoria', linhas, totalLabel:'Total planejado até hoje', totalDisplay: fmtCur(st.saiPlanned)};
+  },
+  dashboard_pmo_custos_realizadas: ()=>{
+    const st = computePrevistoRealizadoStatus('base');
+    const linhas = st.saiRows.filter(r=>r.executado>0).map(r=>[r.label, r.executado, null]);
+    return {titulo:'Custos realizados até hoje — por categoria (já pago, com data)', linhas, totalLabel:'Total realizado até hoje', totalDisplay: fmtCur(st.saiExecutado)};
+  },
+  fluxo_entradas_totais: ()=>{
+    const scen = state.fluxo.scen; const cs = computeScenario(scen); const ann = entAnnualByKey(cs);
+    const linhas = FC_ENT_KEYS.map((k,i)=>[FC_ENT_LABELS[i], ann[k], null]).filter(l=>l[1]>0);
+    return {titulo:`Entradas totais (ano todo) — ${SCEN_LABEL[scen]}, por categoria`, linhas, totalLabel:'Total de entradas', totalDisplay: fmtCur(sum(linhas.map(l=>l[1])))};
+  },
+  fluxo_saidas_totais: ()=>{
+    const scen = state.fluxo.scen; const cs = computeScenario(scen); const ann = saiAnnualByKey(cs);
+    const linhas = FC_SAI_KEYS.map((k,i)=>[FC_SAI_LABELS[i], ann[k], null]).filter(l=>l[1]>0);
+    return {titulo:`Saídas totais (ano todo) — ${SCEN_LABEL[scen]}, por categoria`, linhas, totalLabel:'Total de saídas', totalDisplay: fmtCur(sum(linhas.map(l=>l[1])))};
+  },
+  fluxo_resultado_exercicio: ()=>{
+    const fc = computeFluxoCaixa();
+    return {titulo:'Resultado do exercício = Entradas totais − Saídas totais (ano todo)', linhas:[['Entradas totais', sum(fc.totalEnt), null], ['Saídas totais', -sum(fc.totalSai), null]], totalLabel:'Resultado do exercício', totalDisplay: fmtCur(fc.resultadoFinal)};
+  },
+  fluxo_capital_giro: ()=>{
+    const fc = computeFluxoCaixa();
+    const piorMes = fc.acumulado.indexOf(Math.min(...fc.acumulado));
+    return {titulo:'Necessidade de capital de giro = o quanto o saldo acumulado chega a ficar negativo, no mês mais crítico', linhas:[['Saldo inicial', state.fluxo.saldoInicial, null], [`Saldo acumulado no mês mais crítico (${mesLabel(piorMes)})`, fc.acumulado[piorMes], null]], totalLabel:'Capital de giro necessário', totalDisplay: fmtCur(fc.capGiro)};
+  },
 };
 function custosGroupBreakdown(cs, field){
   const byGroup = new Map();
@@ -3249,9 +3384,12 @@ function lupaNumeroLightbox(){
   const key = state.ui.lupaNumero;
   if(!key) return '';
   const d = lupaNumeroConteudo(key);
+  // a maioria das lupas é de dinheiro, mas algumas (contagem de ingressos, %) precisam de outro
+  // formato nas linhas — "fmt" deixa o gerador escolher, sem precisar reformatar na mão em cada um
+  const fmtRow = d.fmt==='int' ? fmtInt : d.fmt==='pct' ? (v=>fmtPct(v)) : fmtCur2;
   const rows = (d.linhas||[]).map(([label,valor,nota])=>`<tr>
       <td>${esc(label)}${nota ? ` <span class="hint">— ${esc(nota)}</span>` : ''}</td>
-      <td class="num mono">${fmtCur2(valor)}</td>
+      <td class="num mono">${fmtRow(valor)}</td>
     </tr>`).join('') || `<tr><td colspan="2" class="hint">Nenhum valor lançado ainda.</td></tr>`;
   return `
   <div class="saldo-hist-lightbox" data-action="fecharLupaNumero">
@@ -4048,10 +4186,10 @@ VIEWS.vendas = function(){
     ${pctWarn}
     <button class="btn small" style="margin-top:10px;" data-action="addLot:${scen}">+ Adicionar lote</button>
     <div class="gridN" style="margin-top:16px;">
-      <div class="kpi"><div class="lbl">Ingressos planejados</div><div class="kpi-value">${fmtInt(v.qtd)}</div></div>
-      <div class="kpi"><div class="lbl">Ticket médio planejado</div><div class="kpi-value">${fmtCur2(v.ticketMedio)}</div></div>
-      <div class="kpi"><div class="lbl">Receita bruta planejada</div><div class="kpi-value">${fmtCur(v.receitaBruta)}</div></div>
-      <div class="kpi"><div class="lbl">Receita líquida planejada</div><div class="kpi-value">${fmtCur(v.receitaLiquida)}</div></div>
+      ${lupaKpi('Ingressos planejados', 'vendas_ingressos_planejados', fmtInt(v.qtd))}
+      ${lupaKpi('Ticket médio planejado', 'vendas_ticket_medio', fmtCur2(v.ticketMedio))}
+      ${lupaKpi('Receita bruta planejada', 'vendas_receita_bruta_planejada', fmtCur(v.receitaBruta))}
+      ${lupaKpi('Receita líquida planejada', 'vendas_receita_liquida_planejada', fmtCur(v.receitaLiquida))}
     </div>
   </div>
 
@@ -4067,9 +4205,9 @@ VIEWS.vendas = function(){
     </div>
     <button class="btn small" style="margin-top:10px;" data-action="addAtivacao:${scen}">+ Adicionar ativação</button>
     <div class="gridN" style="margin-top:16px;">
-      <div class="kpi"><div class="lbl">Ativações confirmadas</div><div class="kpi-value">${fmtCur(at.confirmado)}</div></div>
-      <div class="kpi"><div class="lbl">Ativações em pipeline</div><div class="kpi-value">${fmtCur(at.pipeline)}</div></div>
-      <div class="kpi"><div class="lbl">Receita ponderada (esperado)</div><div class="kpi-value">${fmtCur(at.esperado)}</div></div>
+      ${lupaKpi('Ativações confirmadas', 'vendas_ativacoes_confirmadas', fmtCur(at.confirmado))}
+      ${lupaKpi('Ativações em pipeline', 'vendas_ativacoes_pipeline', fmtCur(at.pipeline))}
+      ${lupaKpi('Receita ponderada (esperado)', 'vendas_ativacoes_esperado', fmtCur(at.esperado))}
     </div>
   </div>
 
@@ -4154,21 +4292,22 @@ VIEWS.vendas = function(){
         : '"Valor já recebido" é o que de fato entrou no caixa — soma no saldo de caixa compartilhado entre todos os domínios (ver Fluxo de Caixa).'}</div>
       <div class="divider"></div>
       <div class="gridN">
-        <div class="kpi"><div class="lbl">Ingressos disponíveis</div><div class="kpi-value">${fmtInt(trk.ingressosDisponiveis)}</div></div>
-        <div class="kpi"><div class="lbl">% vendido (capacidade Base)</div><div class="kpi-value">${fmtPct(trk.pctVendido)}</div></div>
-        <div class="kpi"><div class="lbl">Receita realizada</div><div class="kpi-value">${fmtCur(trk.receitaRealizada)}</div></div>
-        <div class="kpi"><div class="lbl">Meta de vendas (Base)</div><div class="kpi-value">${fmtInt(trk.metaVendas)}</div></div>
-        <div class="kpi"><div class="lbl">Gap para a meta</div><div class="kpi-value">${fmtInt(trk.gap)}</div></div>
+        ${lupaKpi('Ingressos disponíveis', 'vendas_ingressos_disponiveis', fmtInt(trk.ingressosDisponiveis))}
+        ${lupaKpi('% vendido (capacidade Base)', 'vendas_pct_vendido', fmtPct(trk.pctVendido))}
+        ${lupaKpi('Receita realizada', 'vendas_receita_realizada', fmtCur(trk.receitaRealizada))}
+        ${lupaKpi('Meta de vendas (Base)', 'vendas_meta', fmtInt(trk.metaVendas))}
+        ${lupaKpi('Gap para a meta', 'vendas_gap', fmtInt(trk.gap))}
         <div class="kpi"><div class="lbl">Dias restantes</div><div class="kpi-value">${fmtInt(trk.diasRestantes)}</div></div>
-        <div class="kpi"><div class="lbl">Velocidade média (ing./dia)</div><div class="kpi-value">${fmtNum(trk.velocidade,2)}</div></div>
-        <div class="kpi"><div class="lbl">Venda diária necessária</div><div class="kpi-value">${fmtNum(trk.vendaDiariaNecessaria,2)}</div></div>
-        <div class="kpi"><div class="lbl">Projeção de público final</div><div class="kpi-value">${fmtInt(trk.projecaoFinal)}</div></div>
+        ${lupaKpi('Velocidade média (ing./dia)', 'vendas_velocidade', fmtNum(trk.velocidade,2))}
+        ${lupaKpi('Venda diária necessária', 'vendas_venda_diaria', fmtNum(trk.vendaDiariaNecessaria,2))}
+        ${lupaKpi('Projeção de público final', 'vendas_projecao_final', fmtInt(trk.projecaoFinal))}
         ${PROJECT_ID==='bateria-piquinzada' ? `<div class="kpi saldo-kpi-clickable guest-ok" data-action="openRitmistasLista" title="Clique para ver por instrumento, quem são e quanto cada um pagou/está em atraso"><div class="lbl">Total de ritmistas 🔎</div><div class="kpi-value">${fmtInt((state.contribuintesBateria||[]).length)}</div></div>` : ''}
       </div>
     </div>
   </div>
   ${PROJECT_ID==='bateria-piquinzada' ? viewContribuintesBateria() : ''}
-  ${state.ui.ritmistasListaOpen ? ritmistasLightbox() : ''}`;
+  ${state.ui.ritmistasListaOpen ? ritmistasLightbox() : ''}
+  ${lupaNumeroLightbox()}`;
 };
 // agrupa os integrantes da Bateria por instrumento (campo Obs.) — responde "quantos ritmistas por
 // categoria, quem são, e quanto cada um já pagou / está em atraso" sem abrir pessoa a pessoa.
@@ -4461,9 +4600,9 @@ VIEWS.patrocinios = function(){
   <button class="btn small" style="margin-top:10px;" data-action="addTier:${scen}">+ Adicionar cota</button>
 
   <div class="gridN" style="margin-top:18px;">
-    <div class="kpi"><div class="lbl">Patrocínio contratado (assinado)</div><div class="kpi-value">${fmtCur(p.contratado)}</div></div>
-    <div class="kpi"><div class="lbl">Patrocínio em pipeline</div><div class="kpi-value">${fmtCur(p.pipeline)}</div></div>
-    <div class="kpi"><div class="lbl">Receita ponderada (esperado)</div><div class="kpi-value">${fmtCur(p.esperado)}</div></div>
+    ${lupaKpi('Patrocínio contratado (assinado)', 'patrocinio_contratado', fmtCur(p.contratado))}
+    ${lupaKpi('Patrocínio em pipeline', 'patrocinio_pipeline', fmtCur(p.pipeline))}
+    ${lupaKpi('Receita ponderada (esperado)', 'patrocinio_esperado', fmtCur(p.esperado))}
     ${permutaResumoKpi(cs)}
   </div>
   ${lupaNumeroLightbox()}`;
@@ -5647,10 +5786,10 @@ VIEWS.fluxo = function(){
     ])}</div>
     ${chartLegend([{label:'Saldo acumulado', color:'var(--accent)'},{label:'Entradas', color:'var(--good)'},{label:'Saídas', color:'var(--bad)'}])}
     <div class="gridN" style="margin-top:14px;">
-      <div class="kpi"><div class="lbl">Entradas totais</div><div class="kpi-value">${fmtCur(sum(fc.totalEnt))}</div></div>
-      <div class="kpi"><div class="lbl">Saídas totais</div><div class="kpi-value">${fmtCur(sum(fc.totalSai))}</div></div>
-      <div class="kpi"><div class="lbl">Resultado do exercício</div><div class="kpi-value">${fmtCur(fc.resultadoFinal)}</div></div>
-      <div class="kpi"><div class="lbl">Necessidade de capital de giro</div><div class="kpi-value">${fmtCur(fc.capGiro)}</div></div>
+      ${lupaKpi('Entradas totais', 'fluxo_entradas_totais', fmtCur(sum(fc.totalEnt)))}
+      ${lupaKpi('Saídas totais', 'fluxo_saidas_totais', fmtCur(sum(fc.totalSai)))}
+      ${lupaKpi('Resultado do exercício', 'fluxo_resultado_exercicio', fmtCur(fc.resultadoFinal))}
+      ${lupaKpi('Necessidade de capital de giro', 'fluxo_capital_giro', fmtCur(fc.capGiro))}
     </div>
     <div class="callout" style="margin-top:14px; border-color:var(--${alertCls}); background:var(--${alertCls}-soft); color:var(--${alertCls});">
       <strong>${alertMsg}</strong>
