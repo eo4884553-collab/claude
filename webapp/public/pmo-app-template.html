@@ -4194,6 +4194,61 @@ VIEWS.vendas = function(){
   </div>
 
   <div class="section">
+    <h2>Acompanhamento de vendas realizado <span class="hint">· indicadores de venda, independente do cenário</span></h2>
+    <div class="card" style="padding:16px 18px;">
+      <div class="gridN">
+        ${fld('Data de início das vendas', 'venda.dataInicio', {kind:'date'})}
+        ${fld('Data do evento', 'venda.dataEvento', {kind:'date'})}
+        ${PROJECT_ID==='feijoada-bloco' ? '' : PROJECT_ID==='bateria-piquinzada'
+          ? `<label class="field"><span class="lbl">Ingressos vendidos até hoje</span>
+              <input type="text" value="${fmtInt(contribuintesBateriaJaContribuiram())}" readonly>
+            </label>`
+          : fld('Ingressos vendidos até hoje', 'venda.vendidosHoje', {kind:'int'})}
+        ${PROJECT_ID==='bateria-piquinzada'
+          ? `<label class="field"><span class="lbl">Valor já recebido em caixa</span>
+              <input type="text" value="${fmtCur(contribuintesBateriaTotalPago())}" readonly>
+            </label>`
+          : PROJECT_ID==='feijoada-bloco' ? '' : fld('Valor já recebido em caixa (ingressos)', 'venda.valorRecebido', {kind:'currency'})}
+      </div>
+      ${PROJECT_ID==='feijoada-bloco' ? (()=>{
+        const mesasVB = mesasFeijoadaVendaBreakdown();
+        const totalIngressos = (Number(state.venda.vendidosHojeLote1)||0) + mesasVB.ingressos;
+        const totalValor = (Number(state.venda.valorRecebidoLote1)||0) + mesasVB.valor;
+        return `<div class="gridN" style="margin-top:12px;">
+          ${fld('Ingressos vendidos (1º lote, fora das mesas)', 'venda.vendidosHojeLote1', {kind:'int'})}
+          ${fld('Valor recebido (1º lote)', 'venda.valorRecebidoLote1', {kind:'currency'})}
+          <label class="field"><span class="lbl">Ingressos via mesas pagas</span>
+            <input type="text" value="${fmtInt(mesasVB.ingressos)}" readonly></label>
+          <label class="field"><span class="lbl">Valor recebido via mesas</span>
+            <input type="text" value="${fmtCur(mesasVB.valor)}" readonly></label>
+          <label class="field"><span class="lbl">Total de ingressos vendidos</span>
+            <input type="text" value="${fmtInt(totalIngressos)}" readonly style="font-weight:700;"></label>
+          <label class="field"><span class="lbl">Total recebido em caixa</span>
+            <input type="text" value="${fmtCur(totalValor)}" readonly style="font-weight:700;"></label>
+        </div>`;
+      })() : ''}
+      <div class="hint" style="margin-top:6px;">${PROJECT_ID==='bateria-piquinzada'
+        ? '"Ingressos vendidos" e "Valor já recebido" aqui são calculados automaticamente a partir de "Pagamentos por pessoa" (mais abaixo): 1 ingresso por integrante que já pagou pelo menos 1 parcela, e a soma do que de fato já foi pago — esse valor soma no saldo de caixa compartilhado entre todos os domínios (ver Fluxo de Caixa).'
+        : PROJECT_ID==='feijoada-bloco'
+        ? 'Cada mesa paga (aba Mesas) conta automaticamente como 4 ingressos — some aqui só o que foi vendido FORA das mesas ("1º lote"). O total (em negrito) já soma os dois e é o que entra no saldo de caixa compartilhado entre todos os domínios (ver Fluxo de Caixa).'
+        : '"Valor já recebido" é o que de fato entrou no caixa — soma no saldo de caixa compartilhado entre todos os domínios (ver Fluxo de Caixa).'}</div>
+      <div class="divider"></div>
+      <div class="gridN">
+        ${lupaKpi('Ingressos disponíveis', 'vendas_ingressos_disponiveis', fmtInt(trk.ingressosDisponiveis))}
+        ${lupaKpi('% vendido (capacidade Base)', 'vendas_pct_vendido', fmtPct(trk.pctVendido))}
+        ${lupaKpi('Receita realizada', 'vendas_receita_realizada', fmtCur(trk.receitaRealizada))}
+        ${lupaKpi('Meta de vendas (Base)', 'vendas_meta', fmtInt(trk.metaVendas))}
+        ${lupaKpi('Gap para a meta', 'vendas_gap', fmtInt(trk.gap))}
+        <div class="kpi"><div class="lbl">Dias restantes</div><div class="kpi-value">${fmtInt(trk.diasRestantes)}</div></div>
+        ${lupaKpi('Velocidade média (ing./dia)', 'vendas_velocidade', fmtNum(trk.velocidade,2))}
+        ${lupaKpi('Venda diária necessária', 'vendas_venda_diaria', fmtNum(trk.vendaDiariaNecessaria,2))}
+        ${lupaKpi('Projeção de público final', 'vendas_projecao_final', fmtInt(trk.projecaoFinal))}
+        ${PROJECT_ID==='bateria-piquinzada' ? `<div class="kpi saldo-kpi-clickable guest-ok" data-action="openRitmistasLista" title="Clique para ver por instrumento, quem são e quanto cada um pagou/está em atraso"><div class="lbl">Total de ritmistas 🔎</div><div class="kpi-value">${fmtInt((state.contribuintesBateria||[]).length)}</div></div>` : ''}
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
     <h2>Ativações ${infoIcon('Cadastre aqui cada ativação com custo do produto, preço de venda, mão de obra (dá pra vincular um ou mais itens de Custos por categoria) e Quantidade comprada. Estágio marca se a ativação ocorreu ou não; Probabilidade pondera a receita esperada — Receita ponderada = Valor × Probabilidade, já embutida na linha "Ativações" do cenário, uma vez só, sem duplicar. Quando a ativação é confirmada, clique em "Parcelas" e cadastre valor + data de cada parcela: elas alimentam o Fluxo de Caixa automaticamente no mês certo, e o custo de execução fica rastreável na aba Custos (categoria Marketing), com comprovante.')}</h2>
     <div class="hint">Cenário ${SCEN_LABEL[scen]}.</div>
     <div class="tablewrap" style="margin-top:8px;">
@@ -4249,61 +4304,6 @@ VIEWS.vendas = function(){
         </table>
       </div>
     ` : `<div class="hint">Lance "Qtd. comprada" em Custos e registre alguma venda em "Itens vendidos" acima pra começar a ver o ranking de margem.</div>`}
-  </div>
-
-  <div class="section">
-    <h2>Acompanhamento de vendas realizado <span class="hint">· indicadores de venda, independente do cenário</span></h2>
-    <div class="card" style="padding:16px 18px;">
-      <div class="gridN">
-        ${fld('Data de início das vendas', 'venda.dataInicio', {kind:'date'})}
-        ${fld('Data do evento', 'venda.dataEvento', {kind:'date'})}
-        ${PROJECT_ID==='feijoada-bloco' ? '' : PROJECT_ID==='bateria-piquinzada'
-          ? `<label class="field"><span class="lbl">Ingressos vendidos até hoje</span>
-              <input type="text" value="${fmtInt(contribuintesBateriaJaContribuiram())}" readonly>
-            </label>`
-          : fld('Ingressos vendidos até hoje', 'venda.vendidosHoje', {kind:'int'})}
-        ${PROJECT_ID==='bateria-piquinzada'
-          ? `<label class="field"><span class="lbl">Valor já recebido em caixa</span>
-              <input type="text" value="${fmtCur(contribuintesBateriaTotalPago())}" readonly>
-            </label>`
-          : PROJECT_ID==='feijoada-bloco' ? '' : fld('Valor já recebido em caixa (ingressos)', 'venda.valorRecebido', {kind:'currency'})}
-      </div>
-      ${PROJECT_ID==='feijoada-bloco' ? (()=>{
-        const mesasVB = mesasFeijoadaVendaBreakdown();
-        const totalIngressos = (Number(state.venda.vendidosHojeLote1)||0) + mesasVB.ingressos;
-        const totalValor = (Number(state.venda.valorRecebidoLote1)||0) + mesasVB.valor;
-        return `<div class="gridN" style="margin-top:12px;">
-          ${fld('Ingressos vendidos (1º lote, fora das mesas)', 'venda.vendidosHojeLote1', {kind:'int'})}
-          ${fld('Valor recebido (1º lote)', 'venda.valorRecebidoLote1', {kind:'currency'})}
-          <label class="field"><span class="lbl">Ingressos via mesas pagas</span>
-            <input type="text" value="${fmtInt(mesasVB.ingressos)}" readonly></label>
-          <label class="field"><span class="lbl">Valor recebido via mesas</span>
-            <input type="text" value="${fmtCur(mesasVB.valor)}" readonly></label>
-          <label class="field"><span class="lbl">Total de ingressos vendidos</span>
-            <input type="text" value="${fmtInt(totalIngressos)}" readonly style="font-weight:700;"></label>
-          <label class="field"><span class="lbl">Total recebido em caixa</span>
-            <input type="text" value="${fmtCur(totalValor)}" readonly style="font-weight:700;"></label>
-        </div>`;
-      })() : ''}
-      <div class="hint" style="margin-top:6px;">${PROJECT_ID==='bateria-piquinzada'
-        ? '"Ingressos vendidos" e "Valor já recebido" aqui são calculados automaticamente a partir de "Pagamentos por pessoa" (mais abaixo): 1 ingresso por integrante que já pagou pelo menos 1 parcela, e a soma do que de fato já foi pago — esse valor soma no saldo de caixa compartilhado entre todos os domínios (ver Fluxo de Caixa).'
-        : PROJECT_ID==='feijoada-bloco'
-        ? 'Cada mesa paga (aba Mesas) conta automaticamente como 4 ingressos — some aqui só o que foi vendido FORA das mesas ("1º lote"). O total (em negrito) já soma os dois e é o que entra no saldo de caixa compartilhado entre todos os domínios (ver Fluxo de Caixa).'
-        : '"Valor já recebido" é o que de fato entrou no caixa — soma no saldo de caixa compartilhado entre todos os domínios (ver Fluxo de Caixa).'}</div>
-      <div class="divider"></div>
-      <div class="gridN">
-        ${lupaKpi('Ingressos disponíveis', 'vendas_ingressos_disponiveis', fmtInt(trk.ingressosDisponiveis))}
-        ${lupaKpi('% vendido (capacidade Base)', 'vendas_pct_vendido', fmtPct(trk.pctVendido))}
-        ${lupaKpi('Receita realizada', 'vendas_receita_realizada', fmtCur(trk.receitaRealizada))}
-        ${lupaKpi('Meta de vendas (Base)', 'vendas_meta', fmtInt(trk.metaVendas))}
-        ${lupaKpi('Gap para a meta', 'vendas_gap', fmtInt(trk.gap))}
-        <div class="kpi"><div class="lbl">Dias restantes</div><div class="kpi-value">${fmtInt(trk.diasRestantes)}</div></div>
-        ${lupaKpi('Velocidade média (ing./dia)', 'vendas_velocidade', fmtNum(trk.velocidade,2))}
-        ${lupaKpi('Venda diária necessária', 'vendas_venda_diaria', fmtNum(trk.vendaDiariaNecessaria,2))}
-        ${lupaKpi('Projeção de público final', 'vendas_projecao_final', fmtInt(trk.projecaoFinal))}
-        ${PROJECT_ID==='bateria-piquinzada' ? `<div class="kpi saldo-kpi-clickable guest-ok" data-action="openRitmistasLista" title="Clique para ver por instrumento, quem são e quanto cada um pagou/está em atraso"><div class="lbl">Total de ritmistas 🔎</div><div class="kpi-value">${fmtInt((state.contribuintesBateria||[]).length)}</div></div>` : ''}
-      </div>
-    </div>
   </div>
   ${PROJECT_ID==='bateria-piquinzada' ? viewContribuintesBateria() : ''}
   ${state.ui.ritmistasListaOpen ? ritmistasLightbox() : ''}
