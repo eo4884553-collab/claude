@@ -608,12 +608,16 @@ const RISCOS_DEFAULT = [
   ['Operação','Acidente de trabalho na montagem/desmontagem','Prazos apertados e equipe terceirizada sem treinamento','Risco jurídico, atraso no cronograma físico',2,4,'Mitigar','Exigir NRs e treinamento de segurança de todos os fornecedores'],
 ].map(r=>({id:uid(), categoria:r[0], risco:r[1], causa:r[2], consequencia:r[3], prob:r[4], impacto:r[5], resposta:r[6], plano:r[7], responsavel:'Produção', prazo:'', status:'Aberto'}));
 
-const FC_ENT_LABELS = ['Ingressos','Patrocínios','Bar / Ativações','Outras receitas','Contribuições (Bateria)','Mesas (Feijoada)'];
-const FC_ENT_KEYS = ['receitaIngressos','patrocinio','receitaConsumo','outras','contribuicoesBateria','receitaMesas'];
+const FC_ENT_LABELS = ['Ingressos','Patrocínios','Ativações','Itens vendidos (bar/consumo)','Outras receitas','Contribuições (Bateria)','Mesas (Feijoada)'];
+const FC_ENT_KEYS = ['receitaIngressos','patrocinio','receitaConsumo','itensVendidos','outras','contribuicoesBateria','receitaMesas'];
 const FC_ENT_DEFAULT_PCT = [
   [0,5,10,10,10,5,5,5,10,15,15,10, 0,0,0],
   [5,10,15,15,10,5,5,5,10,10,5,5, 0,0,0],
   [0,0,0,0,0,0,0,0,0,0,0,100, 0,0,0],
+  // Itens vendidos (bar/consumo) não tem "planejado" nenhum (annualTotal sempre 0, ver
+  // entAnnualByKey) — essa % nunca é usada de verdade (monthlyDatedPlusRemainder zera o resto
+  // quando o total anual é 0), fica só zerada por completude.
+  [0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0],
   [0,0,0,0,0,0,0,0,0,0,50,50, 0,0,0],
   [5,5,5,5,10,10,10,10,10,10,10,10, 0,0,0],
   // Mesas (Feijoada) não tem "previsto": o total anual já É o que foi pago até agora (ver
@@ -2430,12 +2434,24 @@ function entDatedAmountsForKey(k, scen, kind){
     const mes = Math.max(0, currentMonthIdxClamped());
     return [{mes, valor: recebido}];
   }
+  // Itens vendidos (bar/consumo): mesmo caso de Ingressos acima — só existe o total JÁ FATURADO
+  // (qtdVendida × preço, lançado na aba Vendas › Itens vendidos), sem data por venda individual —
+  // conta inteiro como Realizado no mês de hoje. Não tem "Previsto" (não é modelado em Entradas
+  // PMO/cenário — por isso o planejado desta linha é sempre 0, igual em Orçamento x Real) e
+  // independe de domínio (lê direto state.custos, igual itensVendidosSummary em qualquer aba).
+  if(k==='itensVendidos'){
+    if(kind==='previsto') return [];
+    const faturamento = itensVendidosSummary().faturamentoTotal;
+    if(!faturamento) return [];
+    const mes = Math.max(0, currentMonthIdxClamped());
+    return [{mes, valor: faturamento}];
+  }
   return [];
 }
 // valor anual total de cada linha de ENTRADA/SAÍDA do cenário — extraído à parte pra ser
 // reaproveitado no cálculo do fluxo e no "% do total já previsto/realizado" da tela
 function entAnnualByKey(cs){
-  return {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, outras:cs.outras, contribuicoesBateria: contribuintesBateriaTotalAnual(), receitaMesas: mesasFeijoadaTotalAnual()};
+  return {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, itensVendidos:0, outras:cs.outras, contribuicoesBateria: contribuintesBateriaTotalAnual(), receitaMesas: mesasFeijoadaTotalAnual()};
 }
 function saiAnnualByKey(cs){
   return {subAtracoes:cs.subAtracoes, subEstrutura:cs.subEstrutura, subOperacao:cs.subOperacao, subMarketing:cs.subMarketing,
