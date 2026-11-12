@@ -899,10 +899,45 @@ function planilhaParseNumero(raw){
   const n = parseFloat(normalized);
   return isNaN(n) ? 0 : n;
 }
-// colunas fixas esperadas (A-J, 1ª linha = cabeçalho, ignorada): Grupo | Subcategoria/Descrição |
-// Tipo (Custo/Venda) | Valor contratado | Valor pago | Data de pagamento | Qtd. comprada |
-// Qtd. vendida | Preço de venda unitário | Fornecedor — mesmas colunas que já existem em Custos,
-// só lidas de uma planilha em vez de digitadas uma a uma. Sem IA: a ordem das colunas importa.
+// colunas esperadas: Grupo | Subcategoria/Descrição | Tipo (Custo/Venda) | Valor contratado |
+// Valor pago | Data de pagamento | Qtd. comprada | Qtd. vendida | Preço de venda unitário |
+// Fornecedor — mesmas colunas que já existem em Custos, só lidas de uma planilha em vez de
+// digitadas uma a uma. Sem IA: a posição da coluna só é usada quando o NOME do cabeçalho (1ª
+// linha) não bate com nenhuma variação reconhecida — ver planilhaDetectarColunas logo abaixo.
+// Isso cobre a planilha que já existia (ordem A-J) e também uma mais simples, feita por conta
+// própria (ex.: só Fornecedor/Valor/Data), sem exigir que a pessoa siga a ordem exata.
+function planilhaNormalizarHeader(s){
+  return String(s==null?'':s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
+}
+// cada campo tem uma lista de variações aceitas de cabeçalho, da mais específica pra mais
+// genérica — "valor" sozinho (sem "contratado"/"pago" no nome) cai nos dois campos ao mesmo
+// tempo, assumindo "já foi contratado E pago nesse valor" (o caso mais comum de quem só
+// tem 1 coluna de valor: já pagou a conta inteira).
+const PLANILHA_COLUNA_ALIASES = {
+  grupo: ['grupo','categoria'],
+  subcategoria: ['subcategoria','descricao','descricao/item','item','nome','produto','produto/servico'],
+  tipo: ['tipo'],
+  valorContratado: ['valor contratado','contratado','valor'],
+  valorPago: ['valor pago','pago','valor'],
+  dataPagamento: ['data de pagamento','data pagamento','data'],
+  qtdComprada: ['qtd. comprada','qtd comprada','quantidade comprada','qtd'],
+  qtdVendida: ['qtd. vendida','qtd vendida','quantidade vendida'],
+  precoVendaUnit: ['preco de venda unitario','preco unitario','preco de venda','preco venda'],
+  fornecedor: ['fornecedor','nome do fornecedor','empresa','pago para','pago a','origem'],
+};
+const PLANILHA_COLUNA_FIXA = {grupo:0, subcategoria:1, tipo:2, valorContratado:3, valorPago:4, dataPagamento:5, qtdComprada:6, qtdVendida:7, precoVendaUnit:8, fornecedor:9};
+function planilhaDetectarColunas(headerRow){
+  const normalizados = (headerRow||[]).map(planilhaNormalizarHeader);
+  const mapa = {};
+  Object.keys(PLANILHA_COLUNA_ALIASES).forEach(campo=>{
+    let idx = -1;
+    for(const alias of PLANILHA_COLUNA_ALIASES[campo]){ idx = normalizados.indexOf(alias); if(idx>=0) break; }
+    // nenhum cabeçalho reconhecido pra esse campo — assume a posição fixa de sempre (A-J),
+    // pra continuar funcionando com a planilha no modelo original
+    mapa[campo] = idx>=0 ? idx : PLANILHA_COLUNA_FIXA[campo];
+  });
+  return mapa;
+}
 async function planilhaProcessarArquivo(file){
   if(!state.ui.importPlanilha) state.ui.importPlanilha = {linhas:[], aberto:true};
   const ip = state.ui.importPlanilha;
@@ -914,24 +949,25 @@ async function planilhaProcessarArquivo(file){
     const wb = XLSX.read(buf, {type:'array'});
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const linhasCru = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false, defval:''});
+    const colMap = planilhaDetectarColunas(linhasCru[0]);
     const linhas = linhasCru.slice(1)
       .filter(r=> r.some(c=> String(c==null?'':c).trim()!==''))
       .map(r=>{
-        const grupoRaw = String(r[0]||'').trim();
+        const grupoRaw = String(r[colMap.grupo]||'').trim();
         const grupoMatch = state.costGroups.find(g=> g.label.toLowerCase()===grupoRaw.toLowerCase());
-        const subcategoria = String(r[1]||'').trim();
+        const subcategoria = String(r[colMap.subcategoria]||'').trim();
         const linha = {
           id: uid(),
           grupoRaw, grupo: (grupoMatch||state.costGroups[0]||{}).key,
           subcategoria,
-          tipo: /venda/i.test(String(r[2]||'')) ? 'venda' : 'custo',
-          valorContratado: planilhaParseNumero(r[3]),
-          valorPago: planilhaParseNumero(r[4]),
-          dataPagamento: planilhaParseData(r[5]),
-          qtdComprada: planilhaParseNumero(r[6]),
-          qtdVendida: planilhaParseNumero(r[7]),
-          precoVendaUnit: planilhaParseNumero(r[8]),
-          fornecedor: String(r[9]||'').trim(),
+          tipo: /venda/i.test(String(r[colMap.tipo]||'')) ? 'venda' : 'custo',
+          valorContratado: planilhaParseNumero(r[colMap.valorContratado]),
+          valorPago: planilhaParseNumero(r[colMap.valorPago]),
+          dataPagamento: planilhaParseData(r[colMap.dataPagamento]),
+          qtdComprada: planilhaParseNumero(r[colMap.qtdComprada]),
+          qtdVendida: planilhaParseNumero(r[colMap.qtdVendida]),
+          precoVendaUnit: planilhaParseNumero(r[colMap.precoVendaUnit]),
+          fornecedor: String(r[colMap.fornecedor]||'').trim(),
           matchCustoId: '', lancado: false,
         };
         // sugere automaticamente um item já existente com o mesmo nome (revisável/trocável antes
@@ -4887,7 +4923,7 @@ VIEWS.custos = function(){
 
   <div class="card" style="padding:12px 16px; margin-bottom:12px;">
     <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-      <strong style="font-size:12.5px; white-space:nowrap;">📥 Importar planilha ${infoIcon('Envie uma planilha Excel (.xlsx) com custos e/ou vendas já lançados em outro lugar (ex.: controle que você já mantinha à parte) — revise e aprove linha a linha antes de qualquer coisa entrar de verdade. Item com nome igual a um já existente SOMA nele; nome novo cria um item do zero, mesmo que não estivesse no planejamento (é assim que você enxerga o que foi um acréscimo fora do previsto). Colunas esperadas, nesta ordem, com cabeçalho na 1ª linha: Grupo, Subcategoria, Tipo (Custo ou Venda), Valor contratado, Valor pago, Data de pagamento, Qtd. comprada, Qtd. vendida, Preço de venda unitário, Fornecedor.')}</strong>
+      <strong style="font-size:12.5px; white-space:nowrap;">📥 Importar planilha ${infoIcon('Envie uma planilha Excel (.xlsx) com custos e/ou vendas já lançados em outro lugar (ex.: controle que você já mantinha à parte) — revise e aprove linha a linha antes de qualquer coisa entrar de verdade. Item com nome igual a um já existente SOMA nele; nome novo cria um item do zero, mesmo que não estivesse no planejamento (é assim que você enxerga o que foi um acréscimo fora do previsto). Colunas esperadas (nomeie o cabeçalho na 1ª linha, em qualquer ordem): Grupo, Subcategoria (ou Descrição/Item), Tipo (Custo ou Venda), Valor contratado, Valor pago (ou só "Valor", se já foi tudo pago), Data de pagamento, Qtd. comprada, Qtd. vendida, Preço de venda unitário, Fornecedor. Se algum cabeçalho não for reconhecido, cai de volta pra essa mesma ordem (A, B, C...) — sempre confira e corrija direto na tabela de pré-visualização antes de aprovar.')}</strong>
       <button class="btn small" data-action="planilhaTogglePanel">${(state.ui.importPlanilha&&state.ui.importPlanilha.aberto) ? 'Fechar' : (state.ui.importPlanilha&&state.ui.importPlanilha.linhas&&state.ui.importPlanilha.linhas.length ? 'Abrir' : 'Importar excel…')}</button>
       ${state.ui.importPlanilha&&state.ui.importPlanilha.linhas&&state.ui.importPlanilha.linhas.length ? `<span class="hint">${state.ui.importPlanilha.linhas.filter(l=>l.lancado).length}/${state.ui.importPlanilha.linhas.length} já lançado(s)</span>` : ''}
     </div>
@@ -4921,6 +4957,7 @@ function renderImportPlanilhaPanel(cs){
       <td class="num">${tblInput(`ui.importPlanilha.linhas.${idx}.valorContratado`, l.valorContratado, {type:'number', step:'0.01', cls:'num', width:'90px'})}</td>
       <td class="num">${tblInput(`ui.importPlanilha.linhas.${idx}.valorPago`, l.valorPago, {type:'number', step:'0.01', cls:'num', width:'90px'})}</td>
       <td>${tblInput(`ui.importPlanilha.linhas.${idx}.dataPagamento`, l.dataPagamento, {type:'date'})}</td>
+      <td>${tblInput(`ui.importPlanilha.linhas.${idx}.fornecedor`, l.fornecedor, {width:'130px'})}</td>
       <td>
         <select onchange="undoSnapshotStart(); ACTIONS.planilhaSetMatch(${idx}, this.value);" style="font-size:11px; max-width:170px;" ${l.lancado?'disabled':''}>
           <option value="">+ Novo item (fora do planejamento)</option>
@@ -4941,10 +4978,11 @@ function renderImportPlanilhaPanel(cs){
     ${ip.parseError ? `<div class="hint" style="color:var(--bad); margin-top:8px;">${esc(ip.parseError)}</div>` : ''}
     ${linhas.length ? `<div class="tablewrap" style="margin-top:10px;">
       <table>
-        <thead><tr><th>Subcategoria</th><th>Tipo</th><th class="num">Valor contratado</th><th class="num">Valor pago</th><th>Data de pagamento</th><th>Soma em item existente?</th><th></th><th></th></tr></thead>
+        <thead><tr><th>Subcategoria</th><th>Tipo</th><th class="num">Valor contratado</th><th class="num">Valor pago</th><th>Data de pagamento</th><th>Fornecedor</th><th>Soma em item existente?</th><th></th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-    </div>` : `<div class="hint" style="margin-top:8px;">Nenhuma planilha carregada ainda. Modelo de colunas (com cabeçalho na 1ª linha): Grupo, Subcategoria, Tipo (Custo/Venda), Valor contratado, Valor pago, Data de pagamento, Qtd. comprada, Qtd. vendida, Preço de venda unitário, Fornecedor.</div>`}`;
+    </div>
+    <div class="hint" style="margin-top:6px;">Confira se Valor, Data e Fornecedor vieram certos de cada linha antes de aprovar — se alguma coluna não veio, é só corrigir direto na tabela acima (tudo aqui é editável).</div>` : `<div class="hint" style="margin-top:8px;">Nenhuma planilha carregada ainda. Colunas esperadas (nomeie a 1ª linha com esses cabeçalhos, em qualquer ordem): Grupo, Subcategoria (ou Descrição/Item), Tipo (Custo/Venda), Valor contratado, Valor pago (ou só "Valor", se já foi tudo pago), Data de pagamento, Qtd. comprada, Qtd. vendida, Preço de venda unitário, Fornecedor. Se os cabeçalhos não baterem com nenhum desses nomes, a leitura cai de volta pra essa mesma ordem de colunas (A, B, C...).</div>`}`;
 }
 ACTIONS.toggleCustoSelect = (id)=>{
   if(!state.ui.custosSelected) state.ui.custosSelected = {};
