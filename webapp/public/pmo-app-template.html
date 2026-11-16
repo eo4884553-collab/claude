@@ -4992,7 +4992,7 @@ function renderImportPlanilhaPanel(cs){
           <option value="">+ Novo item (fora do planejamento)</option>
           ${opcoesExistentes.map(o=>`<option value="${o.id}" ${o.id===l.matchCustoId?'selected':''}>${esc(o.label)}</option>`).join('')}
         </select>
-        ${!match ? '<div class="hint" style="color:var(--warn);">⚠ será criado como item novo</div>' : ''}
+        ${!match ? '<div class="hint" style="color:var(--warn);">⚠ será criado como item novo — Valor contratado também vira o Planejado do cenário Base</div>' : ''}
       </td>
       <td>${l.lancado ? '<span class="hint" style="color:var(--good);">✓ lançado</span>' : `<button class="btn small" data-action="planilhaLancarLinha:${idx}">Aprovar e lançar</button>`}</td>
       <td>${l.lancado ? '' : `<button class="rm" data-action="planilhaRemoverLinha:${idx}" title="Descartar esta linha sem lançar">✕</button>`}</td>
@@ -5109,6 +5109,11 @@ ACTIONS.planilhaLimpar = ()=>{
 // explícito: "insira como custo e venda mesmo que não esteja planejado"). Mesmo caminho de
 // "Entradas PMO > Custo por categoria > + Adicionar item" (ver ACTIONS.addCostItem), só preenchido
 // com os dados da planilha — não existe lógica divergente pra um item "vindo de importação".
+// quando o item é novo (sem match), o Valor contratado também vira o Planejado do cenário Base
+// (ACTIONS.addCostItem zera o item nos 3 cenários; aqui só o Base ganha a estimativa real como
+// ponto de partida — Conservador/Agressivo seguem em 0, prontos pra "Replicar com variação %").
+// Se já existia um item (matchCustoId), o Planejado não é tocado — preserva o orçamento que o
+// usuário já tinha decidido pra esse item.
 ACTIONS.planilhaLancarLinha = (idx)=>{
   if(READONLY) return;
   const ip = state.ui.importPlanilha;
@@ -5121,12 +5126,18 @@ ACTIONS.planilhaLancarLinha = (idx)=>{
     if(!group) return;
     ACTIONS.addCostItem(groupKey);
     row = state.custos[state.custos.length-1];
-    const catItem = (state.itemCatalog[groupKey]||[]).find(it=>it.key===row.path[1]);
+    const itemKey = row.path[1];
+    const catItem = (state.itemCatalog[groupKey]||[]).find(it=>it.key===itemKey);
     const label = linha.subcategoria || '(planilha)';
     if(catItem) catItem.label = label;
     row.subcategoria = label;
     row.grupo = group.label;
     row.obs = (row.obs ? row.obs+' | ' : '') + 'Lançado a partir de planilha importada.';
+    const planejado = Number(linha.valorContratado)||0;
+    if(planejado){
+      if(groupKey==='operacao') state.entradas.base.operacao[itemKey] = {qty:1, unitCost:planejado};
+      else state.entradas.base[groupKey][itemKey] = planejado;
+    }
   }
   row.valorContratado = (Number(row.valorContratado)||0) + (Number(linha.valorContratado)||0);
   row.valorPago = (Number(row.valorPago)||0) + (Number(linha.valorPago)||0);
