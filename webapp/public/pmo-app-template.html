@@ -2852,18 +2852,47 @@ function replicateControl(domain, currentScen){
     <select id="replicateFrom_${domain}" class="replicate-select">
       ${others.map(s=>`<option value="${s}">${SCEN_LABEL[s]}</option>`).join('')}
     </select>
+    <span class="replicate-lbl" title="Aplica essa variação por cima de cada valor copiado — ex.: -20 pra gerar um cenário mais pessimista a partir do Base, ou 20 pra um mais otimista. Deixe 0 pra copiar exatamente igual.">Variação</span>
+    <input id="replicateVariacao_${domain}" type="number" step="1" value="0" class="replicate-variacao" style="width:58px;" title="% de variação sobre os valores copiados (ex.: -20 ou 20). 0 copia igual.">%
     <button class="btn small" data-action="replicateScenario:${domain}:${currentScen}" data-confirm="Confirmar — substitui ${SCEN_LABEL[currentScen]}">📋 Replicar para ${SCEN_LABEL[currentScen]}</button>
   </span>`;
+}
+// aplica a % de variação (replicateControl acima) sobre os valores numéricos de CUSTO que fazem
+// sentido pro domínio — só isso, nunca sobre capacidade/conversão/taxas (não são "custo por
+// categoria") nem sobre datas/nomes. Pedido: replicar Base pro Conservador com -20% e pro
+// Agressivo com +20%, já preenchendo os valores pra poder analisar sem digitar tudo de novo.
+function aplicaVariacaoPct(valor, pct){ return Math.round((Number(valor)||0)*(1+pct)*100)/100; }
+function aplicaVariacaoEntradas(copia, pct){
+  ['atracoes','estrutura','marketing','logistica'].forEach(gk=>{
+    Object.keys(copia[gk]||{}).forEach(k=>{ copia[gk][k] = aplicaVariacaoPct(copia[gk][k], pct); });
+  });
+  Object.keys(copia.operacao||{}).forEach(k=>{
+    const item = copia.operacao[k];
+    if(item && typeof item==='object') item.unitCost = aplicaVariacaoPct(item.unitCost, pct);
+    else copia.operacao[k] = aplicaVariacaoPct(item, pct);
+  });
+  return copia;
 }
 ACTIONS.replicateScenario = (domain, toScen)=>{
   const sel = document.getElementById('replicateFrom_'+domain);
   const fromScen = sel ? sel.value : null;
   if(!fromScen || fromScen===toScen) return;
+  const varInput = document.getElementById('replicateVariacao_'+domain);
+  const pct = (Number(varInput && varInput.value)||0)/100;
   const clone = (obj)=> JSON.parse(JSON.stringify(obj));
-  if(domain==='entradas') state.entradas[toScen] = clone(state.entradas[fromScen]);
-  else if(domain==='vendas') state.vendas[toScen] = clone(state.vendas[fromScen]);
-  else if(domain==='patrocinios') state.patrocinios[toScen] = clone(state.patrocinios[fromScen]);
-  else return;
+  if(domain==='entradas'){
+    let copia = clone(state.entradas[fromScen]);
+    if(pct) copia = aplicaVariacaoEntradas(copia, pct);
+    state.entradas[toScen] = copia;
+  } else if(domain==='vendas'){
+    const copia = clone(state.vendas[fromScen]);
+    if(pct) copia.forEach(l=>{ l.preco = aplicaVariacaoPct(l.preco, pct); });
+    state.vendas[toScen] = copia;
+  } else if(domain==='patrocinios'){
+    const copia = clone(state.patrocinios[fromScen]);
+    if(pct) copia.forEach(t=>{ t.valorUnit = aplicaVariacaoPct(t.valorUnit, pct); });
+    state.patrocinios[toScen] = copia;
+  } else return;
   saveState(); render();
 };
 function esc(s){ return String(s).replace(/"/g,'&quot;'); }
