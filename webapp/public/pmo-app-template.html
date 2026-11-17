@@ -2670,19 +2670,26 @@ function renderNav(){
 
 const VIEWS = {}; // preenchido pelas proximas partes
 function goTo(id){ currentView = id; render(); window.scrollTo(0,0); }
-// trocar o innerHTML inteiro de #view a cada ação (lançar algo, anexar comprovante, editar um
-// campo...) faz o navegador resetar o scroll da página pro topo sozinho — guarda a posição antes
-// e restaura depois pra quem tava no meio de uma tabela longa (ex.: Custos) não "voltar pro
-// início" a cada clique. goTo() navega pra OUTRA tela e quer ir pro topo de propósito — por isso
-// ele chama window.scrollTo(0,0) de novo logo depois de render(), por cima do que foi restaurado aqui.
+// trocar o innerHTML inteiro de #view a cada ação (lançar algo, anexar comprovante, mudar status,
+// vincular um item a outro, editar um campo...) faz o navegador resetar o scroll pro topo sozinho
+// — guarda a posição antes e restaura depois pra quem tava no meio de uma tabela longa (ex.:
+// Custos) não "voltar pro início" a cada clique. goTo() navega pra OUTRA tela e quer ir pro topo
+// de propósito — por isso ele chama window.scrollTo(0,0) de novo logo depois de render(), por cima
+// do que foi restaurado aqui.
+// além do scroll da PÁGINA, tabelas longas (ex.: Custos) tem scroll PRÓPRIO dentro de ".tablewrap"
+// (ver CSS: overflow:auto + max-height) — esse scroll interno também é destruído e recriado do
+// zero a cada render(), então precisa ser guardado/restaurado à parte, por posição (mesma ordem
+// em que aparecem no HTML, que não muda de uma renderização pra outra da mesma tela).
 function render(){
   const scrollX = window.scrollX, scrollY = window.scrollY;
+  const innerScrolls = $$('#view .tablewrap').map(el=>({top:el.scrollTop, left:el.scrollLeft}));
   renderNav();
   const fn = VIEWS[currentView];
   $('#view').innerHTML = fn ? fn() : '<p>Em construção.</p>';
   wireGenericInputs();
   const wireFn = VIEWS[currentView+'_wire'];
   if(wireFn) wireFn();
+  $$('#view .tablewrap').forEach((el,i)=>{ if(innerScrolls[i]){ el.scrollTop = innerScrolls[i].top; el.scrollLeft = innerScrolls[i].left; } });
   window.scrollTo(scrollX, scrollY);
 }
 
