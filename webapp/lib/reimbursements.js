@@ -23,3 +23,18 @@ export async function paidReimbursementsTotalAllProjects() {
   if (error) throw error;
   return (data || []).reduce((acc, r) => acc + (Number(r.valor) || 0), 0);
 }
+
+// mesma soma de PAGO, mas de UM projeto só — usado pelo motor local (state.restituicoesPagas,
+// injetado pelo PmoFrame) pra "Restituições de caixa aprovadas" ter um "Realizado" de verdade no
+// Status PMO/Fluxo de Caixa daquele domínio. Sem isso, essa linha sempre mostrava Realizado R$0,
+// mesmo com restituições já de fato pagas — custosDatedAmounts não tinha como saber que uma
+// aprovada virou paga (approvedReimbursementsTotal só soma 'aprovado'+'pago' junto, sem distinguir).
+export async function paidReimbursementsTotal(projectId) {
+  const { data, error } = await supabase
+    .from('reimbursements')
+    .select('valor')
+    .eq('project_id', projectId)
+    .eq('status', 'pago');
+  if (error) throw error;
+  return (data || []).reduce((acc, r) => acc + (Number(r.valor) || 0), 0);
+}
