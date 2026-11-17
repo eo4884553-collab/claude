@@ -67,6 +67,21 @@ export async function fetchSharedCashHistory() {
         valor, data: c.dataPagamento, origem: c.origemPagamento || 'dominio',
       });
     });
+    // "Itens vendidos" (aba Vendas, catálogo de Custos com Qtd. comprada — bar/consumo: cerveja,
+    // bebidas, sucos etc.) é venda à vista, já faturada (ver itensVendidosSummary no motor local) —
+    // mesmo caso de "Ingressos vendidos"/"1º lote" (venda imediata, sem dataPagamento), mas por item
+    // em vez de 1 número só. Essa receita ficava de fora daqui — dando a entender que o evento deu
+    // prejuízo quando na verdade só faltava contar o dinheiro que já entrou vendendo bebida/comida.
+    (d.custos || []).forEach((c) => {
+      if (c.excluidoVendas) return;
+      const qtdVendida = Number(c.qtdVendida) || 0;
+      const valor = qtdVendida * (Number(c.precoVendaUnit) || 0);
+      if (!valor) return;
+      dom.receitas.push({
+        descricao: `${c.subcategoria || c.grupo || '(item)'} — item vendido`,
+        valor, data: null, tipo: 'ingressos',
+      });
+    });
     // patrocínio é pipeline por cenário, mas uma parcela já paga é dinheiro de verdade — lida
     // sempre do cenário "base", em qualquer dos 3 domínios. "tipo" marca a origem (patrocínio x
     // ingressos/mesas/contribuições) — é o que fetchSharedCashBalance usa pra separar os 2 cards

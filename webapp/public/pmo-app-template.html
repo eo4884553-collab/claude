@@ -3172,6 +3172,7 @@ VIEWS.dashboard = function(){
       ${lupaKpi('Receitas realizadas até hoje', 'dashboard_pmo_receitas_realizadas', fmtCur(pmoStatus.entExecutado), {style:`color:${pmoStatus.entExecutado>=pmoStatus.entPlanned*0.7?'var(--good)':'var(--warn)'}`})}
       ${lupaKpi('Custos planejados até hoje', 'dashboard_pmo_custos_planejadas', fmtCur(pmoStatus.saiPlanned))}
       ${lupaKpi('Custos realizados até hoje', 'dashboard_pmo_custos_realizadas', fmtCur(pmoStatus.saiExecutado))}
+      ${lupaKpi('Margem realizada até hoje', 'dashboard_pmo_margem_realizada', fmtCur(pmoStatus.entExecutado-pmoStatus.saiExecutado), {style:`color:${pmoStatus.entExecutado-pmoStatus.saiExecutado>=0?'var(--good)':'var(--bad)'};`})}
     </div>
     ${pmoStatus.ofensores.length ? `
     <div style="margin-top:16px;">
@@ -3529,6 +3530,11 @@ const LUPA_GERADORES = {
     const st = computePrevistoRealizadoStatus('base');
     const linhas = st.saiRows.filter(r=>r.executado>0).map(r=>[r.label, r.executado, null]);
     return {titulo:'Custos realizados até hoje — por categoria (já pago, com data)', linhas, totalLabel:'Total realizado até hoje', totalDisplay: fmtCur(st.saiExecutado)};
+  },
+  dashboard_pmo_margem_realizada: ()=>{
+    const st = computePrevistoRealizadoStatus('base');
+    const linhas = [['+ Receitas realizadas até hoje', st.entExecutado, null], ['− Custos realizados até hoje', -st.saiExecutado, null]];
+    return {titulo:'Margem realizada até hoje — receita já recebida menos custo já pago, com data (cenário Base)', linhas, totalLabel:'Margem realizada', totalDisplay: fmtCur(st.entExecutado-st.saiExecutado)};
   },
   fluxo_entradas_totais: ()=>{
     const scen = state.fluxo.scen; const cs = computeScenario(scen); const ann = entAnnualByKey(cs);
