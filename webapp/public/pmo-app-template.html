@@ -273,15 +273,35 @@ button.mesa-btn.selected{outline:3px solid var(--accent); outline-offset:2px;}
 .saldo-hist-lightbox .lb-bar{display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; justify-content:center; width:100%; max-width:960px;}
 .saldo-hist-lightbox .lb-viewport{flex:1 1 auto; width:100%; max-width:960px; overflow-y:auto; border-radius:10px; background:var(--surface); padding:20px; box-sizing:border-box;}
 .saldo-hist-lightbox .lb-close{cursor:pointer;}
-/* imprimir uma lupa aberta: só entra em ação quando <body> ganha .printing-lightbox (ver
-   ACTIONS.imprimirLupa) — esconde todo o resto da página sem reorganizar o layout (visibility, não
-   display), e solta a lupa do fundo escuro/scroll limitado pra imprimir numa folha normal */
+/* imprimir uma lupa aberta: esconde todo o resto da página e solta a lupa do fundo escuro/scroll
+   limitado (".lb-viewport") pra imprimir numa folha normal, com TODO o conteúdo — sem isso, uma
+   lista longa (ex.: "A pagar" na Restituição de Caixa) ficava cortada na PARTE QUE JÁ ESTAVA
+   VISÍVEL na tela no momento do print (o scroll interno não "se abre" sozinho pra imprimir),
+   fazendo parecer que faltavam lançamentos que na verdade só estavam escondidos abaixo da dobra —
+   reportado com um PDF mostrando a lista cortada bem onde a barra de rolagem aparecia.
+   A lupa normalmente fica no meio do HTML (dentro de #view, bem aninhada). Um listener de
+   "beforeprint" (ver mais abaixo, perto de ACTIONS.imprimirLupa) MOVE ela pra virar filha direta de
+   <body> antes de imprimir — e "afterprint" devolve pro lugar de origem depois. Só assim o resto da
+   página pode ser tirado do fluxo com display:none (não só visibility:hidden, que mantém o espaço
+   ocupado) sem precisar reproduzir a estrutura de ancestrais (#app > #view > ...) em CSS; e, já
+   filha direta do body, a lupa vira position:static (fluxo normal) — necessário porque um elemento
+   position:fixed/absolute (o que ela é normalmente) não "cresce" pra gerar mais páginas quando o
+   conteúdo transborda dele: overflow:visible só deixa aparecer por cima, sem paginar de verdade no
+   PDF/impressão — foi exatamente esse detalhe que causava o corte.
+   beforeprint/afterprint disparam tanto pelo botão "🖨️ Imprimir" de dentro da lupa quanto por um
+   Ctrl+P/"Imprimir" direto do navegador (sem passar pelo botão nenhum) — por isso a correção
+   funciona nos dois casos, sem depender de nenhuma classe adicionada à mão. */
 @media print{
-  body.printing-lightbox > *{visibility:hidden;}
-  body.printing-lightbox .saldo-hist-lightbox{visibility:visible; position:absolute; inset:0; background:#fff; padding:0; display:block; overflow:visible;}
-  body.printing-lightbox .saldo-hist-lightbox *{visibility:visible;}
-  body.printing-lightbox .saldo-hist-lightbox .lb-bar{display:none;}
-  body.printing-lightbox .saldo-hist-lightbox .lb-viewport{max-width:100%; overflow:visible; background:#fff; padding:0; color:#000;}
+  body.printing-lightbox > *:not(.saldo-hist-lightbox){display:none!important;}
+  body.printing-lightbox > .saldo-hist-lightbox{position:static!important; inset:auto!important; background:#fff; padding:0; display:block!important; overflow:visible!important; height:auto!important;}
+  body.printing-lightbox > .saldo-hist-lightbox > *:not(.lb-viewport){display:none!important;}
+  body.printing-lightbox > .saldo-hist-lightbox .lb-viewport{max-width:100%; max-height:none!important; height:auto!important; overflow:visible!important; background:#fff; padding:0; color:#000; display:block!important;}
+  /* a tabela dentro da lupa (ex.: a lista de "A pagar") vem dentro de um ".tablewrap" PRÓPRIO, com
+     seu PRÓPRIO overflow:auto + max-height (mesmo elemento que também tem scroll interno nas telas
+     normais, ver Custos) — sem isso, mesmo já tendo liberado o .lb-viewport acima, o conteúdo
+     continuava cortado no scroll de DENTRO do .tablewrap. Vale pra qualquer impressão (não só
+     dentro de uma lupa): nenhuma tabela deve ficar cortada quando o objetivo é imprimir tudo. */
+  .tablewrap{overflow:visible!important; max-height:none!important;}
 }
 .lb-row-click{cursor:pointer;}
 .lb-row-click:hover td{background:var(--accent-soft);}
@@ -3213,10 +3233,30 @@ function piquinzadaFiltrarLupa(input){
 function lbPrintButton(){
   return `<button class="btn small guest-ok" data-action="imprimirLupa" title="Imprimir esta tela">🖨️ Imprimir</button>`;
 }
-ACTIONS.imprimirLupa = ()=>{
-  document.body.classList.add('printing-lightbox');
-  window.print();
-};
+ACTIONS.imprimirLupa = ()=>{ window.print(); };
+// move a lupa aberta (se tiver uma) pra virar filha direta de <body> antes de imprimir — e devolve
+// pro lugar de origem depois (ver nota grande no @media print acima, sobre por que isso é
+// necessário pra imprimir uma lista longa por inteiro, sem cortar no que já estava visível na
+// tela). beforeprint/afterprint disparam pra QUALQUER jeito de imprimir (botão in-app, Ctrl+P, menu
+// do navegador) — por isso funciona sem depender de qual caminho a pessoa usou.
+if(typeof window!=='undefined'){
+  let lbPrintMoved = null;
+  window.addEventListener('beforeprint', ()=>{
+    const lb = document.querySelector('.saldo-hist-lightbox');
+    if(!lb || lb.parentNode===document.body) return;
+    lbPrintMoved = {el:lb, parent:lb.parentNode, next:lb.nextSibling};
+    document.body.appendChild(lb);
+    document.body.classList.add('printing-lightbox');
+  });
+  window.addEventListener('afterprint', ()=>{
+    document.body.classList.remove('printing-lightbox');
+    if(lbPrintMoved){
+      const {el, parent, next} = lbPrintMoved;
+      if(next && next.parentNode===parent) parent.insertBefore(el, next); else parent.appendChild(el);
+      lbPrintMoved = null;
+    }
+  });
+}
 if(typeof window!=='undefined') window.addEventListener('afterprint', ()=> document.body.classList.remove('printing-lightbox'));
 // "de onde vem" a Receita total / Custo total de um cenário do Dashboard — não é uma consulta
 // nova, é a mesma conta que computeScenario() já faz (ver função acima), só exibida separada por
