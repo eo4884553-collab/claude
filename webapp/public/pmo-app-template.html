@@ -2670,13 +2670,20 @@ function renderNav(){
 
 const VIEWS = {}; // preenchido pelas proximas partes
 function goTo(id){ currentView = id; render(); window.scrollTo(0,0); }
+// trocar o innerHTML inteiro de #view a cada ação (lançar algo, anexar comprovante, editar um
+// campo...) faz o navegador resetar o scroll da página pro topo sozinho — guarda a posição antes
+// e restaura depois pra quem tava no meio de uma tabela longa (ex.: Custos) não "voltar pro
+// início" a cada clique. goTo() navega pra OUTRA tela e quer ir pro topo de propósito — por isso
+// ele chama window.scrollTo(0,0) de novo logo depois de render(), por cima do que foi restaurado aqui.
 function render(){
+  const scrollX = window.scrollX, scrollY = window.scrollY;
   renderNav();
   const fn = VIEWS[currentView];
   $('#view').innerHTML = fn ? fn() : '<p>Em construção.</p>';
   wireGenericInputs();
   const wireFn = VIEWS[currentView+'_wire'];
   if(wireFn) wireFn();
+  window.scrollTo(scrollX, scrollY);
 }
 
 /* liga inputs genericos via data-bind="a.b.c" (aceita indices numericos p/ arrays) */
