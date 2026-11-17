@@ -3257,9 +3257,35 @@ function piquinzadaFiltrarLupa(input){
   const termo = (input.value||'').toLowerCase().trim();
   const lightbox = input.closest('.saldo-hist-lightbox');
   if(!lightbox) return;
-  lightbox.querySelectorAll('tbody tr').forEach(tr=>{
-    const bate = !termo || tr.textContent.toLowerCase().includes(termo);
-    tr.style.display = bate ? '' : 'none';
+  // soma o "data-valor" das linhas que sobraram depois do filtro e mostra um total só daquilo —
+  // por tabela (uma lupa pode ter mais de uma, ex. previsões por domínio), já que o total do
+  // <tfoot> original é sempre do conjunto completo e não acompanha a busca
+  lightbox.querySelectorAll('.tablewrap table').forEach(table=>{
+    let totalFiltro = 0, visiveis = 0, temValor = false;
+    table.querySelectorAll('tbody tr').forEach(tr=>{
+      const bate = !termo || tr.textContent.toLowerCase().includes(termo);
+      tr.style.display = bate ? '' : 'none';
+      if(bate && tr.hasAttribute('data-valor')){
+        temValor = true; visiveis++;
+        totalFiltro += Number(tr.getAttribute('data-valor'))||0;
+      }
+    });
+    let filtroRow = table.querySelector('tr.lb-filtro-total');
+    if(termo && temValor){
+      if(!filtroRow){
+        const tfoot = table.querySelector('tfoot') || table.createTFoot();
+        filtroRow = document.createElement('tr');
+        filtroRow.className = 'lb-filtro-total';
+        tfoot.insertBefore(filtroRow, tfoot.firstChild);
+      }
+      const theadTr = table.querySelector('thead tr');
+      const ncols = theadTr ? theadTr.children.length : 2;
+      filtroRow.style.background = 'var(--accent-soft)';
+      filtroRow.innerHTML = `<td colspan="${Math.max(1,ncols-1)}" style="color:var(--accent-strong); font-weight:600;">Total do filtro (${visiveis} ${visiveis===1?'item':'itens'})</td><td class="num mono" style="font-weight:700; color:var(--accent-strong);">${fmtCur2(totalFiltro)}</td>`;
+      filtroRow.style.display = '';
+    } else if(filtroRow){
+      filtroRow.style.display = 'none';
+    }
   });
 }
 // botão de imprimir reutilizável em qualquer lupa — ver ACTIONS.imprimirLupa e o @media print
@@ -3336,7 +3362,7 @@ function scenarioBreakdownLightbox(){
     ];
     total = c.custoTotal;
   }
-  const rows = linhas.map(([label,valor,nota])=>`<tr>
+  const rows = linhas.map(([label,valor,nota])=>`<tr data-valor="${Number(valor)||0}">
       <td>${esc(label)}${nota ? ` <span class="hint">— ${esc(nota)}</span>` : ''}</td>
       <td class="num mono">${fmtCur2(valor)}</td>
     </tr>`).join('');
@@ -3692,7 +3718,7 @@ function saldoHistoricoFlatTable(data, filtro){
   let theadCols, bodyRows;
   if(filtro==='receitas'){
     theadCols = '<th>Domínio</th><th>Receita</th><th>Data</th><th class="num">Valor</th>';
-    bodyRows = linhas.map(({domId,item:r})=>`<tr>
+    bodyRows = linhas.map(({domId,item:r})=>`<tr data-valor="${Number(r.valor)||0}">
       <td>${esc(SALDO_HIST_DOMAIN_LABEL[domId]||domId)}</td>
       <td>${esc(r.descricao)}${r.agregado ? ` <span class="hint" title="Valor lançado como total único na aba Vendas — não tem lançamento individual por transação.">(agregado)</span>` : ''}</td>
       <td>${dataFmt(r.data)}</td>
@@ -3700,7 +3726,7 @@ function saldoHistoricoFlatTable(data, filtro){
     </tr>`).join('');
   } else if(filtro==='custos'){
     theadCols = '<th>Domínio</th><th>Custo</th><th>Data</th><th>Origem</th><th class="num">Valor</th>';
-    bodyRows = linhas.map(({domId,item:c})=>`<tr>
+    bodyRows = linhas.map(({domId,item:c})=>`<tr data-valor="${Number(c.valor)||0}">
       <td>${esc(SALDO_HIST_DOMAIN_LABEL[domId]||domId)}</td>
       <td>${esc(c.fornecedor)}${c.subcategoria ? ` <span class="hint">(${esc(c.subcategoria)})</span>` : ''}</td>
       <td>${dataFmt(c.data)}</td>
@@ -3709,7 +3735,7 @@ function saldoHistoricoFlatTable(data, filtro){
     </tr>`).join('');
   } else if(filtro==='restituicoesAprovadas'){
     theadCols = '<th>Domínio</th><th>Restituição</th><th>Quem solicitou</th><th>Data da compra</th><th class="num">Valor</th>';
-    bodyRows = linhas.map(({domId,item:r})=>`<tr>
+    bodyRows = linhas.map(({domId,item:r})=>`<tr data-valor="${Number(r.valor)||0}">
       <td>${esc(SALDO_HIST_DOMAIN_LABEL[domId]||domId)}</td>
       <td>${esc(r.descricao||'(sem descrição)')}</td>
       <td>${esc(r.quem||'—')}</td>
@@ -3718,7 +3744,7 @@ function saldoHistoricoFlatTable(data, filtro){
     </tr>`).join('');
   } else {
     theadCols = '<th>Domínio</th><th>Restituição</th><th>Quem recebeu</th><th>Data</th><th class="num">Valor</th>';
-    bodyRows = linhas.map(({domId,item:r})=>`<tr>
+    bodyRows = linhas.map(({domId,item:r})=>`<tr data-valor="${Number(r.valor)||0}">
       <td>${esc(SALDO_HIST_DOMAIN_LABEL[domId]||domId)}</td>
       <td>${esc(r.descricao||'(sem descrição)')}</td>
       <td>${esc(r.quem||'—')}</td>
@@ -3811,12 +3837,12 @@ function previsoesCaixaDomainBlock(domId, dom){
   const custos = (dom.custosPrevistos||[]).slice().sort((a,b)=> (a.dataPrevista||'').localeCompare(b.dataPrevista||''));
   const totalReceitas = sum(receitas.map(r=>r.valor));
   const totalCustos = sum(custos.map(c=>c.valor));
-  const receitasRows = receitas.length ? receitas.map(r=>`<tr>
+  const receitasRows = receitas.length ? receitas.map(r=>`<tr data-valor="${Number(r.valor)||0}">
       <td>${esc(r.descricao)}</td>
       <td>${dataFmt(r.dataPrevista)}</td>
       <td class="num mono" style="color:var(--good);">${fmtCur2(r.valor)}</td>
     </tr>`).join('') : `<tr><td colspan="3" class="hint">Nenhuma receita prevista em aberto.</td></tr>`;
-  const custosRows = custos.length ? custos.map(c=>`<tr>
+  const custosRows = custos.length ? custos.map(c=>`<tr data-valor="${Number(c.valor)||0}">
       <td>${esc(c.fornecedor)}${c.subcategoria ? ` <span class="hint">(${esc(c.subcategoria)})</span>` : ''}</td>
       <td>${dataFmt(c.dataPrevista)}</td>
       <td class="num mono" style="color:var(--bad);">${fmtCur2(c.valor)}</td>
@@ -5595,7 +5621,7 @@ function mesasListaLightbox(){
     : `<button class="btn small guest-ok" data-action="mesaListaAnexarComprovante:${m.numero}" title="Anexar comprovante do pagamento desta mesa">📎 Anexar</button>`}</td>`;
   // clicar em qualquer linha abre direto o painel de reserva daquela mesa (fecha a lupa) — não
   // precisa mais ficar procurando a mesa no mapa depois de achar o nome aqui
-  const rows = mesas.length ? mesas.map(m=> filtro==='pagas' ? `<tr data-action="mesaListaAbrirMesa:${m.numero}" class="lb-row-click" title="Abrir a mesa ${m.numero}">
+  const rows = mesas.length ? mesas.map(m=> filtro==='pagas' ? `<tr data-action="mesaListaAbrirMesa:${m.numero}" class="lb-row-click" title="Abrir a mesa ${m.numero}" data-valor="${Number(m.valorPago)||0}">
       <td class="num mono">${m.numero}</td>
       <td>${esc(m.reservadoPor||'(sem nome)')}</td>
       <td>${esc(m.telefone||'—')}</td>
@@ -5603,7 +5629,7 @@ function mesasListaLightbox(){
       <td>${dataFmt(m.dataPagamento)}</td>
       ${comprovanteCell(m)}
       <td class="num mono" style="color:var(--good);">${fmtCur2(Number(m.valorPago)||0)}</td>
-    </tr>` : `<tr data-action="mesaListaAbrirMesa:${m.numero}" class="lb-row-click" title="Abrir a mesa ${m.numero}">
+    </tr>` : `<tr data-action="mesaListaAbrirMesa:${m.numero}" class="lb-row-click" title="Abrir a mesa ${m.numero}" data-valor="${Number(m.valorPago)||0}">
       <td class="num mono">${m.numero}</td>
       <td>${esc(m.reservadoPor||'(sem nome)')}</td>
       <td>${esc(m.telefone||'—')}</td>
