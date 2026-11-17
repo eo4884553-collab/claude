@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { PROJECTS } from '../lib/projects';
-import { approvedReimbursementsTotal } from '../lib/reimbursements';
+import { approvedReimbursementsTotal, paidReimbursementsTotal } from '../lib/reimbursements';
 import { fetchEffectiveRole } from '../lib/roles';
 import { fetchSharedCashBalance, setSharedCashSaldoInicial, fetchSharedCashHistory, fetchSharedCashForecast } from '../lib/cash';
 import { fetchMesasFeijoada, reservarMesa, atualizarMinhaMesa, cancelarMesa, adminSalvarMesa, registrarPagamentoMesa, moverMesaReserva } from '../lib/mesas';
@@ -70,6 +70,12 @@ export default function PmoFrame({ auth, project, onChangeProject }) {
         const total = await approvedReimbursementsTotal(project.id);
         seed = Object.assign({}, seed, { restituicoesAprovadas: total });
       } catch (_) { /* se falhar, o app abre normalmente so sem essa soma (fica 0) */ }
+      // quanto dessas restituições já foi de fato PAGO (não só aprovado) — usado pelo Status
+      // PMO/Fluxo de Caixa local pra mostrar um "Realizado" de verdade nessa categoria
+      try {
+        const totalPago = await paidReimbursementsTotal(project.id);
+        seed = Object.assign({}, seed, { restituicoesPagas: totalPago });
+      } catch (_) { /* se falhar, fica 0 (Realizado dessa categoria fica subestimado, não quebra nada) */ }
       // saldo de caixa REAL, compartilhado entre todos os domínios — busca sempre fresco
       // (nunca fica gravado no project_state), soma dados dos 3 domínios de uma vez
       try {

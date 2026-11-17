@@ -2253,6 +2253,19 @@ function custosRowsForFCKey(fcKey, custosRows){
 // pra mostrar as duas linhas separadas (Previsto/Realizado) na tela; sem kind, traz os dois juntos
 // (comportamento original, usado no cálculo do fluxo).
 function custosDatedAmounts(fcKey, custosRows, kind){
+  // "Restituições de caixa aprovadas" não é uma linha de state.custos (custosRowsForFCKey sempre
+  // devolve []) — é o scalar sincronizado da aba Restituição de Caixa (ver state.restituicoesAprovadas
+  // acima). Sem data por lançamento individual, igual Ingressos/Itens vendidos: o que já foi PAGO
+  // (state.restituicoesPagas, só 'pago' — não 'aprovado' ainda não pago) conta inteiro como
+  // Realizado no mês de hoje. Sem isso, essa linha sempre mostrava Realizado R$0 mesmo com
+  // restituições já de fato pagas.
+  if(fcKey==='restituicoesAprovadas'){
+    if(kind==='previsto') return [];
+    const pago = Number(state.restituicoesPagas)||0;
+    if(!pago) return [];
+    const mes = Math.max(0, currentMonthIdxClamped());
+    return [{mes, valor: pago}];
+  }
   const out = [];
   custosRowsForFCKey(fcKey, custosRows).forEach(r=>{
     if(r.dataPagamento && r.pago){
