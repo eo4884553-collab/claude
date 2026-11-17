@@ -2569,6 +2569,26 @@ function computePrevistoRealizadoStatus(scen){
   }
   const entRows = FC_ENT_KEYS.map((k,i)=> rowStatus(FC_ENT_LABELS[i], 'receita', entAnnual[k], state.fluxo.pctEnt[k], entDatedAmountsForKey(k, scen, 'real')));
   const saiRows = FC_SAI_KEYS.map((k,i)=> rowStatus(FC_SAI_LABELS[i], 'custo', saiAnnual[k], state.fluxo.pctSai[k], custosDatedAmounts(k, custosRows, 'real')));
+  // "Mesas (Feijoada)" dá acesso ao evento igual um ingresso avulso — mesa paga é ingresso vendido,
+  // só sem um "previsto" próprio (não há preço fixo por mesa, ver mesasFeijoadaTotalAnual: o
+  // planejado dessa linha é sempre igual ao realizado, nunca uma meta de verdade). Funde o
+  // Realizado de Mesas dentro de Ingressos (mesmo critério que a aba Orçamento x Real já usa, via
+  // venda.valorRecebido sincronizado) — sem isso, "Ingressos" aqui no Status PMO nunca contava o
+  // que já entrou por mesa, fazendo a categoria parecer bem mais atrasada do que realmente está
+  // quando a maior parte da receita vem de mesa, não de venda avulsa. Zera a linha "Mesas" depois
+  // de fundida, pra não contar em dobro nos totais (entPlanned/entExecutado) nem aparecer como um
+  // "ofensor" à parte.
+  const idxIngressos = FC_ENT_KEYS.indexOf('receitaIngressos');
+  const idxMesas = FC_ENT_KEYS.indexOf('receitaMesas');
+  if(idxIngressos>=0 && idxMesas>=0){
+    const ingressosRow = entRows[idxIngressos], mesasRow = entRows[idxMesas];
+    if(mesasRow.executado){
+      ingressosRow.executado += mesasRow.executado;
+      ingressosRow.gap = ingressosRow.plannedToDate - ingressosRow.executado;
+      ingressosRow.gapPct = ingressosRow.plannedToDate>0 ? ingressosRow.gap/ingressosRow.plannedToDate : 0;
+    }
+    mesasRow.annualTotal = 0; mesasRow.plannedToDate = 0; mesasRow.executado = 0; mesasRow.gap = 0; mesasRow.gapPct = 0;
+  }
   const entPlanned = sum(entRows.map(r=>r.plannedToDate));
   const entExecutado = sum(entRows.map(r=>r.executado));
   const saiPlanned = sum(saiRows.map(r=>r.plannedToDate));
