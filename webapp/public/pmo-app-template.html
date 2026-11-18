@@ -4888,6 +4888,7 @@ VIEWS.patrocinios = function(){
       <table style="width:auto; min-width:760px;"><thead><tr><th>Empresa</th><th class="num">Pago</th><th class="num">Pendente</th><th>Permuta?</th><th>Cobre custo de</th><th>Parcelas</th><th></th></tr></thead>
       <tbody>${fechRows || `<tr><td colspan="7" class="hint">Nenhuma empresa fechou essa cota ainda.</td></tr>`}</tbody></table>
       <button class="btn small" style="margin-top:8px;" data-action="addFechamento:${scen}:${i}">+ Adicionar empresa</button>
+      <button class="btn small" style="margin-top:8px; margin-left:6px;" data-action="colarEmpresasTier:${scen}:${i}" title="Cole uma lista de nomes (um por linha) e lança todas de uma vez">📋 Colar lista de empresas</button>
     </td></tr>`;
   }).join('');
 
@@ -4948,6 +4949,24 @@ ACTIONS.addFechamento = (scen,i)=>{
   const t = state.patrocinios[scen][Number(i)]; if(!t) return;
   if(!t.fechamentos) t.fechamentos=[];
   t.fechamentos.push({id:uid(), empresa:'', parcelas:[]});
+  saveState(); render();
+};
+// atalho pra lançar várias empresas de uma vez numa cota (ex.: importar uma lista de
+// patrocinadores já fechados) — cola uma lista (um nome por linha, ou separados por vírgula) e
+// cria 1 "fechamento" pra cada nome, já com 1 parcela única no valor cheio da cota (sem data —
+// fica "—" até a pessoa lançar a data/pagamento de verdade depois), pra "Pendente" já aparecer
+// certo sem precisar abrir parcela por parcela. Permuta cada uma marca depois, pelo checkbox normal.
+ACTIONS.colarEmpresasTier = (scen,i)=>{
+  const t = state.patrocinios[scen][Number(i)]; if(!t) return;
+  const texto = window.prompt(`Cole os nomes das empresas que fecharam "${t.cota}", um por linha (ou separados por vírgula):`, '');
+  if(texto==null) return;
+  const nomes = texto.split(/\r?\n|,/).map(s=>s.trim()).filter(Boolean);
+  if(!nomes.length) return;
+  if(!t.fechamentos) t.fechamentos=[];
+  const valorUnit = Number(t.valorUnit)||0;
+  nomes.forEach(nome=>{
+    t.fechamentos.push({id:uid(), empresa:nome, parcelas:[{valor:valorUnit, dataPrevista:'', dataPagamento:''}]});
+  });
   saveState(); render();
 };
 ACTIONS.rmFechamento = (scen,i,fi)=>{
