@@ -2960,11 +2960,21 @@ function replicateControl(domain, currentScen){
   </span>`;
 }
 // aplica a % de variação (replicateControl acima) sobre os valores numéricos de CUSTO que fazem
-// sentido pro domínio — só isso, nunca sobre capacidade/conversão/taxas (não são "custo por
-// categoria") nem sobre datas/nomes. Pedido: replicar Base pro Conservador com -20% e pro
-// Agressivo com +20%, já preenchendo os valores pra poder analisar sem digitar tudo de novo.
+// sentido pro domínio, nunca sobre datas/nomes. Pedido: replicar Base pro Conservador com -20% e
+// pro Agressivo com +20%, já preenchendo os valores pra poder analisar sem digitar tudo de novo.
+// Capacidade máxima e Número de cortesias ficam de fora de propósito — são compromissos do
+// evento (contrato do espaço, lista de convidados), não premissas que mudem com o cenário. Só a
+// Conversão da capacidade (% que efetivamente compra) varia — é essa % que reduz/aumenta o
+// quantitativo de pagantes num cenário mais pessimista/otimista, sem mexer no tamanho do evento.
 function aplicaVariacaoPct(valor, pct){ return Math.round((Number(valor)||0)*(1+pct)*100)/100; }
+// mesma ideia de aplicaVariacaoPct, mas pra campo que já é uma fração 0–1 (ex.: conversaoPct) —
+// arredondar em 2 casas decimais do valor CRU (como aplicaVariacaoPct faz, pensado pra dinheiro)
+// arredondaria pro ponto percentual inteiro mais próximo (64,72% viraria 65%); aqui arredonda em
+// 4 casas da fração, ou seja, no centésimo de ponto percentual (64,72%), preservando a precisão
+// que a própria tela de Entradas PMO já usa pra esse tipo de campo (1 casa decimal no %).
+function aplicaVariacaoFracaoPct(valor, pct){ return Math.round((Number(valor)||0)*(1+pct)*10000)/10000; }
 function aplicaVariacaoEntradas(copia, pct){
+  if(copia.conversaoPct!=null) copia.conversaoPct = Math.max(0, aplicaVariacaoFracaoPct(copia.conversaoPct, pct));
   ['atracoes','estrutura','marketing','logistica'].forEach(gk=>{
     Object.keys(copia[gk]||{}).forEach(k=>{ copia[gk][k] = aplicaVariacaoPct(copia[gk][k], pct); });
   });
