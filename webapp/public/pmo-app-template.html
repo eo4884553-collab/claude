@@ -1882,7 +1882,14 @@ function computeScenario(scen, overrides){
 
   const patrocinio = p.esperado * patroFactor;
   const outras = e.outrasReceitas;
-  const receitaTotal = receitaIngressos + receitaConsumo + patrocinio + outras;
+  // receita planejada de itens comprados pra revender (ex.: copos, bebidas) — ver
+  // custosItensVendidosPlanejadoTotal: assume que tudo que já foi decidido comprar em Custos
+  // (Qtd. comprada) será vendido no preço cadastrado lá. É um valor real já em andamento (igual
+  // restituicoesAprovadas abaixo), por isso entra IGUAL nos 3 cenários, não escalado por fator.
+  // O custo desses mesmos itens já está contado em subOperacao (Entradas PMO) — aqui é só a
+  // RECEITA da revenda, então não duplica custo.
+  const receitaItensVendidos = custosItensVendidosPlanejadoTotal();
+  const receitaTotal = receitaIngressos + receitaConsumo + patrocinio + outras + receitaItensVendidos;
 
   const subAtracoes = g.subAtracoes - e.atracoes.cachePrincipal + cacheOverride;
   const subEstrutura = g.subEstrutura * estruturaFactor;
@@ -1907,7 +1914,7 @@ function computeScenario(scen, overrides){
   // break-even usa a mesma simplificacao do modelo original: exclui taxa de ingressos e open bar da base
   const beBase = custoDiretos * (1 + e.outros.contingenciaPct);
   const beSem = contribPP ? beBase/contribPP : 0;
-  const beCom = contribPP ? Math.max(0,(beBase - patrocinio - outras)/contribPP) : 0;
+  const beCom = contribPP ? Math.max(0,(beBase - patrocinio - outras - receitaItensVendidos)/contribPP) : 0;
   const pctCapBe = e.capMax ? beCom/e.capMax : 0;
   const mseg = pagantes ? (pagantes-beCom)/pagantes : 0;
   const patroMin = e.atracoes.cachePrincipal;
@@ -1919,7 +1926,7 @@ function computeScenario(scen, overrides){
 
   return {
     scen, pagantes, publicoTotal, ocupacao, ticketMedio: v.ticketMedio*ticketFactor,
-    receitaIngressos, receitaConsumo, margemConsumoPP, patrocinio, outras, receitaTotal,
+    receitaIngressos, receitaConsumo, margemConsumoPP, patrocinio, outras, receitaItensVendidos, receitaTotal,
     custoTotal, resultado, margem, receitaPP, custoPP, contribPP, beSem, beCom, pctCapBe, mseg,
     patroMin, cobertura, status, classif,
     patroContratado: p.contratado, patroPipeline: p.pipeline, patroNominal: p.nominal, nCotas: p.nCotas,
@@ -2050,13 +2057,29 @@ function computeCustosSummary(){
 // itens de Custos marcados como "controlados por unidade" (Qtd. comprada > 0) — mesma lista usada
 // pra lançar as vendas realizadas (aba Vendas › Itens vendidos) e pra análise de margem por item.
 // Não depende de cenário: é controle real, igual o resto da aba Custos.
+// total planejado de receita de revenda (itens vendidos), direto da lista CRUA de state.custos —
+// de propósito, sem passar por computeCustosSummary()/computedCostValue(), que dependem de
+// computeScenario('base') pros 4 itens sintéticos "computed" (Tributos, Taxa ingressos, Open bar,
+// Contingência): se este total viesse de lá, computeScenario → aqui → computeCustosSummary →
+// computeScenario de novo viraria recursão infinita, já que computeScenario precisa deste valor
+// pra entrar no resultado planejado dos 3 cenários (ver abaixo).
+// planejado = receita SE tudo o que já foi comprado for vendido no preço de venda cadastrado
+// (qtdComprada × precoVendaUnit, em vez de qtdVendida × precoVendaUnit, que é o já REALIZADO) —
+// o custo de compra desses itens já está contado inteiro no grupo Operação (orçamento de Entradas
+// PMO); esta soma é só o lado da RECEITA, não mexe em custo, então não há duplicação: comprar
+// fica em Custos/Operação, revender entra aqui.
+function custosItensVendidosPlanejadoTotal(){
+  return sum((state.custos||[]).filter(c=> (Number(c.qtdComprada)||0)>0 && !c.excluidoVendas)
+    .map(c=> (Number(c.qtdComprada)||0) * (Number(c.precoVendaUnit)||0)));
+}
 function itensVendidosSummary(){
   const cs = computeCustosSummary();
   const rows = cs.rows.map((r,i)=>({r,i})).filter(({r})=> r.qtdComprada>0 && !r.excluidoVendas);
   const faturamentoTotal = sum(rows.map(({r})=>r.faturamento));
   const margemTotal = sum(rows.map(({r})=>r.margemReal));
   const semVenda = rows.filter(({r})=> !r.qtdVendida);
-  return {rows, faturamentoTotal, margemTotal, semVenda};
+  const planejadoTotal = custosItensVendidosPlanejadoTotal();
+  return {rows, faturamentoTotal, margemTotal, semVenda, planejadoTotal};
 }
 // ranking de margem por item (área de análise pedida: qual item teve a melhor e a pior margem) —
 // só considera item com pelo menos alguma venda lançada (margemPct de item sem venda é sempre 0,
@@ -2116,7 +2139,7 @@ function computeReceitaOxR(){
     {cat:'Ingressos', planejado: cs.receitaIngressos, realizado: vt.receitaRealizada},
     {cat:'Patrocínio', planejado: p.esperado, realizado: sum(patrocinioDatedAmounts('base','real').map(d=>d.valor))},
     {cat:'Ativações', planejado: at.esperado, realizado: sum(ativacoesDatedAmounts('base','real').map(d=>d.valor))},
-    {cat:'Itens vendidos (bar/consumo)', planejado: 0, realizado: iv.faturamentoTotal},
+    {cat:'Itens vendidos (bar/consumo)', planejado: iv.planejadoTotal, realizado: iv.faturamentoTotal},
     {cat:'Outras receitas', planejado: cs.outras, realizado: 0},
   ];
   return linhas.map(l=>{
@@ -2503,11 +2526,13 @@ function entDatedAmountsForKey(k, scen, kind){
     const mes = Math.max(0, currentMonthIdxClamped());
     return [{mes, valor: recebido}];
   }
-  // Itens vendidos (bar/consumo): mesmo caso de Ingressos acima — só existe o total JÁ FATURADO
-  // (qtdVendida × preço, lançado na aba Vendas › Itens vendidos), sem data por venda individual —
-  // conta inteiro como Realizado no mês de hoje. Não tem "Previsto" (não é modelado em Entradas
-  // PMO/cenário — por isso o planejado desta linha é sempre 0, igual em Orçamento x Real) e
-  // independe de domínio (lê direto state.custos, igual itensVendidosSummary em qualquer aba).
+  // Itens vendidos (bar/consumo): o REALIZADO é o total JÁ FATURADO (qtdVendida × preço, lançado
+  // em Vendas › Itens vendidos), sem data por venda individual — conta inteiro no mês de hoje,
+  // igual Ingressos acima. Não tem lista "Previsto" com data própria, mas o ANUAL planejado não é
+  // mais 0 (ver entAnnualByKey → custosItensVendidosPlanejadoTotal: assume vender tudo que já foi
+  // comprado) — a parte sem data cai no "restante" distribuído pela % manual da tela de Fluxo de
+  // Caixa (ver monthlyDatedPlusRemainder). Independe de domínio (lê direto state.custos, igual
+  // itensVendidosSummary em qualquer aba).
   if(k==='itensVendidos'){
     if(kind==='previsto') return [];
     const faturamento = itensVendidosSummary().faturamentoTotal;
@@ -2520,7 +2545,7 @@ function entDatedAmountsForKey(k, scen, kind){
 // valor anual total de cada linha de ENTRADA/SAÍDA do cenário — extraído à parte pra ser
 // reaproveitado no cálculo do fluxo e no "% do total já previsto/realizado" da tela
 function entAnnualByKey(cs){
-  return {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, itensVendidos:0, outras:cs.outras, contribuicoesBateria: contribuintesBateriaTotalAnual(), receitaMesas: mesasFeijoadaTotalAnual()};
+  return {receitaIngressos:cs.receitaIngressos, patrocinio:cs.patrocinio, receitaConsumo:cs.receitaConsumo, itensVendidos:cs.receitaItensVendidos||0, outras:cs.outras, contribuicoesBateria: contribuintesBateriaTotalAnual(), receitaMesas: mesasFeijoadaTotalAnual()};
 }
 function saiAnnualByKey(cs){
   return {subAtracoes:cs.subAtracoes, subEstrutura:cs.subEstrutura, subOperacao:cs.subOperacao, subMarketing:cs.subMarketing,
@@ -3105,6 +3130,7 @@ VIEWS.dashboard = function(){
         <div class="kv"><span class="k">↳ Ingressos</span><span class="v">${fmtCur(c.receitaIngressos)}</span></div>
         <div class="kv"><span class="k">↳ Patrocínio</span><span class="v">${fmtCur(c.patrocinio)}</span></div>
         <div class="kv"><span class="k">↳ Ativações</span><span class="v">${fmtCur(c.receitaConsumo)}</span></div>
+        <div class="kv"><span class="k">↳ Itens vendidos (planejado)</span><span class="v">${fmtCur(c.receitaItensVendidos)}</span></div>
         <div class="kv total saldo-kpi-clickable" data-action="openScenarioBreakdown:${scen}:custo" title="Clique para ver de onde vem"><span class="k">Custo total 🔎</span><span class="v">${fmtCur(c.custoTotal)}</span></div>
         <div class="kv total"><span class="k">Resultado</span><span class="v" style="color:${c.resultado>=0?'var(--good)':'var(--bad)'}">${fmtCur(c.resultado)}</span></div>
         <div class="kv"><span class="k">Margem líquida</span><span class="v">${fmtPct(c.margem)}</span></div>
@@ -3333,6 +3359,7 @@ function scenarioBreakdownLightbox(){
       ['Ingressos vendidos', c.receitaIngressos, `${fmtInt(c.pagantes)} pagantes × ${fmtCur2(c.ticketMedio)} de ticket médio (bruto, antes das taxas)`],
       ['Patrocínio', c.patrocinio, `pipeline ponderado pela probabilidade de cada cota — contratado: ${fmtCur(c.patroContratado)}, em negociação: ${fmtCur(c.patroPipeline)}`],
       ['Ativações', c.receitaConsumo, 'soma da margem ponderada pela probabilidade de cada ativação cadastrada em Vendas'],
+      ['Itens vendidos (planejado)', c.receitaItensVendidos, 'Qtd. comprada × Preço de venda de cada item em Custos (aba Vendas › Itens vendidos) — assume vender tudo o que já foi decidido comprar; o custo de compra desses mesmos itens já está contado em "Operação", então esta linha é só a receita da revenda, sem duplicar'],
       ['Outras receitas', c.outras, 'valor fixo lançado em Entradas PMO'],
     ];
     total = c.receitaTotal;
@@ -3349,7 +3376,7 @@ function scenarioBreakdownLightbox(){
     linhas = [
       ['Atrações', c.subAtracoes, `inclui o cachê principal (${fmtCur(c.cachePrincipal)})`],
       ['Estrutura', c.subEstrutura, null],
-      ['Operação', c.subOperacao, null],
+      ['Operação', c.subOperacao, 'inclui o custo de compra de itens revendidos (ex.: copos, bebidas) — a receita dessa revenda aparece à parte, na Receita total › "Itens vendidos (planejado)", sem duplicar este custo'],
       ['Marketing', c.subMarketing, null],
       ['Logística', c.subLogistica, null],
       ...extraRows,
