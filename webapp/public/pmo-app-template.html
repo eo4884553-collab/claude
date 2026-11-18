@@ -1969,6 +1969,20 @@ function permutaDetalhesPorCusto(){
   });
   return out;
 }
+// "Qtd. comprada" EFETIVA de um item de Custos: o valor digitado na mão (c.qtdComprada), ou, se
+// a pessoa nunca editou esse campo (ainda null/undefined), a quantidade sugerida que segue
+// acompanhando Entradas PMO > Custo por categoria automaticamente (só o grupo Operação tem esse
+// campo) — mesma regra de computeCustosSummary() abaixo, extraída pra cá pra poder ser reaproveitada
+// sem precisar passar pela lista toda (ver custosItensVendidosPlanejadoTotal, que não pode chamar
+// computeCustosSummary() por causa da recursão com computeScenario — ver nota lá).
+function custosQtdCompradaEfetiva(c){
+  let qtdCompradaSugerida = null;
+  if(c.path[0]==='operacao'){
+    const rawOp = getPath(state.entradas.base, c.path);
+    qtdCompradaSugerida = (rawOp && typeof rawOp==='object') ? (Number(rawOp.qty)||0) : (rawOp!=null ? 1 : 0);
+  }
+  return (c.qtdComprada==null) ? (qtdCompradaSugerida||0) : (Number(c.qtdComprada)||0);
+}
 function computeCustosSummary(){
   const qtdVendidaPorLink = qtdVendidaPorCustoLink();
   const permutaPorCusto = permutaDetalhesPorCusto();
@@ -1994,14 +2008,7 @@ function computeCustosSummary(){
     // enquanto a pessoa nunca editar o campo aqui (c.qtdComprada ainda null/undefined). No momento
     // em que a pessoa digita um valor aqui (mesmo que igual ao sugerido), ele vira fixo/manual e
     // para de seguir Entradas PMO — é o "se for diferente, editável pra eu editar" pedido.
-    let qtdCompradaSugerida = null;
-    if(c.path[0]==='operacao'){
-      const rawOp = getPath(state.entradas.base, c.path);
-      // valor de Operação pode vir como {qty,unitCost} (normal) ou número solto (legado, nunca
-      // editado na tela — nesse caso a Quantidade implícita é 1, mesma leitura de costItemRowOperacao)
-      qtdCompradaSugerida = (rawOp && typeof rawOp==='object') ? (Number(rawOp.qty)||0) : (rawOp!=null ? 1 : 0);
-    }
-    const qtdComprada = (c.qtdComprada==null) ? (qtdCompradaSugerida||0) : (Number(c.qtdComprada)||0);
+    const qtdComprada = custosQtdCompradaEfetiva(c);
     const qtdVendida = Number(c.qtdVendida)||0;
     const precoVendaUnit = Number(c.precoVendaUnit)||0;
     const custoUnitario = qtdComprada>0 ? contratado/qtdComprada : 0;
@@ -2064,13 +2071,16 @@ function computeCustosSummary(){
 // computeScenario de novo viraria recursão infinita, já que computeScenario precisa deste valor
 // pra entrar no resultado planejado dos 3 cenários (ver abaixo).
 // planejado = receita SE tudo o que já foi comprado for vendido no preço de venda cadastrado
-// (qtdComprada × precoVendaUnit, em vez de qtdVendida × precoVendaUnit, que é o já REALIZADO) —
-// o custo de compra desses itens já está contado inteiro no grupo Operação (orçamento de Entradas
-// PMO); esta soma é só o lado da RECEITA, não mexe em custo, então não há duplicação: comprar
-// fica em Custos/Operação, revender entra aqui.
+// (qtdComprada EFETIVA × precoVendaUnit, em vez de qtdVendida × precoVendaUnit, que é o já
+// REALIZADO) — usa custosQtdCompradaEfetiva() acima, não o campo cru c.qtdComprada, senão um item
+// que nunca foi editado na mão aqui (ainda seguindo a Qtd. de Entradas PMO > Operação
+// automaticamente — ver comentário de custosQtdCompradaEfetiva) ficaria de fora mesmo aparecendo
+// preenchido na tela. O custo de compra desses itens já está contado inteiro no grupo Operação
+// (orçamento de Entradas PMO); esta soma é só o lado da RECEITA, não mexe em custo, então não há
+// duplicação: comprar fica em Custos/Operação, revender entra aqui.
 function custosItensVendidosPlanejadoTotal(){
-  return sum((state.custos||[]).filter(c=> (Number(c.qtdComprada)||0)>0 && !c.excluidoVendas)
-    .map(c=> (Number(c.qtdComprada)||0) * (Number(c.precoVendaUnit)||0)));
+  return sum((state.custos||[]).filter(c=> custosQtdCompradaEfetiva(c)>0 && !c.excluidoVendas)
+    .map(c=> custosQtdCompradaEfetiva(c) * (Number(c.precoVendaUnit)||0)));
 }
 function itensVendidosSummary(){
   const cs = computeCustosSummary();
