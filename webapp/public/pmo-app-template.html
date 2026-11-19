@@ -2960,11 +2960,21 @@ function replicateControl(domain, currentScen){
   </span>`;
 }
 // aplica a % de variação (replicateControl acima) sobre os valores numéricos de CUSTO que fazem
-// sentido pro domínio — só isso, nunca sobre capacidade/conversão/taxas (não são "custo por
-// categoria") nem sobre datas/nomes. Pedido: replicar Base pro Conservador com -20% e pro
-// Agressivo com +20%, já preenchendo os valores pra poder analisar sem digitar tudo de novo.
+// sentido pro domínio, nunca sobre datas/nomes. Pedido: replicar Base pro Conservador com -20% e
+// pro Agressivo com +20%, já preenchendo os valores pra poder analisar sem digitar tudo de novo.
+// Capacidade máxima e Número de cortesias ficam de fora de propósito — são compromissos do
+// evento (contrato do espaço, lista de convidados), não premissas que mudem com o cenário. Só a
+// Conversão da capacidade (% que efetivamente compra) varia — é essa % que reduz/aumenta o
+// quantitativo de pagantes num cenário mais pessimista/otimista, sem mexer no tamanho do evento.
 function aplicaVariacaoPct(valor, pct){ return Math.round((Number(valor)||0)*(1+pct)*100)/100; }
+// mesma ideia de aplicaVariacaoPct, mas pra campo que já é uma fração 0–1 (ex.: conversaoPct) —
+// arredondar em 2 casas decimais do valor CRU (como aplicaVariacaoPct faz, pensado pra dinheiro)
+// arredondaria pro ponto percentual inteiro mais próximo (64,72% viraria 65%); aqui arredonda em
+// 4 casas da fração, ou seja, no centésimo de ponto percentual (64,72%), preservando a precisão
+// que a própria tela de Entradas PMO já usa pra esse tipo de campo (1 casa decimal no %).
+function aplicaVariacaoFracaoPct(valor, pct){ return Math.round((Number(valor)||0)*(1+pct)*10000)/10000; }
 function aplicaVariacaoEntradas(copia, pct){
+  if(copia.conversaoPct!=null) copia.conversaoPct = Math.max(0, aplicaVariacaoFracaoPct(copia.conversaoPct, pct));
   ['atracoes','estrutura','marketing','logistica'].forEach(gk=>{
     Object.keys(copia[gk]||{}).forEach(k=>{ copia[gk][k] = aplicaVariacaoPct(copia[gk][k], pct); });
   });
@@ -4878,6 +4888,7 @@ VIEWS.patrocinios = function(){
       <table style="width:auto; min-width:760px;"><thead><tr><th>Empresa</th><th class="num">Pago</th><th class="num">Pendente</th><th>Permuta?</th><th>Cobre custo de</th><th>Parcelas</th><th></th></tr></thead>
       <tbody>${fechRows || `<tr><td colspan="7" class="hint">Nenhuma empresa fechou essa cota ainda.</td></tr>`}</tbody></table>
       <button class="btn small" style="margin-top:8px;" data-action="addFechamento:${scen}:${i}">+ Adicionar empresa</button>
+      <button class="btn small" style="margin-top:8px; margin-left:6px;" data-action="colarEmpresasTier:${scen}:${i}" title="Cole uma lista de nomes (um por linha) e lança todas de uma vez">📋 Colar lista de empresas</button>
     </td></tr>`;
   }).join('');
 
@@ -4938,6 +4949,24 @@ ACTIONS.addFechamento = (scen,i)=>{
   const t = state.patrocinios[scen][Number(i)]; if(!t) return;
   if(!t.fechamentos) t.fechamentos=[];
   t.fechamentos.push({id:uid(), empresa:'', parcelas:[]});
+  saveState(); render();
+};
+// atalho pra lançar várias empresas de uma vez numa cota (ex.: importar uma lista de
+// patrocinadores já fechados) — cola uma lista (um nome por linha, ou separados por vírgula) e
+// cria 1 "fechamento" pra cada nome, já com 1 parcela única no valor cheio da cota (sem data —
+// fica "—" até a pessoa lançar a data/pagamento de verdade depois), pra "Pendente" já aparecer
+// certo sem precisar abrir parcela por parcela. Permuta cada uma marca depois, pelo checkbox normal.
+ACTIONS.colarEmpresasTier = (scen,i)=>{
+  const t = state.patrocinios[scen][Number(i)]; if(!t) return;
+  const texto = window.prompt(`Cole os nomes das empresas que fecharam "${t.cota}", um por linha (ou separados por vírgula):`, '');
+  if(texto==null) return;
+  const nomes = texto.split(/\r?\n|,/).map(s=>s.trim()).filter(Boolean);
+  if(!nomes.length) return;
+  if(!t.fechamentos) t.fechamentos=[];
+  const valorUnit = Number(t.valorUnit)||0;
+  nomes.forEach(nome=>{
+    t.fechamentos.push({id:uid(), empresa:nome, parcelas:[{valor:valorUnit, dataPrevista:'', dataPagamento:''}]});
+  });
   saveState(); render();
 };
 ACTIONS.rmFechamento = (scen,i,fi)=>{
